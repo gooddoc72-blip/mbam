@@ -1,0 +1,386 @@
+"use client";
+import { fetchWithAuth } from "../../utils/api";
+import { useState, useEffect, useRef } from "react";
+import { Search, Loader2, Star, ShoppingCart, Heart, Activity, Target, ShieldCheck, Trophy, Info, Zap } from 'lucide-react';
+
+export default function ShoppingRankDashboard() {
+  const [keyword, setKeyword] = useState("");
+  const [targetMid, setTargetMid] = useState("");
+  const [targetName, setTargetName] = useState("");
+  
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [trackedPlaces, setTrackedPlaces] = useState([]);
+  
+  const [activeRightTab, setActiveRightTab] = useState("ranking"); // "history" or "ranking"
+  const abortControllerRef = useRef(null);
+
+  // Fetch tracked shopping items on mount
+  useEffect(() => {
+    fetchWithAuth("/api/shopping/tracked")
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setTrackedPlaces(data.tracked || []);
+        }
+      })
+      .catch(err => console.error(err));
+  }, []);
+  
+  const formatN = (val) => {
+    if (val === undefined || val === null) return "0.00";
+    return Number(val).toFixed(2);
+  };
+  
+  const renderDeltaValue = (delta, isRank = false) => {
+    if (!delta || delta === 0) return <span style={{color: "#94a3b8", fontSize: "0.75rem", marginLeft: "4px"}}>-</span>;
+    if (isRank) {
+      return delta > 0 ? <span style={{color: "#ef4444", fontSize: "0.75rem", marginLeft: "4px"}}>▲{Math.abs(delta)}</span> : <span style={{color: "#3b82f6", fontSize: "0.75rem", marginLeft: "4px"}}>▼{Math.abs(delta)}</span>;
+    } else {
+      return delta > 0 ? <span style={{color: "#ef4444", fontSize: "0.75rem", marginLeft: "4px"}}>▲{Math.abs(delta)}</span> : <span style={{color: "#3b82f6", fontSize: "0.75rem", marginLeft: "4px"}}>▼{Math.abs(delta)}</span>;
+    }
+  };
+
+  const handleTrackPlace = async () => {
+    if (!result || !result.places) return;
+    const target = result.places.find(p => p.is_target);
+    if (!target) {
+      alert("분석 결과에 내 상품이 포함되어 있지 않아 저장할 수 없습니다.");
+      return;
+    }
+    try {
+      const res = await fetchWithAuth("/api/shopping/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mid: target.mid || targetMid,
+          keyword: keyword,
+          name: target.title || targetName,
+          places: result && result.places ? result.places : null,
+          report: result && result.report ? result.report : null,
+          target_stats: target
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("관심 상품으로 저장되었습니다! 매일 순위 추이를 확인할 수 있습니다.");
+        fetchWithAuth("/api/shopping/tracked")
+          .then(res => res.json())
+          .then(data => setTrackedPlaces(data.tracked || []));
+      } else {
+        alert("저장 실패: " + data.error);
+      }
+    } catch (err) {
+      alert("저장 중 오류 발생");
+    }
+  };
+
+  const handleAnalyze = async (e) => {
+    e.preventDefault();
+    if (!keyword.trim()) {
+      return alert("검색 키워드를 입력해주세요.");
+    }
+    if (!targetMid.trim() && !targetName.trim()) {
+      return alert("타겟 식별을 위해 업체명(스토어명)이나 MID 중 하나를 입력해주세요.");
+    }
+    
+    setLoading(true);
+    setResult(null);
+    abortControllerRef.current = new AbortController();
+    
+    try {
+      const res = await fetchWithAuth("/api/shopping/analyze-keyword", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword, target_mid: targetMid, store_name: targetName }),
+        signal: abortControllerRef.current.signal
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "분석 실패");
+      
+      setResult(data);
+      setActiveRightTab("ranking");
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        alert("검색이 중지되었습니다.");
+      } else {
+        alert(err.message);
+      }
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleCancelSearch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
+  const handleTrackedClick = async (tp) => {
+    setKeyword(tp.keyword);
+    setTargetMid(tp.mid);
+    setTargetName(tp.name);
+    
+    try {
+      const res = await fetchWithAuth("/api/shopping/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: tp.keyword, target_mid: tp.mid })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setResult(prev => ({
+          ...prev,
+          found: true,
+          history: data.history,
+          places: data.places || (prev && prev.places) || [],
+          report: data.report || (prev && prev.report) || ""
+        }));
+        setActiveRightTab("history");
+      }
+    } catch (err) {
+      console.error("히스토리 로드 실패:", err);
+    }
+  };
+
+  return (
+    <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
+      <header style={{ marginBottom: "0.5rem" }}>
+        <h1 style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#1e293b", margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <ShoppingCart size={24} color="#3b82f6"/> 쇼핑 N지수 하이브리드 분석기 (400위 초정밀 딥서치)
+        </h1>
+      </header>
+
+      <div style={{ display: "flex", gap: "1rem", flex: 1, minHeight: 0 }}>
+        
+        {/* 1. Left Sidebar: 분석리스트 */}
+        <div style={{ width: "260px", background: "white", border: "1px solid #cbd5e1", display: "flex", flexDirection: "column", borderRadius: "8px", overflow: "hidden" }}>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", padding: "1rem", borderBottom: "1px solid #cbd5e1", margin: 0, background: "#f1f5f9" }}>관심 상품 분석리스트</h2>
+          <div style={{ flex: 1, overflowY: "auto", padding: "0.5rem" }}>
+            {trackedPlaces.length === 0 ? (
+              <div style={{ padding: "1rem", color: "#94a3b8", fontSize: "0.9rem" }}>저장된 관심 상품이 없습니다.</div>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {trackedPlaces.map((tp, i) => (
+                  <li 
+                    key={i} 
+                    onClick={() => handleTrackedClick(tp)}
+                    style={{ padding: "0.8rem", borderBottom: "1px solid #e2e8f0", cursor: "pointer", fontSize: "0.9rem", color: "#334155", background: "#f8fafc", marginBottom: "0.5rem", borderRadius: "4px", transition: "all 0.2s" }}
+                    onMouseEnter={(e)=>e.currentTarget.style.background="#eff6ff"} 
+                    onMouseLeave={(e)=>e.currentTarget.style.background="#f8fafc"}
+                  >
+                    <div style={{ fontWeight: "bold", color: "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tp.name || "이름없음"}</div>
+                    <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.3rem", display: "flex", justifyContent: "space-between" }}>
+                        <span>키워드: {tp.keyword}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Right Main Area */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem", minWidth: 0 }}>
+          
+          {/* 2. Top: 폼 영역 */}
+          <div style={{ background: "white", border: "1px solid #cbd5e1", padding: "1.5rem", borderRadius: "8px" }}>
+            <h2 style={{ fontSize: "1.2rem", fontWeight: "bold", marginBottom: "1rem", margin: 0, color: "#334155" }}>타겟 상품 순위 실시간 검색 (최대 400위)</h2>
+            <form onSubmit={handleAnalyze} style={{ display: "flex", alignItems: "flex-end", flexWrap: "wrap", gap: "1rem", marginTop: "1rem" }}>
+              <div style={{ flex: "1 1 250px", minWidth: "250px" }}>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "0.5rem" }}>
+                  <label style={{ width: "100px", fontSize: "0.9rem", fontWeight: "bold", color: "#475569" }}>스토어명</label>
+                  <input type="text" value={targetName} onChange={e => setTargetName(e.target.value)} placeholder="예: 코스트코핫딜" style={{ flex: 1, padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <label style={{ width: "100px", fontSize: "0.9rem", fontWeight: "bold", color: "#475569" }}>상품명/ID</label>
+                  <input type="text" value={targetMid} onChange={e => setTargetMid(e.target.value)} placeholder="상품명 또는 상품ID 입력" style={{ flex: 1, padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} />
+                </div>
+              </div>
+              <div style={{ flex: "1 1 250px", minWidth: "250px" }}>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "0.5rem", height: "34px", display: "none" }}></div>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <label style={{ width: "80px", fontSize: "0.9rem", fontWeight: "bold", color: "#ef4444" }}>검색키워드</label>
+                  <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 씨솔트초콜릿" style={{ flex: 1, padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button type="submit" disabled={loading} style={{ padding: "0.5rem 2rem", height: "38px", background: "#3b82f6", color: "white", fontWeight: "bold", border: "none", cursor: loading ? "wait" : "pointer", borderRadius: "4px", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  {loading ? "조회중..." : "초고속 조회"}
+                </button>
+                {loading && (
+                  <button type="button" onClick={handleCancelSearch} style={{ padding: "0.5rem 1.5rem", height: "38px", background: "#ef4444", color: "white", fontWeight: "bold", border: "none", cursor: "pointer", borderRadius: "4px" }}>
+                    중지
+                  </button>
+                )}
+                {result && result.places && result.places.length > 0 && (
+                  <button type="button" onClick={handleTrackPlace} style={{ padding: "0.5rem 1.5rem", height: "38px", background: "#0f172a", color: "white", fontWeight: "bold", border: "none", cursor: "pointer", borderRadius: "4px" }}>
+                    관심상품 저장
+                  </button>
+                )}
+                
+                <div style={{ display: "flex", alignItems: "center", marginLeft: "1rem", gap: "0.5rem", borderLeft: "1px solid #e2e8f0", paddingLeft: "1rem" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#10b981", background: "#ecfdf5", padding: "0.4rem 0.8rem", borderRadius: "12px", border: "1px solid #a7f3d0", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <Zap size={14} /> 매일 새벽 5시 자동 순위 업데이트
+                  </span>
+                </div>
+              </div>
+            </form>
+          </div>
+          
+          {/* AI 컨설팅 리포트 */}
+          {result && result.report && (
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "1.5rem", borderRadius: "8px", position: "relative" }}>
+              <div style={{ position: "absolute", top: "-12px", left: "20px", background: "#3b82f6", color: "white", padding: "3px 12px", fontSize: "0.85rem", fontWeight: "bold", borderRadius: "12px", display: "flex", alignItems: "center", gap: "0.3rem" }}><Target size={14}/> AI 컨설팅 (N1~N3 Model)</div>
+              <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "1rem", color: "#1e3a8a", lineHeight: "1.6", marginTop: "0.5rem" }}>
+                {result.report}
+              </pre>
+            </div>
+          )}
+
+          {/* Bottom Split: 탭 영역 */}
+          <div style={{ flex: 1, display: "flex", flexWrap: "wrap", gap: "1rem", minHeight: 0 }}>
+            <div style={{ flex: "1", minWidth: 0, background: "white", border: "1px solid #cbd5e1", display: "flex", flexDirection: "column", borderRadius: "8px", overflow: "hidden" }}>
+              <div style={{ background: "#f8fafc", padding: "0", borderBottom: "1px solid #cbd5e1", display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                <button 
+                  onClick={() => setActiveRightTab("history")} 
+                  style={{ padding: "1rem 1.5rem", background: activeRightTab === "history" ? "white" : "transparent", border: "none", borderBottom: activeRightTab === "history" ? "2px solid #3b82f6" : "2px solid transparent", fontWeight: activeRightTab === "history" ? "bold" : "normal", color: activeRightTab === "history" ? "#1e293b" : "#64748b", cursor: "pointer", fontSize: "1rem", outline: "none" }}>
+                  일자별 히스토리 내역
+                </button>
+                <button 
+                  onClick={() => setActiveRightTab("ranking")} 
+                  style={{ padding: "1rem 1.5rem", background: activeRightTab === "ranking" ? "white" : "transparent", border: "none", borderBottom: activeRightTab === "ranking" ? "2px solid #3b82f6" : "2px solid transparent", fontWeight: activeRightTab === "ranking" ? "bold" : "normal", color: activeRightTab === "ranking" ? "#1e293b" : "#64748b", cursor: "pointer", fontSize: "1rem", outline: "none" }}>
+                  쇼핑 400위 전체순위
+                </button>
+
+                {activeRightTab === "history" && <span style={{ marginLeft: "auto", paddingRight: "1.5rem", fontSize: "0.85rem", color: "#64748b" }}>실시간 경쟁사 비교는 상단의 [초고속 조회]를 눌러주세요.</span>}
+                {activeRightTab === "ranking" && result && result.places && result.places.length > 0 && <span style={{ marginLeft: "auto", paddingRight: "1.5rem", fontSize: "0.85rem", color: "#3b82f6", fontWeight: "bold" }}>Top {result.places.length} 순위 (1~10페이지)</span>}
+              </div>
+              
+              <div style={{ flex: 1, overflow: "auto" }}>
+                {activeRightTab === "history" ? (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", textAlign: "center", whiteSpace: "nowrap" }}>
+                    <thead style={{ position: "sticky", top: 0, background: "#f1f5f9", zIndex: 10, borderBottom: "2px solid #cbd5e1" }}>
+                      <tr>
+                        <th style={{ padding: "0.8rem 0.4rem" }}>조회 일자</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#3b82f6" }}>쇼핑 랭킹</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#10b981" }}>구매수</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#f59e0b" }}>리뷰수</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#8b5cf6" }}>찜수</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#3b82f6" }}>N1(적합도)</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#10b981" }}>N2(실거래)</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#8b5cf6" }}>N3(트래픽)</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#ef4444" }}>N4(페널티)</th>
+                        <th style={{ padding: "0.8rem 0.4rem", color: "#1e3a8a", fontWeight: "900" }}>총점 (S_shop)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!result || !result.history || result.history.length === 0 ? (
+                        <tr>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#94a3b8" }}>히스토리 기록이 없습니다.</td>
+                        </tr>
+                      ) : (
+                        [...result.history].map((h, idx) => {
+                          return (
+                          <tr key={idx} style={{ borderBottom: "1px solid #e2e8f0", transition: "background 0.2s" }} onMouseEnter={(e)=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={(e)=>e.currentTarget.style.background="white"}>
+                            <td style={{ padding: "0.8rem 1rem", fontWeight: "bold", color: "#475569" }}>{h.date}</td>
+                            <td style={{ padding: "0.8rem 1rem", fontWeight: "bold", color: "#1e293b" }}>{h.rank}위 (P.{Math.ceil(h.rank/40)})</td>
+                            <td style={{ padding: "0.8rem 1rem", color: "#10b981", fontWeight: "bold" }}>{h.purchases.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 1rem", color: "#f59e0b" }}>{h.visitor_reviews.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 1rem", color: "#8b5cf6" }}>{h.saves.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.3rem", color: "#3b82f6" }}>{formatN(h.n1)}</td>
+                            <td style={{ padding: "0.8rem 0.3rem", color: "#10b981" }}>{formatN(h.n2)}</td>
+                            <td style={{ padding: "0.8rem 0.3rem", color: "#8b5cf6" }}>{formatN(h.n3)}</td>
+                            <td style={{ padding: "0.8rem 0.3rem", color: h.n4 < 1.0 ? "#ef4444" : "#64748b" }}>{formatN(h.n4)}</td>
+                            <td style={{ padding: "0.8rem 0.3rem", color: "#1e3a8a", fontWeight: "900" }}>{formatN(h.n5)}</td>
+                          </tr>
+                        )})
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", textAlign: "center", whiteSpace: "nowrap" }}>
+                    <thead style={{ position: "sticky", top: 0, background: "#f1f5f9", zIndex: 10, borderBottom: "2px solid #cbd5e1" }}>
+                      <tr>
+                        <th style={{ padding: "0.8rem 0.5rem", width: "50px" }}>순위</th>
+                        <th style={{ padding: "0.8rem 1rem", textAlign: "left" }}>상품명/스토어명</th>
+                        <th style={{ padding: "0.8rem 0.5rem", color: "#10b981" }}>구매수</th>
+                        <th style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>리뷰수</th>
+                        <th style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>찜수</th>
+                        <th style={{ padding: "0.8rem 0.2rem", color: "#3b82f6" }}>N1(적합)</th>
+                        <th style={{ padding: "0.8rem 0.2rem", color: "#10b981" }}>N2(실거래)</th>
+                        <th style={{ padding: "0.8rem 0.2rem", color: "#8b5cf6" }}>N3(트래픽)</th>
+                        <th style={{ padding: "0.8rem 0.2rem", color: "#ef4444" }}>N4(페널티)</th>
+                        <th style={{ padding: "0.8rem 0.2rem", color: "#1e3a8a", fontWeight: "900" }}>총점</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!result && !loading && (
+                        <tr>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#94a3b8" }}>상단 폼에서 조회 조건을 입력해주세요.</td>
+                        </tr>
+                      )}
+                      {loading && (
+                        <tr>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#3b82f6", fontWeight: "bold" }}>네이버 쇼핑 400위 데이터를 수집하고 N지수를 수학적으로 연산하고 있습니다... (15~30초)</td>
+                        </tr>
+                      )}
+                      {result && result.found === false && !loading && (
+                        <tr>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#ef4444", fontWeight: "bold" }}>
+                            {result.message || "조회된 순위 데이터가 없습니다."}
+                          </td>
+                        </tr>
+                      )}
+                      {result && result.found !== false && (!result.places || result.places.length === 0) && !loading && (
+                        <tr>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#94a3b8" }}>조회된 순위 데이터가 없습니다.</td>
+                        </tr>
+                      )}
+                      {result && result.places && result.places.map((place, idx) => {
+                        const isTarget = place.is_target;
+                        return (
+                          <tr key={idx} style={{ borderBottom: "1px solid #e2e8f0", background: isTarget ? "#eff6ff" : "white", fontWeight: isTarget ? "bold" : "normal" }}>
+                            <td style={{ padding: "0.8rem 0.5rem", color: isTarget ? "white" : "#475569" }}>
+                              {isTarget ? <span style={{ background: "#3b82f6", padding: "0.2rem 0.6rem", borderRadius: "4px", fontWeight: "bold" }}>{place.rank}</span> : place.rank}
+                            </td>
+                            <td style={{ padding: "0.8rem 1rem", textAlign: "left", maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <div style={{ color: isTarget ? "#1e40af" : "#1e293b", fontSize: "0.95rem" }}>
+                                {place.title}
+                                {place.is_new && <span style={{ marginLeft: "6px", background: "#ef4444", color: "white", padding: "0.1rem 0.4rem", borderRadius: "12px", fontSize: "0.7rem", fontWeight: "bold" }}>새로오픈</span>}
+                              </div>
+                              {place.storeName && (
+                                <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "4px" }}>
+                                  🏢 {place.storeName}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{place.purchases.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{place.reviews.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{place.keeps.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.2rem", color: "#3b82f6" }}>{formatN(place.n1)}</td>
+                            <td style={{ padding: "0.8rem 0.2rem", color: "#10b981" }}>{formatN(place.n2)}</td>
+                            <td style={{ padding: "0.8rem 0.2rem", color: "#8b5cf6" }}>{formatN(place.n3)}</td>
+                            <td style={{ padding: "0.8rem 0.2rem", color: (place.n4 < 1.0) ? "#ef4444" : "#64748b" }}>
+                              {formatN(place.n4)} {(place.n4 < 1.0) && "🚨"}
+                            </td>
+                            <td style={{ padding: "0.8rem 0.2rem", color: "#1e3a8a", fontWeight: "900", background: "#f8fafc" }}>
+                              {formatN(place.n5)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}

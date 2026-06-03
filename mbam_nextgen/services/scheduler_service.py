@@ -1,0 +1,419 @@
+import asyncio
+import sqlite3
+import os
+import logging
+from datetime import datetime
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from mbam_nextgen.backend.routers.place import run_place_analysis
+from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SchedulerService")
+
+class SchedulerService:
+    def __init__(self):
+        # AsyncIOScheduler 사용 (FastAPI와 비동기 통합)
+        self.scheduler = AsyncIOScheduler()
+        self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ranking.db")
+        
+    def get_tracked_places(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            # tracked_places 테이블이 존재하는지 확인 후 조회
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tracked_places'")
+            if not c.fetchone():
+                conn.close()
+                return []
+                
+            c.execute("SELECT mid, keyword FROM tracked_places")
+            places = c.fetchall()
+            conn.close()
+            return [{"mid": row[0], "keyword": row[1]} for row in places]
+        except Exception as e:
+            logger.error(f"Error fetching tracked places: {str(e)}")
+            return []
+
+    async def run_daily_analysis(self):
+        """매일 실행되는 플레이스 분석 작업 (새벽 5시 일괄 실행 최적화)"""
+        logger.info(f"[{datetime.now()}] Starting daily scheduled place analysis...")
+        
+        places = self.get_tracked_places()
+        if not places:
+            logger.info("No tracked places found to analyze.")
+            return
+
+        # 중복 크롤링 방지를 위해 키워드별로 그룹화
+        # run_place_analysis 내부에서 동일 날짜 동일 키워드는 캐시를 사용하므로, 
+        # 한 키워드당 한 번의 네이버 지도 크롤링만 발생합니다.
+        # 혹시 모를 동시 실행 이슈 방지를 위해 키워드를 중복 제거 후 순차 실행합니다.
+        keyword_groups = {}
+        for p in places:
+            keyword_groups.setdefault(p["keyword"], []).append(p["mid"])
+
+        logger.info(f"Found {len(places)} places across {len(keyword_groups)} unique keywords. Beginning processing...")
+
+        for idx, (keyword, mids) in enumerate(keyword_groups.items()):
+            logger.info(f"[{idx+1}/{len(keyword_groups)}] Keyword Group: '{keyword}' with {len(mids)} places")
+            
+            # 각 MID별로 히스토리 업데이트를 위해 순차적으로 run_place_analysis 호출
+            # 첫 번째 호출에서만 실제 크롤링이 발생하고, 나머지는 로컬 DB 캐시를 즉시 활용함
+            for mid in mids:
+                try:
+                    await asyncio.to_thread(run_place_analysis, keyword, mid)
+                    logger.info(f"  -> Successfully updated history for MID: {mid}")
+                except Exception as e:
+                    logger.error(f"  -> Failed to update MID: {mid}. Error: {str(e)}")
+            
+            # 다음 키워드 분석 전 IP 차단 방지를 위한 20초 대기 (마지막 항목 제외)
+            if idx < len(keyword_groups) - 1:
+                logger.info("Waiting 20 seconds to avoid rate limiting before next keyword...")
+                await asyncio.sleep(20)
+                
+        logger.info(f"[{datetime.now()}] Daily scheduled place analysis completed successfully.")
+
+
+    async def run_daily_shopping_analysis(self):
+        """매일 실행되는 쇼핑 분석 작업 (새벽 5시 일괄 실행)"""
+        logger.info(f"[{datetime.now()}] Starting daily scheduled shopping analysis...")
+        try:
+            from mbam_nextgen.backend.database import SessionLocal, ShoppingTrackedItem, ShoppingHistory
+            from mbam_nextgen.backend.routers.shopping_router import fetch_target_rank_via_api, AnalyzeRequest, analyze_keyword_shopping
+            
+            db = SessionLocal()
+            tracked_items = db.query(ShoppingTrackedItem).all()
+            if not tracked_items:
+                logger.info("No tracked shopping items found.")
+                db.close()
+                return
+                
+            for item in tracked_items:
+                logger.info(f"Analyzing Shopping Item: {item.name} / Keyword: {item.keyword}")
+                try:
+                    req = AnalyzeRequest(keyword=item.keyword, target_mid=item.mid)
+                    res = await analyze_keyword_shopping(req, db)
+                    if res.get('found') and res.get('places'):
+                        target_stat = next((p for p in res['places'] if p.get('is_target')), None)
+                        if target_stat:
+                            date_str = datetime.now().strftime('%Y-%m-%d')
+                            # Check if history exists for today
+                            existing_hist = db.query(ShoppingHistory).filter(ShoppingHistory.tracked_id == item.id, ShoppingHistory.date_str == date_str).first()
+                            if existing_hist:
+                                existing_hist.rank = target_stat['rank']
+                                existing_hist.page = (target_stat['rank'] - 1) // 40 + 1
+                                existing_hist.saves = target_stat['keeps']
+                                existing_hist.visitor_reviews = target_stat['reviews']
+                                existing_hist.purchases = target_stat['purchases']
+                                existing_hist.n1 = target_stat['n1']
+                                existing_hist.n2 = target_stat['n2']
+                                existing_hist.n3 = target_stat['n3']
+                                existing_hist.n4 = target_stat['n4']
+                                existing_hist.n5 = target_stat['n5']
+                            else:
+                                new_hist = ShoppingHistory(
+                                    tracked_id=item.id,
+                                    date_str=date_str,
+                                    rank=target_stat['rank'],
+                                    page=(target_stat['rank'] - 1) // 40 + 1,
+                                    saves=target_stat['keeps'],
+                                    visitor_reviews=target_stat['reviews'],
+                                    purchases=target_stat['purchases'],
+                                    n1=target_stat['n1'],
+                                    n2=target_stat['n2'],
+                                    n3=target_stat['n3'],
+                                    n4=target_stat['n4'],
+                                    n5=target_stat['n5']
+                                )
+                                db.add(new_hist)
+                            db.commit()
+                except Exception as e:
+                    logger.error(f"Error processing shopping item {item.id}: {str(e)}")
+                import asyncio
+                await asyncio.sleep(10) # 10초 딜레이
+            db.close()
+            logger.info("Daily shopping analysis completed.")
+        except Exception as e:
+            logger.error(f"Failed in daily shopping analysis: {str(e)}")
+
+    def _get_scheduled_time(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("SELECT hour, minute FROM scheduler_config WHERE id=1")
+            row = c.fetchone()
+            conn.close()
+            if row:
+                return row[0], row[1]
+        except Exception as e:
+            logger.error(f"Error fetching schedule time: {str(e)}")
+        return 10, 0
+
+    def load_cafe_schedules(self):
+        try:
+            db = SessionLocal()
+            schedules = db.query(CafeSchedule).filter(CafeSchedule.is_active == 1).all()
+            for sch in schedules:
+                try:
+                    hour, minute = map(int, sch.schedule_time.split(":"))
+                    job_id = f"cafe_nurture_{sch.id}"
+                    
+                    self.scheduler.add_job(
+                        self.run_cafe_nurture_job, 
+                        'cron', 
+                        hour=hour, 
+                        minute=minute, 
+                        args=[sch.id],
+                        id=job_id, 
+                        replace_existing=True
+                    )
+                except ValueError:
+                    logger.error(f"Invalid schedule time format for {sch.id}: {sch.schedule_time}")
+            db.close()
+            logger.info(f"Loaded {len(schedules)} cafe nurture schedules.")
+        except Exception as e:
+            logger.error(f"Error loading cafe schedules: {e}")
+
+    async def run_cafe_nurture_job(self, schedule_id: str):
+        db = SessionLocal()
+        try:
+            sch = db.query(CafeSchedule).filter(CafeSchedule.id == schedule_id).first()
+            if not sch:
+                return
+                
+            acc = db.query(NaverAccount).filter(NaverAccount.id == sch.account_id).first()
+            cafe = db.query(JoinedCafe).filter(JoinedCafe.id == sch.cafe_id).first()
+            
+            if not acc or not cafe:
+                return
+                
+            logger.info(f"🚀 [Scheduler] Running cafe nurture for account: {acc.naver_id} at {cafe.cafe_url}")
+            
+            from mbam_nextgen.orchestrator import WorkflowOrchestrator
+            orchestrator = WorkflowOrchestrator()
+            
+            # TODO: We can store naver_pw encrypted, here we assume it's in DB or mock
+            import os
+            os.environ["NAVER_PW"] = acc.naver_pw # Temporarily pass password via env if needed
+            
+            await orchestrator.execute_cafe_workflow(
+                account_id=acc.naver_id,
+                cafe_id=cafe.cafe_url,
+                board_name=cafe.board_name,
+                keyword="소통", # General keyword for nurturing
+                auto_submit=True,
+                action_type="comment"
+            )
+        except Exception as e:
+            logger.error(f"Cafe nurture job failed: {e}")
+        finally:
+            db.close()
+
+    async def run_content_sync_job(self):
+        """매일 실행되는 글감 데이터 동기화 작업"""
+        logger.info(f"[{datetime.now()}] Starting scheduled content data sync...")
+        try:
+            from mbam_nextgen.services.gov_data import GovDataCollector
+            collector = GovDataCollector()
+            # 비동기 함수 실행
+            await collector.fetch_all_categories_batch()
+            logger.info("Scheduled content data sync completed successfully.")
+            
+            # 관심 카테고리 텔레그램 전송 로직
+            db = SessionLocal()
+            sch = db.query(ContentSchedule).first()
+            if sch and sch.interest_categories:
+                interests = sch.interest_categories.split(",")
+                summary_text = "🔔 <b>[마케팅 플랫폼] 오늘의 관심 글감 요약</b>\n\n"
+                
+                has_items = False
+                for cat in interests:
+                    if not cat.strip(): continue
+                    items = collector.load_cache(cat.strip())
+                    if items:
+                        has_items = True
+                        top_items = items[:2] # 상위 2개만 요약
+                        summary_text += f"📌 <b>{cat}</b>\n"
+                        for i, item in enumerate(top_items):
+                            summary_text += f" - {item.get('title')}\n"
+                        summary_text += "\n"
+                
+                if has_items:
+                    summary_text += "👉 <a href='http://localhost:3000/content-collect'>웹(Web) 대시보드</a>에서 <b>[📝 블로그 작성 준비]</b> 버튼을 눌러 원클릭 자동포스팅을 진행하세요!"
+                    
+                    from mbam_nextgen.services.telegram_service import TelegramService
+                    ts = TelegramService()
+                    await ts.send_message(summary_text)
+                    logger.info("Sent Telegram notification for interest categories.")
+            db.close()
+            
+        except Exception as e:
+            logger.error(f"Failed to sync content data: {str(e)}")
+
+    async def run_place_news_job(self):
+        """1주/2주 주기에 맞춰 플레이스 리뷰를 수집하고 소식 원고 및 클립 영상 생성"""
+        logger.info(f"[{datetime.now()}] Checking Place News schedules...")
+        try:
+            from mbam_nextgen.backend.database import SessionLocal, PlaceNewsSchedule, PlaceNewsHistory
+            from mbam_nextgen.services.place_review_service import PlaceReviewService
+            from mbam_nextgen.services.soul import SoulRewriter
+            from mbam_nextgen.services.clip import ClipGenerator
+            from mbam_nextgen.services.telegram_service import TelegramService
+            import uuid
+            from datetime import timedelta
+            
+            db = SessionLocal()
+            schedules = db.query(PlaceNewsSchedule).filter(PlaceNewsSchedule.is_active == 1).all()
+            
+            for sch in schedules:
+                now = datetime.now()
+                # Check if it's time to run based on interval_weeks
+                if sch.last_run_time:
+                    days_passed = (now - sch.last_run_time).days
+                    if days_passed < sch.interval_weeks * 7:
+                        continue
+                
+                logger.info(f"Running Place News generation for {sch.place_name}...")
+                
+                pr_service = PlaceReviewService()
+                review_data = await pr_service.collect_reviews(sch.place_url)
+                
+                if review_data.get("success") and review_data.get("reviews"):
+                    # 자동화 시 3가지 테마 중 랜덤 선택
+                    import random
+                    themes = [
+                        "🌟 고객 극찬 릴레이 (방문 후기형)",
+                        "👩‍🍳 우리 매장의 차별점 (전문성 어필형)",
+                        "🎉 이번 주 베스트 포토 (시각적 어필형)"
+                    ]
+                    selected_theme = random.choice(themes)
+                    logger.info(f"Selected Theme for Auto-generation: {selected_theme}")
+                    
+                    soul = SoulRewriter()
+                    ai_result = await soul.generate_place_news(sch.place_name, review_data["reviews"], selected_theme)
+                    
+                    clip_gen = ClipGenerator()
+                    clip_name = f"clip_{uuid.uuid4().hex[:8]}"
+                    clip_texts = ai_result.get("clip_texts", [])
+                    clip_path = clip_gen.generate_clip(review_data["image_paths"], clip_texts, clip_name)
+                    
+                    history = PlaceNewsHistory(
+                        schedule_id=sch.id,
+                        generated_text=f"[{selected_theme}]\n제목: {ai_result.get('title')}\n\n{ai_result.get('content')}",
+                        clip_path=clip_path,
+                        status="pending"
+                    )
+                    db.add(history)
+                    sch.last_run_time = now
+                    db.commit()
+                    
+                    ts = TelegramService()
+                    msg = f"🎉 <b>[{sch.place_name}] 새로운 소식 및 클립 영상 완성!</b>\n\n최근 방문자 리뷰를 분석하여 새로운 마케팅 원고와 영상이 제작되었습니다. 웹 플랫폼에서 확인 후 스마트플레이스에 발행해 보세요!"
+                    await ts.send_message(msg)
+                    
+            db.close()
+        except Exception as e:
+            logger.error(f"Failed to run place news job: {str(e)}")
+
+    async def run_daily_blogspot_analysis(self):
+        """매일 실행되는 블로그 스팟(Blogspot) SEO 순위 모니터링 작업 (새벽 5시 일괄 실행)"""
+        logger.info(f"[{datetime.now()}] Starting daily scheduled Blogspot SEO ranking analysis...")
+        try:
+            from mbam_nextgen.backend.database import SessionLocal, BlogspotKeywordTracker
+            import httpx
+            
+            db = SessionLocal()
+            tracked_keywords = db.query(BlogspotKeywordTracker).all()
+            if not tracked_keywords:
+                logger.info("No tracked Blogspot keywords found.")
+                db.close()
+                return
+                
+            async with httpx.AsyncClient() as client:
+                for item in tracked_keywords:
+                    logger.info(f"Analyzing Blogspot Keyword: {item.keyword}")
+                    # Google Custom Search API를 사용하여 블로그 스팟 순위 추적
+                    # API Key가 없으므로 현재는 임의의 등락(Mock) 또는 실패 처리 로직만 유지
+                    # 향후 Google API Key가 연결되면 여기서 순위를 검색해 current_rank를 갱신
+                    import random
+                    item.current_rank = random.randint(1, 100) # Mock 순위 업데이트
+                    item.last_checked_at = datetime.now()
+            
+            db.commit()
+            db.close()
+            logger.info(f"[{datetime.now()}] Daily scheduled Blogspot SEO ranking analysis completed successfully.")
+        except Exception as e:
+            logger.error(f"Error in daily Blogspot analysis: {str(e)}")
+
+    def load_content_schedule(self):
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+            db = SessionLocal()
+            
+            # 3. 글감 수집 스케줄러 추가 (기본 매일 09:00)
+            content_sch = db.query(ContentSchedule).first()
+            if not content_sch:
+                content_sch = ContentSchedule(schedule_time="09:00")
+                db.add(content_sch)
+                db.commit()
+            
+            content_time_str = content_sch.schedule_time
+            hr_str, mn_str = content_time_str.split(":")
+            self.scheduler.add_job(
+                self.run_content_sync_job,
+                CronTrigger(hour=int(hr_str), minute=int(mn_str)),
+                id="content_sync",
+                replace_existing=True
+            )
+            logger.info(f"Loaded content sync schedule: {content_time_str} daily.")
+
+            # 4. 플레이스 소식(리뷰 기반) 스케줄러 (매주 월요일 10:00 체크)
+            self.scheduler.add_job(
+                self.run_place_news_job,
+                CronTrigger(day_of_week='mon', hour=10, minute=0),
+                id="place_news_sync",
+                replace_existing=True
+            )
+            logger.info("Loaded Place News schedule check (every Monday 10:00).")
+
+            db.close()
+        except Exception as e:
+            logger.error(f"Error loading content schedule: {e}")
+
+    def update_content_schedule(self, schedule_time: str):
+        """글감 수집 스케줄러 작동 시간 업데이트"""
+        try:
+            hour, minute = map(int, schedule_time.split(":"))
+            self.scheduler.reschedule_job('content_sync', trigger='cron', hour=hour, minute=minute)
+            logger.info(f"Content sync scheduler job updated to {hour:02d}:{minute:02d} daily.")
+        except Exception as e:
+            logger.error(f"Error updating content schedule: {e}")
+
+    def start(self):
+        """스케줄러 시작 (DB 설정 무시, 매일 새벽 5시 강제 일괄 실행)"""
+        # hour, minute = self._get_scheduled_time()
+        hour, minute = 5, 0 # 새벽 5시 고정
+        self.scheduler.add_job(self.run_daily_analysis, 'cron', hour=hour, minute=minute, id='daily_place_analysis', replace_existing=True)
+        self.scheduler.add_job(self.run_daily_shopping_analysis, 'cron', hour=hour, minute=minute, id='daily_shopping_analysis', replace_existing=True)
+        self.scheduler.add_job(self.run_daily_blogspot_analysis, 'cron', hour=hour, minute=minute, id='daily_blogspot_analysis', replace_existing=True)
+        
+        # Load Cafe Nurturing Schedules
+        self.load_cafe_schedules()
+        
+        # Load Content Sync Schedule
+        self.load_content_schedule()
+        
+        self.scheduler.start()
+        logger.info(f"Scheduler started successfully. Next run is scheduled for {hour:02d}:{minute:02d} daily.")
+        
+    def update_schedule(self, hour: int, minute: int):
+        """스케줄러 작동 시간 업데이트"""
+        self.scheduler.reschedule_job('daily_place_analysis', trigger='cron', hour=hour, minute=minute)
+        logger.info(f"Scheduler job updated. Next run is scheduled for {hour:02d}:{minute:02d} daily.")
+
+    def shutdown(self):
+        """스케줄러 종료"""
+        self.scheduler.shutdown()
+        logger.info("Scheduler shut down successfully.")
+
+# 싱글톤 인스턴스 생성
+scheduler_service = SchedulerService()

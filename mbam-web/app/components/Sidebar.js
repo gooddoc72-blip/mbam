@@ -1,0 +1,253 @@
+"use client";
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { 
+    LayoutDashboard, 
+    FileText, 
+    TrendingUp, 
+    MapPin, 
+    ShieldCheck, 
+    PenTool, 
+    Coffee, 
+    HeartHandshake, 
+    Layers, 
+    Settings, 
+    ScrollText,
+    ChevronDown,
+    ChevronRight,
+    Search,
+    MessageSquare,
+    CreditCard
+} from 'lucide-react';
+
+const MENU_ITEMS = [
+    { name: "홈", path: "/dashboard", icon: LayoutDashboard },
+    { name: "글감 수집", path: "/content-collect", icon: FileText },
+    { name: "SEO 분석", path: "/seo-analysis", icon: TrendingUp },
+    { 
+        name: "플레이스 자동화", 
+        icon: MapPin,
+        submenus: [
+            { name: "플레이스 진단", path: "/place-seo", icon: MapPin },
+            { name: "소식 & 영상 자동화", path: "/place-news", icon: PenTool }
+        ]
+    },
+    { 
+        name: "블로그 분석 및 자동화", 
+        icon: PenTool,
+        submenus: [
+            { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
+            { name: "블로그 포스팅", path: "/blog-posting", icon: PenTool },
+            { name: "블로그 자동화", path: "/blog-auto", icon: PenTool },
+            { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake }
+        ]
+    },
+    { name: "구글 블로그스팟 자동화", path: "/blogspot", icon: PenTool },
+    { 
+        name: "카페 분석 및 자동화", 
+        icon: Coffee,
+        submenus: [
+            { name: "카페글 분석", path: "/cafe-analysis", icon: Search },
+            { name: "카페 포스팅 및 육성 자동화", path: "/cafe-auto", icon: PenTool }
+        ]
+    },
+    { 
+        name: "쇼핑 분석 및 자동화", 
+        icon: Search,
+        submenus: [
+            { name: "네이버 쇼핑 순위 검색", path: "/shopping/rank", icon: TrendingUp },
+            { name: "키워드 분석", path: "/shopping/keyword", icon: Search },
+            { name: "상품명 키워드 조합", path: "/shopping/combine", icon: FileText }
+        ]
+    },
+    { name: "멀티 실행", path: "/multi-task", icon: Layers },
+    { name: "설정", path: "/settings", icon: Settings },
+    { name: "결제 및 플랜", path: "/billing", icon: CreditCard },
+    { name: "로그", path: "/logs", icon: ScrollText },
+    { name: "관리자 (마스터)", path: "/admin", icon: ShieldCheck, adminOnly: true },
+];
+
+export default function Sidebar() {
+    const pathname = usePathname();
+    const [openMenus, setOpenMenus] = useState({"블로그 분석 및 자동화": true, "카페 분석 및 자동화": true, "쇼핑 분석 및 자동화": true});
+    const [mounted, setMounted] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [userRole, setUserRole] = useState(null);
+    const [userEmail, setUserEmail] = useState("");
+
+    useEffect(() => {
+        setMounted(true);
+        const token = localStorage.getItem('mbam_token');
+        if (token) {
+            setIsLoggedIn(true);
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                setUserRole(payload.role);
+                setUserEmail(payload.sub);
+            } catch (e) {
+                console.error("Token parsing error");
+            }
+        } else {
+            setIsLoggedIn(false);
+            setUserRole(null);
+            setUserEmail("");
+        }
+    }, [pathname]);
+
+    const toggleMenu = (name) => {
+        setOpenMenus(prev => ({ ...prev, [name]: !prev[name] }));
+    };
+
+    return (
+        <aside style={{
+            width: "260px",
+            height: "100vh",
+            background: "rgba(255, 255, 255, 0.8)",
+            backdropFilter: "blur(12px)",
+            borderRight: "1px solid rgba(226, 232, 240, 0.8)",
+            display: "flex",
+            flexDirection: "column",
+            position: "sticky",
+            top: 0
+        }}>
+            <div style={{ padding: "2rem 1.5rem 1.5rem 1.5rem", borderBottom: "1px solid rgba(226, 232, 240, 0.6)", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                <div>
+                    <h1 style={{ fontSize: "2.1rem", fontWeight: "800", color: "#1e293b", margin: 0, letterSpacing: "-0.5px" }}>
+                        <span style={{ color: "#3b82f6" }}>마케팅연구소</span>
+                    </h1>
+                    <p style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.3rem" }}>Marketing lab's</p>
+                </div>
+                
+                {/* 사용자 정보 및 로그인/로그아웃 영역 */}
+                {!mounted ? (
+                    <div style={{ height: "45px" }}></div>
+                ) : isLoggedIn ? (
+                    <div style={{ padding: "0.75rem", borderRadius: "8px", background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#3b82f6", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.9rem" }}>
+                                {userEmail ? userEmail.charAt(0).toUpperCase() : "U"}
+                            </div>
+                            <div style={{ flex: 1, overflow: "hidden" }}>
+                                <div style={{ fontSize: "0.85rem", fontWeight: "600", color: "#1e293b", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                                    {userEmail || "사용자"}
+                                </div>
+                                <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                                    {userRole === "admin" ? "마스터 관리자" : "회원"}
+                                </div>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => {
+                                localStorage.removeItem('mbam_token');
+                                window.location.href = '/login';
+                            }}
+                            style={{
+                                width: "100%", padding: "0.5rem", borderRadius: "6px", border: "1px solid #e2e8f0", 
+                                background: "white", color: "#64748b", fontWeight: "600", cursor: "pointer",
+                                transition: "all 0.2s ease", fontSize: "0.8rem"
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "#fecaca"; }}
+                            onMouseOut={(e) => { e.currentTarget.style.background = "white"; e.currentTarget.style.color = "#64748b"; e.currentTarget.style.borderColor = "#e2e8f0"; }}
+                        >
+                            로그아웃
+                        </button>
+                    </div>
+                ) : (
+                    <Link href="/login" style={{ textDecoration: "none" }}>
+                        <button 
+                            style={{
+                                width: "100%", padding: "0.75rem", borderRadius: "8px", border: "none", 
+                                background: "#3b82f6", color: "white", fontWeight: "600", cursor: "pointer",
+                                transition: "all 0.2s ease"
+                            }}
+                            onMouseOver={(e) => { e.currentTarget.style.background = "#2563eb"; }}
+                            onMouseOut={(e) => { e.currentTarget.style.background = "#3b82f6"; }}
+                        >
+                            로그인
+                        </button>
+                    </Link>
+                )}
+            </div>
+            
+            <nav style={{ flex: 1, padding: "1.5rem 1rem", display: "flex", flexDirection: "column", gap: "0.5rem", overflowY: "auto" }}>
+                {MENU_ITEMS.map((item, idx) => {
+                    if (item.adminOnly && userRole !== 'admin') return null;
+                    
+                    const Icon = item.icon;
+                    
+                    if (item.submenus) {
+                        const isOpen = openMenus[item.name];
+                        const isAnySubActive = item.submenus.some(sub => pathname === sub.path);
+                        return (
+                            <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                <div 
+                                    onClick={() => toggleMenu(item.name)}
+                                    style={{
+                                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                                        padding: "0.75rem 1rem", borderRadius: "8px", cursor: "pointer",
+                                        background: isAnySubActive ? "#f1f5f9" : "transparent",
+                                        color: isAnySubActive ? "#334155" : "#475569",
+                                        fontWeight: isAnySubActive ? "600" : "500",
+                                        transition: "all 0.2s ease"
+                                    }}
+                                >
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                        <Icon size={20} strokeWidth={isAnySubActive ? 2.5 : 2} />
+                                        <span style={{ fontSize: "0.95rem" }}>{item.name}</span>
+                                    </div>
+                                    {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                </div>
+                                {isOpen && (
+                                    <div style={{ paddingLeft: "2.5rem", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                        {item.submenus.map((sub, sIdx) => {
+                                            const isSubActive = pathname === sub.path;
+                                            const SubIcon = sub.icon;
+                                            return (
+                                                <Link key={sIdx} href={sub.path} style={{ textDecoration: "none" }}>
+                                                    <div style={{
+                                                        display: "flex", alignItems: "center", gap: "0.5rem",
+                                                        padding: "0.6rem 1rem", borderRadius: "8px",
+                                                        background: isSubActive ? "#eff6ff" : "transparent",
+                                                        color: isSubActive ? "#3b82f6" : "#64748b",
+                                                        fontWeight: isSubActive ? "600" : "400",
+                                                        fontSize: "0.9rem",
+                                                        transition: "all 0.2s ease"
+                                                    }}>
+                                                        <SubIcon size={16} />
+                                                        {sub.name}
+                                                    </div>
+                                                </Link>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    }
+
+                    const isActive = pathname === item.path;
+                    return (
+                        <Link key={item.path} href={item.path} style={{ textDecoration: "none" }}>
+                            <div style={{
+                                display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 1rem",
+                                borderRadius: "8px", background: isActive ? "#eff6ff" : "transparent",
+                                color: isActive ? "#3b82f6" : "#475569", fontWeight: isActive ? "600" : "500",
+                                transition: "all 0.2s ease"
+                            }}>
+                                <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                                <span style={{ fontSize: "0.95rem" }}>{item.name}</span>
+                            </div>
+                        </Link>
+                    );
+                })}
+            </nav>
+            
+            <div style={{ padding: "1.5rem", borderTop: "1px solid rgba(226, 232, 240, 0.6)", display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ fontSize: "0.8rem", color: "#94a3b8", textAlign: "center", marginTop: "0.5rem" }}>
+                    &copy; 2026 마케팅연구소 Marketing lab's
+                </div>
+            </div>
+        </aside>
+    );
+}

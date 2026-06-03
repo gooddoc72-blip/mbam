@@ -1,0 +1,229 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+    --bg-main: #f0f2f5;
+    --bg-sidebar: #ffffff;
+    --bg-card: #ffffff;
+    --accent: #00c473; /* 캐시플랜 그린 */
+    --accent-hover: #00b368;
+    --text-main: #1a1d23;
+    --text-dim: #717d8e;
+    --border-color: #e4e7eb;
+    --shadow-sm: 0 2px 4px rgba(0,0,0,0.02);
+    --shadow-md: 0 4px 20px rgba(0,0,0,0.05);
+}
+
+* { font-family: 'Inter', 'Noto Sans KR', sans-serif; }
+
+/* --- Main Layout --- */
+.stApp {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+}
+
+.block-container {
+    padding-top: 1.5rem !important; /* 상단 공백을 기존의 1/4 수준으로 대폭 축소 */
+    padding-bottom: 2rem !important;
+}
+
+/* --- Sidebar --- */
+[data-testid="stSidebar"] {
+    background-color: var(--bg-sidebar) !important;
+    border-right: 1px solid var(--border-color);
+}
+
+.profile-box {
+    padding: 2rem 1.5rem;
+    background: #f8fafb;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+.profile-box .user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 1.5rem;
+}
+.profile-box .avatar {
+    width: 45px; height: 45px;
+    background: var(--accent);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white; font-weight: 700; font-size: 1.2rem;
+}
+.profile-box .name { font-weight: 700; font-size: 1rem; color: var(--text-main); }
+.profile-box .email { font-size: 0.75rem; color: var(--text-dim); }
+
+.quick-action-btn {
+    background: var(--accent);
+    color: white;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: 0.2s;
+}
+.quick-action-btn:hover { background: var(--accent-hover); }
+
+/* --- Sidebar Nav --- */
+[data-testid="stSidebar"] .stRadio label {
+    color: var(--text-dim) !important;
+    font-weight: 600;
+    transition: all 0.2s;
+    padding: 12px 20px;
+    border-radius: 0 !important;
+    border-left: 4px solid transparent;
+}
+[data-testid="stSidebar"] .stRadio label:hover {
+    background: #f8fafb;
+    color: var(--accent) !important;
+}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] > div:has(input:checked) label {
+    background: #f0fdf4 !important;
+    color: var(--accent) !important;
+    border-left-color: var(--accent);
+}
+
+/* --- Cards --- */
+.m-card, .s-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+}
+.m-card::after {
+    content: '';
+    position: absolute;
+    right: -20px; top: -20px;
+    width: 100px; height: 100px;
+    background: var(--accent);
+    opacity: 0.03;
+    border-radius: 50%;
+}
+
+.m-card .lbl { color: var(--text-dim); font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
+.m-card .val { font-size: 2.2rem; font-weight: 800; color: var(--text-main); }
+.m-card .sub { font-size: 0.75rem; color: var(--accent); margin-top: 0.5rem; }
+
+/* --- Page Headers --- */
+.ph {
+    background: white;
+    padding: 1rem 2.5rem; /* 세로 여백을 2rem에서 1rem으로 1/2 축소 */
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.ph h1 { font-size: 1.8rem; font-weight: 800; margin: 0; color: var(--text-main) !important; }
+.ph p { color: var(--text-dim); font-size: 0.9rem; margin: 5px 0 0 0; }
+
+/* --- Buttons --- */
+.stButton > button {
+    background-color: var(--accent) !important;
+    color: white !important;
+    border: none !important;
+    padding: 10px 24px !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    transition: all 0.2s !important;
+}
+.stButton > button:hover {
+    background-color: var(--accent-hover) !important;
+    box-shadow: 0 4px 12px rgba(0, 196, 115, 0.2) !important;
+}
+
+/* --- Input Elements (Permanent Border - 가시성 극대화) --- */
+/* 모든 입력 필드(텍스트, 선택, 영역, 숫자)의 컨테이너를 직접 타겟팅 */
+div[data-baseweb="input"], 
+div[data-baseweb="select"], 
+div[data-baseweb="textarea"] {
+    border: 1px solid #94a3b8 !important; /* 훨씬 더 짙은 회색으로 구분감 강화 */
+    border-radius: 8px !important;
+    background-color: white !important;
+}
+
+/* 포커스 시 강조 컬러 (그린) */
+div[data-baseweb="input"]:focus-within, 
+div[data-baseweb="select"]:focus-within, 
+div[data-baseweb="textarea"]:focus-within {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px rgba(0, 196, 115, 0.1) !important;
+}
+
+/* --- Badges --- */
+.chip {
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+.chip-run { background: #e0f2fe; color: #0369a1; }
+.chip-idle { background: #f1f5f9; color: #475569; }
+.chip-ok { background: #dcfce7; color: #166534; }
+.chip-err { background: #fee2e2; color: #991b1b; }
+
+header { visibility: hidden; }
+footer { visibility: hidden; }
+
+/* SERP Structure Component (Vibrant & Interactive) */
+.serp-container {
+    background: #fdfdfd;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 10px;
+    margin-top: 1rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+}
+
+.serp-header {
+    padding: 10px 15px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.serp-ad { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.serp-clip { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+.serp-brand { background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
+.serp-blog { background: #f0fdf4; color: #15803d; border: 1px solid #dcfce7; }
+.serp-influencer { background: #fffaf0; color: #9a3412; border: 1px solid #ffedd5; }
+.serp-web { background: #ecfeff; color: #0e7490; border: 1px solid #cffafe; }
+.serp-shorts { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+.serp-related { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
+
+.serp-item {
+    padding: 8px 12px;
+    margin-left: 10px;
+    font-size: 0.85rem;
+    color: #4b5563;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.serp-item:hover {
+    background: #f1f5f9;
+    color: var(--accent);
+}
+
+.serp-check {
+    color: #9ca3af;
+    font-size: 1rem;
+    min-width: 20px;
+}
