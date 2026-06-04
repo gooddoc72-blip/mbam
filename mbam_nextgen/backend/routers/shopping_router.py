@@ -20,24 +20,7 @@ router = APIRouter(prefix="/api/shopping", tags=["shopping"])
 
 SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송'}
 
-def clean_and_tokenize(keyword: str) -> List[str]:
-    """형태소 분리 및 필터링"""
-    cleaned = re.sub(r'[!?,\[\]\(\)\{\}\<\>~*]', ' ', keyword)
-    if not kiwi:
-        return [w for w in cleaned.split() if w not in SPAM_WORDS]
-    
-    tokens = kiwi.tokenize(cleaned)
-    valid_tokens = []
-    for t in tokens:
-        if t.tag.startswith('N') or t.tag == 'SL':
-            word = t.form
-            if word not in SPAM_WORDS and not re.fullmatch(r'\d{4}', word):
-                valid_tokens.append(word)
-    return valid_tokens
-
-def remove_duplicates_keep_order(tokens: List[str]) -> List[str]:
-    seen = set()
-    return [x for x in tokens if not (x in seen or seen.add(x))]
+# Utility functions imported from keyword_seo
 
 # ==========================================
 # 2. 키워드 분석 (모듈 1, 2)
@@ -49,31 +32,12 @@ class KeywordAnalyzeRequest(BaseModel):
 @router.post("/keyword/analyze")
 async def analyze_keyword(req: KeywordAnalyzeRequest):
     """
-    연관 키워드 확장 및 NLP 토큰 풀 추출
+    네이버 Top 10 상품 및 검색광고 API 기반 연관 키워드 추출
     """
     seed = req.seed_keyword.strip()
+    result = await analyze_seo_keyword(seed)
     
-    # Mock data for 연관 키워드 추출
-    mock_related_keywords = [
-        f"{seed} 추천", f"가성비 {seed}", f"예쁜 {seed}", f"사무실 {seed}", 
-        f"소형 {seed}", f"2026 신상 {seed} 특가"
-    ]
-    
-    all_tokens = []
-    for kw in mock_related_keywords:
-        tokens = clean_and_tokenize(kw)
-        all_tokens.extend(tokens)
-        
-    unique_tokens = remove_duplicates_keep_order(all_tokens)
-    seed_tokens = clean_and_tokenize(seed)
-    
-    return {
-        "seed_keyword": seed,
-        "seed_tokens": seed_tokens,
-        "related_keywords_count": len(mock_related_keywords),
-        "valid_tokens_pool": unique_tokens,
-        "message": "분석 완료"
-    }
+    return result
 
 # ==========================================
 # 3. 상품명 조립 (모듈 3, 4)
@@ -87,23 +51,35 @@ class TitleAssembleRequest(BaseModel):
 @router.post("/keyword/assemble")
 async def assemble_title(req: TitleAssembleRequest):
     """
-    50자 이내 SEO 최적화 상품명 조립
+    SEO 최적화 상품명 조립 (거리 점수 반영)
+    사용자가 '단어 간 거리(Proximity)'가 중요한 네이버 로직을 요구함에 따라
+    [롱테일/세부 토큰 1~2개] [브랜드명] [메인 키워드] [추가 상위노출 토큰들] 순으로 결합
     """
-    title = ""
-    if req.brand_name:
-        title += f"{req.brand_name} "
-        
     seed = req.seed_keyword.strip()
-    if seed:
-        title += f"{seed} "
-        
-    used_words = set(clean_and_tokenize(title))
+    brand = req.brand_name.strip() if req.brand_name else ""
     
-    for token in req.tokens:
-        if token not in used_words:
-            if len(title) + len(token) + 1 <= 50:
-                title += f"{token} "
-                used_words.add(token)
+    # Use top 2 lowest volume keywords at the front
+    front_tokens = req.tokens[:2]
+    back_tokens = req.tokens[2:]
+    
+    title = ""
+    used_words = set(clean_and_tokenize(seed))
+    
+    for t in front_tokens:
+        if t not in used_words:
+            title += f"{t} "
+            used_words.add(t)
+            
+    if brand:
+        title += f"{brand} "
+        
+    title += f"{seed} "
+    
+    for t in back_tokens:
+        if t not in used_words:
+            if len(title) + len(t) + 1 <= 50:
+                title += f"{t} "
+                used_words.add(t)
             else:
                 break
                 
@@ -112,7 +88,7 @@ async def assemble_title(req: TitleAssembleRequest):
     return {
         "assembled_title": title,
         "length": len(title),
-        "warning": "길이가 50자를 초과할 경우 네이버 검색 알고리즘에서 감점(-30점) 될 수 있습니다." if len(title) > 50 else None
+        "message": "SEO 최적화(단어 거리 점수 반영) 조립 완료"
     }
 
 # ==========================================

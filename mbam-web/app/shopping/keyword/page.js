@@ -67,9 +67,11 @@ export default function ShoppingKeyword() {
                             
                             <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                                 <h4 style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#334155', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                    <Tag size={16} /> 클린 토큰 풀 ({result.valid_tokens_pool.length}개)
+                                    <Tag size={16} /> 클린 토큰 풀 (총 {result.valid_tokens_pool.length}개)
                                 </h4>
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>어뷰징 필터링 및 형태소 분석, 중복 제거가 완료된 단어들의 모음입니다. 이 풀(Pool)의 단어들이 조합기에 사용됩니다.</p>
+                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
+                                    네이버 상위 10위 상품들의 핵심 키워드와 조회수 기반 롱테일 키워드가 병합된 토큰 풀입니다.
+                                </p>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     {result.valid_tokens_pool.map((token, idx) => (
                                         <span key={idx} style={{ background: '#e0f2fe', color: '#0284c7', padding: '0.3rem 0.8rem', borderRadius: '999px', fontSize: '0.9rem', fontWeight: '500' }}>
@@ -79,6 +81,47 @@ export default function ShoppingKeyword() {
                                 </div>
                             </div>
                         </div>
+                        
+                        {/* SEO Title Assembler Section */}
+                        <div style={{ marginTop: '2rem', padding: '1.5rem', background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                            <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#0f172a', marginBottom: '1rem' }}>🤖 네이버 거리점수 반영 SEO 상품명 조립기</h3>
+                            <p style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '1.5rem' }}>
+                                메인 키워드와의 <strong>형태소 거리(Proximity)</strong>를 최소화하는 네이버 알고리즘 최적화 방식으로 상품명을 자동 조립합니다.<br/>
+                                <span style={{color: '#0284c7'}}>[롱테일 키워드 2개] + [브랜드명] + [메인(시드)키워드] + [상위노출 핵심 수식어들]</span> 순서로 결합됩니다.
+                            </p>
+                            
+                            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
+                                <input id="brandInput" placeholder="브랜드명 (선택사항)" style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0' }} />
+                                <button 
+                                    onClick={async () => {
+                                        const brand = document.getElementById('brandInput').value;
+                                        const res = await fetchWithAuth('/api/shopping/keyword/assemble', {
+                                            method: 'POST',
+                                            headers: {'Content-Type': 'application/json'},
+                                            body: JSON.stringify({
+                                                seed_keyword: result.seed_keyword,
+                                                brand_name: brand,
+                                                tokens: result.valid_tokens_pool
+                                            })
+                                        });
+                                        const data = await res.json();
+                                        if(data.assembled_title) {
+                                            document.getElementById('assembledResult').innerText = data.assembled_title;
+                                            document.getElementById('assembledLength').innerText = `총 ${data.length}자 (네이버 권장 50자 이내)`;
+                                            document.getElementById('assembledLength').style.color = data.length > 50 ? 'red' : '#10b981';
+                                        }
+                                    }}
+                                    style={{ padding: '0.75rem 2rem', background: '#10b981', color: 'white', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
+                                    최적화 상품명 생성
+                                </button>
+                            </div>
+                            
+                            <div style={{ padding: '1.5rem', background: '#f1f5f9', borderRadius: '8px', textAlign: 'center' }}>
+                                <div id="assembledResult" style={{ fontSize: '1.3rem', fontWeight: 'bold', color: '#0f172a', marginBottom: '0.5rem' }}>버튼을 눌러 상품명을 생성해보세요!</div>
+                                <div id="assembledLength" style={{ fontSize: '0.9rem', color: '#64748b' }}></div>
+                            </div>
+                        </div>
+                        
                     </div>
                 )}
             </div>
