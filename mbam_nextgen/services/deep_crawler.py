@@ -113,7 +113,7 @@ async def _scrape_badges_for_keyword(keyword: str, max_scrolls: int = 20):
                 if not text_content: continue
                 
                 # 플레이스 이름 추출 (보통 첫 번째 줄 또는 특정 클래스)
-                name_parts = text_content.split('\\n')
+                name_parts = text_content.split('\n')
                 name = name_parts[0] if name_parts else "Unknown"
                 
                 # '예약', '새로오픈' 등이 이름에 섞여 있을 수 있으므로 클렌징

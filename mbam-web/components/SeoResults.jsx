@@ -27,13 +27,14 @@ function GradeBadge({ grade, score, title }) {
 }
 
 export default function SeoResults({ data }) {
-  if (!data) return null;
-
-  const { keyword, metrics, top_keywords, formula, smart_blocks } = data;
   const [expandedRows, setExpandedRows] = useState({});
   const [selectedBlogs, setSelectedBlogs] = useState([]);
-  
-  const cafePopularBlocks = smart_blocks?.blocks?.filter(b => b.block_title.includes("카페")) || [];
+
+  if (!data) return null;
+
+  const { keyword, metrics = [], top_keywords = [], formula, smart_blocks } = data;
+
+  const cafePopularBlocks = smart_blocks?.blocks?.filter(b => b.block_title?.includes("카페")) || [];
   
   const toggleRow = (idx) => {
     setExpandedRows(prev => ({ ...prev, [idx]: !prev[idx] }));

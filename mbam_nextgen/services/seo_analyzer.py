@@ -1326,21 +1326,28 @@ class SeoAnalyzer:
         """여러 URL의 포스팅 데이터를 분석하여 통계 및 공통 단어 추출"""
         all_results = []
         all_words = {}
-        
-        for url in urls:
-            res = await self.analyze_specific_url(url)
+
+        analyzed = await self.analyze_multiple_urls(urls)
+        for res in analyzed.values():
             if "error" not in res:
                 all_results.append(res)
-                # 단어 빈도 합산
-                for word, count in res.get("keywords", []):
-                    all_words[word] = all_words.get(word, 0) + count
-        
+                # 단어 빈도 합산 (top_keywords: [{"keyword":.., "count":..}] 또는 [(word, count)] 모두 허용)
+                for kw in res.get("top_keywords", []):
+                    if isinstance(kw, dict):
+                        word, count = kw.get("keyword"), kw.get("count", 0)
+                    elif isinstance(kw, (list, tuple)) and len(kw) >= 2:
+                        word, count = kw[0], kw[1]
+                    else:
+                        continue
+                    if word:
+                        all_words[word] = all_words.get(word, 0) + count
+
         if not all_results:
             return {"error": "분석 가능한 데이터가 없습니다."}
-            
+
         # 통계 계산
-        avg_img = sum(r['img_count'] for r in all_results) / len(all_results)
-        avg_char = sum(r['char_count'] for r in all_results) / len(all_results)
+        avg_img = sum(r.get('img_count', 0) for r in all_results) / len(all_results)
+        avg_char = sum(r.get('char_count', 0) for r in all_results) / len(all_results)
         
         # 공통 사용 단어 TOP 30 (2개 이상의 블로그에서 등장한 단어 우선)
         # 여기서는 단순 빈도순으로 정렬

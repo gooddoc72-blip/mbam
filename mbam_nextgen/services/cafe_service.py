@@ -40,7 +40,8 @@ class CafeService:
         """카페 에디터 프레임이 나타날 때까지 대기"""
         print("🔍 [CafeService] 카페 에디터 감시 중...")
         target_frame = None
-        while True:
+        max_attempts = 15
+        for _ in range(max_attempts):
             for p in context.pages:
                 for f in p.frames:
                     try:
@@ -50,11 +51,13 @@ class CafeService:
                             break
                     except: continue
                 if target_frame: break
-            
+
             if target_frame:
                 print(f"✨ [CafeService] 카페 에디터 포착: {target_frame.name}")
                 return target_frame
             await asyncio.sleep(1)
+
+        raise TimeoutError("카페 에디터 프레임을 찾지 못했습니다 (15초 초과). 로그인/페이지 상태를 확인하세요.")
 
     async def select_board(self, frame, board_name: str):
         """게시판(말머리) 선택"""
