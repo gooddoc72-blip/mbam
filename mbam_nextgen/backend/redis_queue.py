@@ -17,8 +17,8 @@ class TaskQueueManager:
             self.redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
             # 서버 구동 시 Redis 연결 테스트
             self.redis_client.ping()
-        except redis.ConnectionError:
-            # 로컬 환경에서 Redis 컨테이너가 없을 때 다운되지 않도록 예외 처리
+        except Exception:
+            # 로컬 환경에서 Redis 컨테이너가 없거나 REDIS_URL이 잘못돼도 모듈 로드가 죽지 않도록
             self.redis_client = None
 
     def publish_task(self, task_id: str, user_id: str, task_type: str, payload: dict):
@@ -47,11 +47,11 @@ class TaskQueueManager:
         if data and "payload" in data:
             try:
                 data["payload"] = json.loads(data["payload"])
-            except: pass
+            except (json.JSONDecodeError, TypeError): pass
         if data and "result" in data:
             try:
                 data["result"] = json.loads(data["result"])
-            except: pass
+            except (json.JSONDecodeError, TypeError): pass
             
         return data if data else {"status": "not_found"}
 

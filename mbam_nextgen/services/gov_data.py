@@ -111,7 +111,8 @@ class GovDataCollector:
                 return result
 
         print(f"[GovData] [Fallback] {category} 샘플 데이터 사용")
-        return [d for d in self.SAMPLE_DATA if d.get("category") == category] or self.SAMPLE_DATA
+        # 매칭 샘플이 없을 때 전체 SAMPLE_DATA를 반환하면 다른 카테고리 데이터가 섞여 노출됨 → 빈 리스트 반환
+        return [d for d in self.SAMPLE_DATA if d.get("category") == category]
 
     async def _fetch_via_ai(self, category: str) -> list:
         """Gemini AI에게 특정 카테고리의 공공 데이터 조사를 요청"""
@@ -171,7 +172,7 @@ class GovDataCollector:
             json_str = re.sub(r'```json\s*|```', '', response_text).strip()
             start = json_str.find('[')
             end = json_str.rfind(']') + 1
-            if start != -1 and end != 0:
+            if start != -1 and end > start:
                 json_str = json_str[start:end]
             
             data = json.loads(json_str)
