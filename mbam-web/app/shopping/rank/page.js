@@ -267,7 +267,6 @@ export default function ShoppingRankDashboard() {
                       <tr>
                         <th style={{ padding: "0.8rem 0.4rem" }}>조회 일자</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#3b82f6" }}>쇼핑 랭킹</th>
-                        <th style={{ padding: "0.8rem 0.4rem", color: "#ef4444" }}>판매가격</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#10b981" }}>구매수</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#f59e0b" }}>리뷰수</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#8b5cf6" }}>찜수</th>
@@ -289,7 +288,6 @@ export default function ShoppingRankDashboard() {
                           <tr key={idx} style={{ borderBottom: "1px solid #e2e8f0", transition: "background 0.2s" }} onMouseEnter={(e)=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={(e)=>e.currentTarget.style.background="white"}>
                             <td style={{ padding: "0.8rem 1rem", fontWeight: "bold", color: "#475569" }}>{h.date}</td>
                             <td style={{ padding: "0.8rem 1rem", fontWeight: "bold", color: "#1e293b" }}>{h.rank}위 (P.{Math.ceil(h.rank/40)})</td>
-                            <td style={{ padding: "0.8rem 1rem", color: "#ef4444", fontWeight: "bold" }}>{h.price ? h.price.toLocaleString() + '원' : '-'}</td>
                             <td style={{ padding: "0.8rem 1rem", color: "#10b981", fontWeight: "bold" }}>{h.purchases.toLocaleString()}</td>
                             <td style={{ padding: "0.8rem 1rem", color: "#f59e0b" }}>{h.visitor_reviews.toLocaleString()}</td>
                             <td style={{ padding: "0.8rem 1rem", color: "#8b5cf6" }}>{h.saves.toLocaleString()}</td>
@@ -309,7 +307,6 @@ export default function ShoppingRankDashboard() {
                       <tr>
                         <th style={{ padding: "0.8rem 0.5rem", width: "50px" }}>순위</th>
                         <th style={{ padding: "0.8rem 1rem", textAlign: "left" }}>상품명/스토어명</th>
-                        <th style={{ padding: "0.8rem 0.5rem", color: "#ef4444" }}>판매가격</th>
                         <th style={{ padding: "0.8rem 0.5rem", color: "#10b981" }}>구매수</th>
                         <th style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>리뷰수</th>
                         <th style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>찜수</th>
@@ -361,10 +358,9 @@ export default function ShoppingRankDashboard() {
                                 </div>
                               )}
                             </td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#ef4444", fontWeight: "bold" }}>{place.price ? place.price.toLocaleString() + '원' : '-'}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{(place.purchases || 0).toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{(place.reviews || 0).toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{(place.keeps || 0).toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{place.purchases.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{place.reviews.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{place.keeps.toLocaleString()}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#3b82f6" }}>{formatN(place.n1)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#10b981" }}>{formatN(place.n2)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#8b5cf6" }}>{formatN(place.n3)}</td>

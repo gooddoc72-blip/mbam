@@ -5,7 +5,7 @@ echo ==========================================
 
 echo [1/3] Installing Python backend dependencies...
 pip install -r requirements.txt
-python -m playwright install chromium
+playwright install chromium
 
 echo [2/3] Installing Frontend dependencies...
 cd mbam-web

@@ -20,7 +20,24 @@ router = APIRouter(prefix="/api/shopping", tags=["shopping"])
 
 SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송'}
 
-# Utility functions imported from keyword_seo
+def clean_and_tokenize(keyword: str) -> List[str]:
+    """형태소 분리 및 필터링"""
+    cleaned = re.sub(r'[!?,\[\]\(\)\{\}\<\>~*]', ' ', keyword)
+    if not kiwi:
+        return [w for w in cleaned.split() if w not in SPAM_WORDS]
+    
+    tokens = kiwi.tokenize(cleaned)
+    valid_tokens = []
+    for t in tokens:
+        if t.tag.startswith('N') or t.tag == 'SL':
+            word = t.form
+            if word not in SPAM_WORDS and not re.fullmatch(r'\d{4}', word):
+                valid_tokens.append(word)
+    return valid_tokens
+
+def remove_duplicates_keep_order(tokens: List[str]) -> List[str]:
+    seen = set()
+    return [x for x in tokens if not (x in seen or seen.add(x))]
 
 # ==========================================
 # 2. 키워드 분석 (모듈 1, 2)
@@ -32,12 +49,31 @@ class KeywordAnalyzeRequest(BaseModel):
 @router.post("/keyword/analyze")
 async def analyze_keyword(req: KeywordAnalyzeRequest):
     """
-    네이버 Top 10 상품 및 검색광고 API 기반 연관 키워드 추출
+    연관 키워드 확장 및 NLP 토큰 풀 추출
     """
     seed = req.seed_keyword.strip()
-    result = await analyze_seo_keyword(seed)
     
-    return result
+    # Mock data for 연관 키워드 추출
+    mock_related_keywords = [
+        f"{seed} 추천", f"가성비 {seed}", f"예쁜 {seed}", f"사무실 {seed}", 
+        f"소형 {seed}", f"2026 신상 {seed} 특가"
+    ]
+    
+    all_tokens = []
+    for kw in mock_related_keywords:
+        tokens = clean_and_tokenize(kw)
+        all_tokens.extend(tokens)
+        
+    unique_tokens = remove_duplicates_keep_order(all_tokens)
+    seed_tokens = clean_and_tokenize(seed)
+    
+    return {
+        "seed_keyword": seed,
+        "seed_tokens": seed_tokens,
+        "related_keywords_count": len(mock_related_keywords),
+        "valid_tokens_pool": unique_tokens,
+        "message": "분석 완료"
+    }
 
 # ==========================================
 # 3. 상품명 조립 (모듈 3, 4)
@@ -51,35 +87,23 @@ class TitleAssembleRequest(BaseModel):
 @router.post("/keyword/assemble")
 async def assemble_title(req: TitleAssembleRequest):
     """
-    SEO 최적화 상품명 조립 (거리 점수 반영)
-    사용자가 '단어 간 거리(Proximity)'가 중요한 네이버 로직을 요구함에 따라
-    [롱테일/세부 토큰 1~2개] [브랜드명] [메인 키워드] [추가 상위노출 토큰들] 순으로 결합
+    50자 이내 SEO 최적화 상품명 조립
     """
-    seed = req.seed_keyword.strip()
-    brand = req.brand_name.strip() if req.brand_name else ""
-    
-    # Use top 2 lowest volume keywords at the front
-    front_tokens = req.tokens[:2]
-    back_tokens = req.tokens[2:]
-    
     title = ""
-    used_words = set(clean_and_tokenize(seed))
-    
-    for t in front_tokens:
-        if t not in used_words:
-            title += f"{t} "
-            used_words.add(t)
-            
-    if brand:
-        title += f"{brand} "
+    if req.brand_name:
+        title += f"{req.brand_name} "
         
-    title += f"{seed} "
+    seed = req.seed_keyword.strip()
+    if seed:
+        title += f"{seed} "
+        
+    used_words = set(clean_and_tokenize(title))
     
-    for t in back_tokens:
-        if t not in used_words:
-            if len(title) + len(t) + 1 <= 50:
-                title += f"{t} "
-                used_words.add(t)
+    for token in req.tokens:
+        if token not in used_words:
+            if len(title) + len(token) + 1 <= 50:
+                title += f"{token} "
+                used_words.add(token)
             else:
                 break
                 
@@ -88,7 +112,7 @@ async def assemble_title(req: TitleAssembleRequest):
     return {
         "assembled_title": title,
         "length": len(title),
-        "message": "SEO 최적화(단어 거리 점수 반영) 조립 완료"
+        "warning": "길이가 50자를 초과할 경우 네이버 검색 알고리즘에서 감점(-30점) 될 수 있습니다." if len(title) > 50 else None
     }
 
 # ==========================================
@@ -97,7 +121,7 @@ async def assemble_title(req: TitleAssembleRequest):
 from dotenv import load_dotenv
 import os
 from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from playwright_stealth import stealth
 import concurrent.futures
 from mbam_nextgen.backend.database import get_db, ShoppingTrackedItem, ShoppingHistory
 from sqlalchemy.orm import Session
@@ -127,7 +151,7 @@ def min_max_norm(x, min_val, max_val):
 async def fetch_target_rank_via_api(keyword: str, store_name: str, product_name: str, mid: str):
     client_id = os.environ.get("NAVER_CLIENT_ID")
     client_secret = os.environ.get("NAVER_CLIENT_SECRET")
-    if not client_id or not client_secret: return 0, None, []
+    if not client_id or not client_secret: return 0, None
     headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     
     target_item = None
@@ -165,7 +189,6 @@ async def fetch_target_rank_via_api(keyword: str, store_name: str, product_name:
                             "rank": global_rank,
                             "title": clean_title,
                             "storeName": item.get("mallName", ""),
-                            "price": int(item.get("lprice", 0)) if item.get("lprice") else 0,
                             "reviews": 0, "purchases": 0, "keeps": 0, "n1_base": 0,
                             "is_target": is_match,
                             "mid": item.get("productId", ""),
@@ -196,7 +219,7 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
     def scrape_sync():
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                headless=False,
+                headless=True,
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--disable-infobars',
@@ -209,11 +232,11 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             page = context.new_page()
-            Stealth().apply_stealth_sync(page)
+            stealth(page)
             
             def scrape_page(pg_num):
                 url = f"https://search.shopping.naver.com/search/all?query={req.keyword}&pagingIndex={pg_num}&pagingSize=40"
-                page.goto(url, wait_until="networkidle", timeout=30000)
+                page.goto(url, wait_until="networkidle", timeout=15000)
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 page.wait_for_timeout(500)
                 items = page.query_selector_all("[class^='product_item__'], [class^='basicList_item__']")
@@ -223,26 +246,13 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
                     html_content = item.inner_text()
                     html_content = html_content.replace('\\n', ' ')
                     
-                    review_match = re.search(r'리뷰(?!별점)[^\d]*?([0-9,\.]+만?)', html_content)
-                    purchase_match = re.search(r'(?:구매|판매)[^\d]*?([0-9,\.]+만?)', html_content)
-                    keep_match = re.search(r'찜[^\d]*?([0-9,\.]+만?)', html_content)
+                    review_match = re.search(r'리뷰\\s*([0-9,]+)', html_content)
+                    purchase_match = re.search(r'구매\\s*([0-9,]+)', html_content)
+                    keep_match = re.search(r'찜\\s*([0-9,]+)', html_content)
                     
-                    def parse_num(m):
-                        if not m: return 0
-                        try:
-                            val = m.group(1).replace(',', '')
-                            if '만' in val:
-                                return int(float(val.replace('만', '')) * 10000)
-                            return int(float(val))
-                        except Exception:
-                            return 0
-
-                    reviews = parse_num(review_match)
-                    purchases = parse_num(purchase_match)
-                    keeps = parse_num(keep_match)
-                    
-                    price_match = re.search(r'([0-9,]+)원', html_content)
-                    price = int(price_match.group(1).replace(',', '')) if price_match else 0
+                    reviews = int(review_match.group(1).replace(',', '')) if review_match else 0
+                    purchases = int(purchase_match.group(1).replace(',', '')) if purchase_match else 0
+                    keeps = int(keep_match.group(1).replace(',', '')) if keep_match else 0
                     
                     title_match = re.search(r'^(.*?)(?:\\s*(?:찜|리뷰|구매|무료배송))', html_content)
                     title_snippet = title_match.group(1).strip()[:30] if title_match else html_content[:30]
@@ -261,7 +271,6 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
                         "rank": current_rank,
                         "title": title_snippet,
                         "storeName": api_data.get("mallName", req.store_name) if is_match and api_data else "",
-                        "price": price,
                         "reviews": reviews,
                         "purchases": purchases,
                         "keeps": keeps,
@@ -301,12 +310,7 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
 
     if not target_stats and api_rank > 0:
         target_stats = {
-            "rank": api_rank, "title": api_data.get("title", ""), "storeName": api_data.get("mallName", ""), "price": api_data.get("lprice", 0), "reviews": 0, "purchases": 0, "keeps": 0, "n1_base": 80, "is_target": True, "mid": req.target_mid, "category": api_data.get("category", "")
-        }
-    elif not target_stats:
-        # Not found in top 400
-        target_stats = {
-            "rank": "400위 밖", "title": req.product_name or "내 상품", "storeName": req.store_name or "", "price": 0, "reviews": 0, "purchases": 0, "keeps": 0, "n1_base": 50, "is_target": True, "mid": req.target_mid or "unknown", "category": ""
+            "rank": api_rank, "title": api_data["title"], "storeName": api_data.get("mallName", ""), "reviews": 0, "purchases": 0, "keeps": 0, "n1_base": 80, "is_target": True, "mid": req.target_mid, "category": api_data.get("category", "")
         }
         
     all_items = list(top_competitors)
@@ -330,22 +334,16 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
         r_norm = min_max_norm(log_scale(item['reviews']), r_min, r_max) * 100
         k_norm = min_max_norm(log_scale(item['keeps']), k_min, k_max) * 100
         
-        # N2 (Popularity): Purchases > Reviews > Keeps
-        n2 = 0.6 * p_norm + 0.3 * r_norm + 0.1 * k_norm
-        
-        # N3 (Freshness/Traffic)
-        n3 = 80 if item.get('is_new') else (k_norm * 0.5 + 30)
-        
-        # N4 (Penalty/Trust)
-        n4 = 1.0
-        title_str = item.get('title') or ''
-        title_len = len(title_str)
-        if title_len > 50:
-            n4 = 0.7 # Heavy penalty for exceeding 50 chars
+        cvr = p_norm * 0.8
+        click = k_norm * 1.2
+        if click > 100: click = 100
         
         n1 = item.get('n1_base', 80)
+        n2 = 0.5 * p_norm + 0.4 * r_norm + 0.1 * cvr
+        n3 = 0.6 * click + 0.4 * k_norm
+        n4 = 1.0 # Base penalty filter
         
-        s_shop = (0.3 * n1 + 0.7 * (0.8 * n2 + 0.2 * n3)) * n4
+        s_shop = (0.3 * n1 + 0.7 * (0.7 * n2 + 0.3 * n3)) * n4
         
         item['n1'] = round(n1, 2)
         item['n2'] = round(n2, 2)
@@ -364,17 +362,16 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
         "avg_reviews": round(sum([c['reviews'] for c in top_competitors]) / len(top_competitors) if top_competitors else 0)
     }
 
-    report = f"""[네이버 쇼핑 N지수 타겟 가이드 리포트]
-1. 1페이지(Top 40) 커트라인 분석:
-  - 1페이지 제품들의 평균 구매수는 {page1_stats['avg_purchases']:,}건, 평균 리뷰수는 {page1_stats['avg_reviews']:,}건 입니다.
-  - 최상위권 진입을 위해서는 구매수(N2)의 실거래 실적이 가장 큰 비중(60%)을 차지합니다.
+    report = f"""[AI 컨설팅 N지수 정밀 분석 리포트]
+1. 1페이지(Top 40) 시장 분석:
+  - 1페이지 제품들의 평균 구매수는 {page1_stats['avg_purchases']:,}건, 최대 구매수는 {page1_stats['max_purchases']:,}건으로 집계되었습니다.
+  - 최상위 노출을 위해서는 트래픽(N3) 점수 최적화가 필수입니다.
 
-2. 내 상품({target_stats['title']}) 진단 결과:
-  - 현재 순위: {target_stats['rank']}
-  - 현재 누적 구매수는 {target_stats['purchases']:,}건, 리뷰는 {target_stats['reviews']:,}건 입니다.
-  - 검색 적합성(N1): {target_stats['n1']}점 / 실거래 인기도(N2): {target_stats['n2']}점 / 최신성(N3): {target_stats['n3']}점 / 패널티(N4): {target_stats['n4']} (1.0 만점)
-  - 최종 랭킹 역산 점수(S_total): {target_stats['n5']}점
-  - 액션 가이드: { '상품명이 50자를 초과하여 N4 패널티(-30%)를 받고 있습니다. 50자 이내로 즉시 수정하세요.' if target_stats['n4'] < 1.0 else '적합도(N1) 형태소 배열이 안전합니다. 리뷰 이벤트를 통해 구매수(N2)를 1페이지 평균까지 끌어올리는 데 집중하세요.' }
+2. 타겟 상품({target_stats['title']}) 진단 결과:
+  - 현재 누적 구매수는 {target_stats['purchases']:,}건, 찜수는 {target_stats['keeps']:,}회 입니다.
+  - 검색 적합성(N1): {target_stats['n1']}점 / 실거래 인기도(N2): {target_stats['n2']}점 / 유입(N3): {target_stats['n3']}점
+  - 최종 융합 스코어(S_shopping): {target_stats['n5']}점
+  - 제안: 1페이지 평균치 도달을 위해 리뷰 이벤트 및 외부 유입(N3)을 늘려 전환율(CVR)을 개선하세요.
 """ if target_stats else "타겟 상품을 찾지 못했습니다."
 
     return {
@@ -419,7 +416,6 @@ async def track_shopping_item(req: TrackRequest, db: Session = Depends(get_db)):
             visitor_reviews=req.target_stats.get("reviews", 0),
             saves=req.target_stats.get("keeps", 0),
             purchases=req.target_stats.get("purchases", 0),
-            price=req.target_stats.get("price", 0),
             n1=req.target_stats.get("n1", 0),
             n2=req.target_stats.get("n2", 0),
             n3=req.target_stats.get("n3", 0),
@@ -460,7 +456,6 @@ async def get_shopping_history(req: AnalyzeRequest, db: Session = Depends(get_db
                 "visitor_reviews": h.visitor_reviews,
                 "saves": h.saves,
                 "purchases": h.purchases,
-                "price": getattr(h, "price", 0),
                 "n1": h.n1,
                 "n2": h.n2,
                 "n3": h.n3,
