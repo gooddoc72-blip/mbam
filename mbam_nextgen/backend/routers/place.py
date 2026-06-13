@@ -241,7 +241,10 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
         raise Exception(f"크롤러 에러: {competitors['error']}")
     if not isinstance(competitors, list):
         raise Exception(f"크롤러 응답 오류: {competitors}")
-        
+
+    # mid/name 없는 비정상 크롤링 항목은 매칭/순위 계산을 깨뜨리므로 제외 (KeyError → 500 방지)
+    competitors = [c for c in competitors if c.get("mid") is not None and c.get("name") is not None]
+
     # 2. 내 매장 상세 정보 수집 (타겟이 검색 결과에 이미 있다면 불필요한 크롤링 생략하여 속도 최적화)
     target_comp = next((c for c in competitors if str(c["mid"]).strip() == str(target_mid).strip()), None)
     if target_comp:

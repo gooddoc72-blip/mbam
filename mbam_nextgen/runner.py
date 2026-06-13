@@ -129,11 +129,13 @@ class EngineRunner:
             self._status = "completed"
             self._save_log(result)
         except Exception as e:
+            # run_multi는 config로 (accounts, global_config) 튜플을 넘기므로 .get가 없음 → 에러 핸들러 자체 크래시 방지
+            cfg = config if isinstance(config, dict) else {}
             err_result = {
                 "success": False,
                 "error": str(e),
-                "account_id": config.get("account_id", "Unknown"),
-                "keyword": config.get("keyword", "N/A"),
+                "account_id": cfg.get("account_id", "Unknown"),
+                "keyword": cfg.get("keyword", "N/A"),
                 "timestamp": datetime.now().isoformat()
             }
             self._result = err_result
