@@ -1,7 +1,9 @@
 import asyncio
+import os
 import random
 import sys
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
+from .core.stealth import StealthExecutor
 from .services.soul import SoulRewriter
 from .services.armor import ImageArmor
 from .services.blog_service import BlogService
@@ -64,7 +66,6 @@ class WorkflowOrchestrator:
             page = await context.new_page()
             
             if not has_session:
-                import os
                 pw = os.getenv("NAVER_PW", "")
                 await self.authenticator.login_with_bypass(page, account_id, pw)
                 await self.session_manager.save_session(context, account_id)
@@ -129,7 +130,7 @@ class WorkflowOrchestrator:
 
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 45.0, ai_provider: str = "claude", reference_data: dict = None,
-        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None
+        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -321,8 +322,7 @@ class WorkflowOrchestrator:
             
             # 4. 이미지 세척 및 준비
             washed_images = []
-            
-            import os
+
             # (A) 폴더 연동 방식
             if image_folder_path and os.path.exists(image_folder_path):
                 logger.info(f"📂 [Orchestrator] 로컬 폴더 연동 시작: {image_folder_path}")
@@ -505,7 +505,8 @@ class WorkflowOrchestrator:
         ai_provider: str = "claude",
         action_type: str = "post",
         content: str = None,
-        reference_data: dict = None
+        reference_data: dict = None,
+        proxy: str = None
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -533,7 +534,6 @@ class WorkflowOrchestrator:
                 page = await context.new_page()
                 
                 if not has_session:
-                    import os
                     pw = os.getenv("NAVER_PW", "")
                     await self.authenticator.login_with_bypass(page, account_id, pw)
                     await self.session_manager.save_session(context, account_id)
