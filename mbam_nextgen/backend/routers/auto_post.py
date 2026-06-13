@@ -66,7 +66,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
 
     try:
         orchestrator = WorkflowOrchestrator()
-        
+        account_id = req.naver_id if req.naver_id else "unknown_account"
+
         if req.target_type == "blog":
             if req.accounts and len(req.accounts) > 0:
                 log(f"[다중 계정 블로그] 워크플로우를 시작합니다. (계정 수: {len(req.accounts)})")
@@ -88,20 +89,19 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     log_callback=log
                 )
             else:
-                account_id = req.naver_id if req.naver_id else "unknown_account"
                 log(f"[{req.target_type}] 단일 계정 워크플로우를 시작합니다...")
-            result = await orchestrator.execute_blog_workflow(
-                account_id=account_id,
-                keyword=req.target_keyword or "테스트",
-                publish_mode=req.publish_mode,
-                schedule_date=req.schedule_date,
-                schedule_time=req.schedule_time,
-                ai_provider=req.ai_provider,
-                reference_data=req.reference_data,
-                post_purpose=req.post_purpose,
-                promo_type=req.promo_type,
-                distribution_mode=req.distribution_mode
-            )
+                result = await orchestrator.execute_blog_workflow(
+                    account_id=account_id,
+                    keyword=req.target_keyword or "테스트",
+                    publish_mode=req.publish_mode,
+                    schedule_date=req.schedule_date,
+                    schedule_time=req.schedule_time,
+                    ai_provider=req.ai_provider,
+                    reference_data=req.reference_data,
+                    post_purpose=req.post_purpose,
+                    promo_type=req.promo_type,
+                    distribution_mode=req.distribution_mode
+                )
             if result.get("success"):
                 log("✅ 블로그 포스팅이 성공적으로 완료되었습니다!")
             else:

@@ -151,7 +151,7 @@ def min_max_norm(x, min_val, max_val):
 async def fetch_target_rank_via_api(keyword: str, store_name: str, product_name: str, mid: str):
     client_id = os.environ.get("NAVER_CLIENT_ID")
     client_secret = os.environ.get("NAVER_CLIENT_SECRET")
-    if not client_id or not client_secret: return 0, None
+    if not client_id or not client_secret: return 0, None, []
     headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     
     target_item = None
