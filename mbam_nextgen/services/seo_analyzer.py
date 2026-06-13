@@ -282,7 +282,7 @@ class SeoAnalyzer:
             if res.status_code == 200:
                 data = res.json()
                 if "items" in data and len(data["items"]) > 0:
-                    return [item[0] for item in data["items"][0][:10]] # 최대 10개
+                    return [item[0] for item in data["items"][0][:10] if item] # 최대 10개 (빈 항목 IndexError 방지)
         except Exception as e:
             print(f"[SEO] 연관 검색어 추출 실패: {e}")
         return []
@@ -311,13 +311,14 @@ class SeoAnalyzer:
             hash = hmac.new(secret.encode('utf-8'), message.encode('utf-8'), hashlib.sha256)
             return base64.b64encode(hash.digest()).decode('utf-8')
 
-        timestamp = str(int(time.time() * 1000))
         method = "GET"
         uri = "/keywordstool"
         import asyncio
-        
+
         async def fetch_chunk(chunk):
             kw_param = ",".join([k.replace(" ", "") for k in chunk])
+            # 타임스탬프/서명은 요청마다 생성 (오래된 타임스탬프 서명 거부 방지)
+            timestamp = str(int(time.time() * 1000))
             signature = generate_signature(timestamp, method, uri, secret_key)
             headers = {
                 "X-Timestamp": timestamp,
@@ -334,7 +335,10 @@ class SeoAnalyzer:
                     for item in data.get("keywordList", []):
                         def clean_count(c):
                             if isinstance(c, str) and '<' in c: return 10
-                            return int(c) if c else 0
+                            try:
+                                return int(str(c).replace(',', '')) if c else 0
+                            except (ValueError, TypeError):
+                                return 0
                         pc = clean_count(item.get("monthlyPcQcCnt"))
                         mob = clean_count(item.get("monthlyMobileQcCnt"))
                         chunk_results.append({
@@ -705,11 +709,12 @@ class SeoAnalyzer:
         # 분석은 상위 5개 데이터만 사용 (비용 및 노이즈 방지)
         top_5_metrics = metrics[:5]
         
-        avg_char = sum(m['char_count'] for m in top_5_metrics) // len(top_5_metrics) if top_5_metrics else 0
-        avg_img = sum(m['img_count'] for m in top_5_metrics) // len(top_5_metrics) if top_5_metrics else 0
+        avg_char = sum(m.get('char_count', 0) for m in top_5_metrics) // len(top_5_metrics) if top_5_metrics else 0
+        avg_img = sum(m.get('img_count', 0) for m in top_5_metrics) // len(top_5_metrics) if top_5_metrics else 0
         
         inf_count = sum(1 for m in top_5_metrics if m.get('type') == '인플루언서')
-        pop_count = sum(1 for m in top_5_metrics if m.get('type') == '인기글')
+        # 실제 type 값은 '인기카페'/'인기블로그' → 존재하지 않는 '인기글' 대신 '인기' 포함으로 집계
+        pop_count = sum(1 for m in top_5_metrics if '인기' in (m.get('type') or ''))
         
         # 난이도 계산 로직
         difficulty_score = (inf_count * 15) + (pop_count * 10)
@@ -720,7 +725,7 @@ class SeoAnalyzer:
         keyword_str = ", ".join([f"{k['keyword']}({k['count']}회)" for k in top_keywords[:10]])
         
         # 선택된 포스팅 정보 구성
-        blog_list_str = "\n".join([f"- {m['title']} (분류: {m['type']}, 글자수: {m['char_count']}자, 이미지: {m['img_count']}장)" for m in metrics])
+        blog_list_str = "\n".join([f"- {m.get('title','')} (분류: {m.get('type','')}, 글자수: {m.get('char_count',0)}자, 이미지: {m.get('img_count',0)}장)" for m in metrics])
         
         prompt = f"""
         당신은 SEO 마케팅 전문가입니다. 검색어 "{keyword}"에 대해 사용자가 직접 선택한 {len(metrics)}개의 블로그를 분석한 결과입니다.
