@@ -414,10 +414,3 @@ if __name__ == "__main__":
                 
         except Exception as e:
             print(json.dumps({"error": str(e)}))
-            
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) >= 4 and sys.argv[1] == "search":
-        search_keyword_ranking(sys.argv[2], int(sys.argv[3]))
-    elif len(sys.argv) >= 3 and sys.argv[1] == "detail":
-        fetch_place_by_mid(sys.argv[2])
