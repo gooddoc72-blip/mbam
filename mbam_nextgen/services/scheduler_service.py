@@ -191,17 +191,15 @@ class SchedulerService:
             from mbam_nextgen.orchestrator import WorkflowOrchestrator
             orchestrator = WorkflowOrchestrator()
             
-            # TODO: We can store naver_pw encrypted, here we assume it's in DB or mock
-            import os
-            os.environ["NAVER_PW"] = acc.naver_pw # Temporarily pass password via env if needed
-            
+            # 비밀번호는 전역 os.environ 대신 인자로 직접 전달 (동시 작업 간 비밀번호 레이스 방지)
             await orchestrator.execute_cafe_workflow(
                 account_id=acc.naver_id,
                 cafe_id=cafe.cafe_url,
                 board_name=cafe.board_name,
                 keyword="소통", # General keyword for nurturing
                 auto_submit=True,
-                action_type="comment"
+                action_type="comment",
+                naver_pw=acc.naver_pw
             )
         except Exception as e:
             logger.error(f"Cafe nurture job failed: {e}")

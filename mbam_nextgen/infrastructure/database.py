@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from contextlib import contextmanager
 from datetime import datetime
 
 class DatabaseManager:
@@ -12,10 +13,20 @@ class DatabaseManager:
         self.db_path = db_path
         self._init_db()
         
+    @contextmanager
     def _get_connection(self):
+        # sqlite3의 'with conn'은 commit/rollback만 하고 close는 안 함 → 커넥션/파일핸들 누수.
+        # 여기서 commit·rollback·close를 모두 보장한다. (호출부의 'with ... as conn'은 그대로 동작)
         conn = sqlite3.connect(self.db_path, timeout=15.0, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL;")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
         
     def _init_db(self):
         """테이블이 없으면 생성합니다."""

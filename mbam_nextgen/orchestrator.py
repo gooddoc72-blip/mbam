@@ -506,7 +506,8 @@ class WorkflowOrchestrator:
         action_type: str = "post",
         content: str = None,
         reference_data: dict = None,
-        proxy: str = None
+        proxy: str = None,
+        naver_pw: str = None
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -534,7 +535,7 @@ class WorkflowOrchestrator:
                 page = await context.new_page()
                 
                 if not has_session:
-                    pw = os.getenv("NAVER_PW", "")
+                    pw = naver_pw or os.getenv("NAVER_PW", "")
                     await self.authenticator.login_with_bypass(page, account_id, pw)
                     await self.session_manager.save_session(context, account_id)
                 
