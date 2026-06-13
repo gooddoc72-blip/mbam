@@ -9,7 +9,12 @@ from passlib.context import CryptContext
 from dotenv import load_dotenv
 load_dotenv()
 
-SECRET_KEY = os.environ.get("JWT_SECRET") or os.environ.get("JWT_SECRET_KEY", "mbam_super_secret_dev_key")
+SECRET_KEY = os.environ.get("JWT_SECRET") or os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET(또는 JWT_SECRET_KEY) 환경변수가 설정되지 않았습니다. "
+        "보안상 기본 시크릿으로는 토큰을 발급할 수 없습니다. .env를 확인하세요."
+    )
 ALGORITHM = "HS256"
 
 security = HTTPBearer()
@@ -19,6 +24,9 @@ def get_password_hash(password: str):
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str):
+    # 소셜 로그인 계정은 password가 None일 수 있음 → 크래시 대신 인증 실패 처리
+    if not plain_password or not hashed_password:
+        return False
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

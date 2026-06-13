@@ -21,7 +21,7 @@ function GradeBadge({ grade, score, title }) {
       }}
     >
       <span style={{ fontSize: '0.9rem' }}>{grade}</span>
-      <span style={{ opacity: 0.8 }}>{Number(score).toFixed(0)}</span>
+      <span style={{ opacity: 0.8 }}>{Number(score || 0).toFixed(0)}</span>
     </span>
   );
 }

@@ -56,7 +56,8 @@ app.include_router(auth_router.router, prefix="/api/auth", tags=["Authentication
 
 # 라우터 연결 (인증 필수 라우터)
 app.include_router(seo.router, prefix="/api/seo", tags=["SEO Analysis"], dependencies=[Depends(get_current_user)])
-app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(get_current_user)])
+# 설정 라우터는 API 키/시크릿을 읽고 .env를 덮어쓰므로 관리자 전용
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(admin_router.verify_admin)])
 app.include_router(rank.router, prefix="/api/seo/rank", tags=["Ranking Tracker"], dependencies=[Depends(get_current_user)])
 app.include_router(content.router, prefix="/api/content", tags=["Content Collect"], dependencies=[Depends(get_current_user)])
 app.include_router(place.router, prefix="/api/place", tags=["Place SEO"], dependencies=[Depends(get_current_user)])

@@ -37,7 +37,8 @@ class PlaceReviewService:
                     raise Exception(f"Failed to fetch page, status: {res.status_code}")
                 
                 html = res.text
-                match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});', html, re.DOTALL)
+                # 단순 ({.*?}); 는 첫 '};'에서 잘려 JSON이 깨짐 → naver_crawler와 동일하게 ';\s*window.'로 종결 앵커
+                match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});\s*window\.', html, re.DOTALL)
                 if not match:
                     raise Exception("Apollo State not found in HTML (Bot detection or DOM change)")
                 
