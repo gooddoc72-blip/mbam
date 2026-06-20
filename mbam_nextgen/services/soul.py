@@ -207,7 +207,11 @@ class SoulRewriter:
             model="gemini-2.5-flash",
             contents=prompt,
         )
-        return response.text
+        text = response.text
+        if not text:
+            # 안전필터 차단·빈 part 시 .text는 None → 호출자가 retry/폴백하도록 raise
+            raise RuntimeError("Gemini가 빈 응답을 반환했습니다 (안전필터 차단 또는 빈 결과).")
+        return text
 
     async def _call_claude_client(self, client, prompt: str) -> str:
         try:

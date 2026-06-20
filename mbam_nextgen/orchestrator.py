@@ -1,9 +1,11 @@
 import asyncio
+import os
 import random
 import sys
 import os
 import glob
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
+from .core.stealth import StealthExecutor
 from .services.soul import SoulRewriter
 from .services.armor import ImageArmor
 from .services.blog_service import BlogService
@@ -551,7 +553,9 @@ class WorkflowOrchestrator:
         ai_provider: str = "claude",
         action_type: str = "post",
         content: str = None,
-        reference_data: dict = None
+        reference_data: dict = None,
+        proxy: str = None,
+        naver_pw: str = None
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)

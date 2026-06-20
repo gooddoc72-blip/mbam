@@ -434,7 +434,6 @@ export default function ShoppingRankDashboard() {
                       <tr>
                         <th style={{ padding: "0.8rem 0.4rem" }}>조회 일자</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#3b82f6" }}>쇼핑 랭킹</th>
-                        <th style={{ padding: "0.8rem 0.4rem", color: "#ef4444" }}>판매가격</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#10b981" }}>구매수</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#f59e0b" }}>리뷰수</th>
                         <th style={{ padding: "0.8rem 0.4rem", color: "#8b5cf6" }}>찜수</th>
@@ -669,10 +668,9 @@ export default function ShoppingRankDashboard() {
                                 </div>
                               )}
                             </td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#ef4444", fontWeight: "bold" }}>{place.price ? place.price.toLocaleString() + '원' : '-'}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{(place.purchases || 0).toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{(place.reviews || 0).toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{(place.keeps || 0).toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{place.purchases.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{place.reviews.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{place.keeps.toLocaleString()}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#3b82f6" }}>{formatN(place.n1)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#10b981" }}>{formatN(place.n2)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#8b5cf6" }}>{formatN(place.n3)}</td>

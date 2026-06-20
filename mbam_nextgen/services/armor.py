@@ -13,8 +13,7 @@ class ImageArmor:
     
     def __init__(self, output_dir: str = "mbam_nextgen/temp_images"):
         self.output_dir = output_dir
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
     def _get_fake_exif(self):
         """최신 스마트폰 기기 정보를 담은 가짜 EXIF 데이터를 생성합니다."""

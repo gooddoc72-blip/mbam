@@ -22,6 +22,8 @@ export const fetchWithAuth = async (url, options = {}) => {
         window.location.href = "/login";
       }
     }
+    // 리다이렉트로 끝내고, 호출부가 빈/HTML 401 body를 res.json()하다 터지지 않도록 중단
+    throw new Error("UNAUTHORIZED");
   }
   return response;
 };

@@ -69,9 +69,7 @@ export default function ShoppingKeyword() {
                                 <h4 style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#334155', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                     <Tag size={16} /> 클린 토큰 풀 (총 {(result.valid_tokens_pool || []).length}개)
                                 </h4>
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
-                                    네이버 상위 10위 상품들의 핵심 키워드와 조회수 기반 롱테일 키워드가 병합된 토큰 풀입니다.
-                                </p>
+                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>어뷰징 필터링 및 형태소 분석, 중복 제거가 완료된 단어들의 모음입니다. 이 풀(Pool)의 단어들이 조합기에 사용됩니다.</p>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     {(result.valid_tokens_pool || []).map((token, idx) => (
                                         <span key={idx} style={{ background: '#e0f2fe', color: '#0284c7', padding: '0.3rem 0.8rem', borderRadius: '999px', fontSize: '0.9rem', fontWeight: '500' }}>

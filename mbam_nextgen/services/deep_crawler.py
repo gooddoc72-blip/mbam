@@ -4,6 +4,7 @@ import sqlite3
 import os
 import json
 import re
+from datetime import datetime
 
 def get_db_path():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
@@ -151,9 +152,9 @@ def run_deep_crawl_for_keyword(keyword: str, limit: int = 30):
     """
     백그라운드에서 키워드별 상위 업체 뱃지/반응도 데이터를 심층 수집하여 DB에 캐시를 덮어씁니다.
     """
-    print(f"\\n{'='*50}")
+    print(f"\n{'='*50}")
     print(f"[Deep Crawler Track 2] '{keyword}' 분석 시작")
-    print(f"{'='*50}\\n")
+    print(f"{'='*50}\n")
     
     # 1. Playwright 크롤링 실행
     try:
@@ -171,7 +172,7 @@ def run_deep_crawl_for_keyword(keyword: str, limit: int = 30):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
-    today_str = asyncio.run(asyncio.sleep(0)) or __import__('datetime').datetime.now().strftime("%Y-%m-%d")
+    today_str = datetime.now().strftime("%Y-%m-%d")
     
     try:
         c.execute("SELECT id, snapshot_json FROM place_rank_history WHERE keyword=? AND date=? ORDER BY id DESC LIMIT 1", (keyword, today_str))

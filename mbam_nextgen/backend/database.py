@@ -155,7 +155,6 @@ class ShoppingHistory(Base):
     blog_reviews = Column(Integer, default=0) # 안쓰지만 통일을 위해 0
     saves = Column(Integer, default=0) # 찜수
     purchases = Column(Integer, default=0) # 구매수
-    price = Column(Integer, default=0) # 판매가격
     n1 = Column(Integer, default=0)
     n2 = Column(Integer, default=0)
     n3 = Column(Integer, default=0)

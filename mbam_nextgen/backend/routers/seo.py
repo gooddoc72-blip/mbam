@@ -84,6 +84,8 @@ async def analyze_keyword_endpoint(request: AnalyzeRequest, db: Session = Depend
             db.rollback()
             
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(traceback.format_exc())
@@ -115,6 +117,8 @@ async def analyze_top3_seo(request: KeywordRequest, current_user: dict = Depends
         increment_quota(current_user["sub"], current_user.get("role", "advertiser"), db)
 
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -128,6 +132,8 @@ async def search_keyword_endpoint(keyword: str):
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print("SEARCH ERROR:", traceback.format_exc())

@@ -163,7 +163,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
 
     try:
         orchestrator = WorkflowOrchestrator()
-        
+        account_id = req.naver_id if req.naver_id else "unknown_account"
+
         if req.target_type == "blog":
             if req.accounts and len(req.accounts) > 0:
                 log(f"[다중 계정 블로그] 워크플로우를 시작합니다. (계정 수: {len(req.accounts)})")
@@ -186,7 +187,6 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     log_callback=log
                 )
             else:
-                account_id = req.naver_id if req.naver_id else "unknown_account"
                 log(f"[{req.target_type}] 단일 계정 워크플로우를 시작합니다...")
                 result = await orchestrator.execute_blog_workflow(
                     account_id=account_id,

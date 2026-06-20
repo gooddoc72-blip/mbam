@@ -11,8 +11,7 @@ class CardNewsGenerator:
     def __init__(self, font_path: str = "C:/Windows/Fonts/malgun.ttf"):
         self.font_path = font_path
         self.output_dir = "mbam_nextgen/generated_images"
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
             
         # 다양한 트렌디한 그라데이션 및 단색 배경 팔레트
         self.bg_colors = [

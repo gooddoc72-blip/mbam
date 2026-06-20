@@ -69,12 +69,7 @@ async def run_communication_task(task_id: str, req: CommunicationRequest):
 @router.post("/")
 async def trigger_communication(req: CommunicationRequest, background_tasks: BackgroundTasks):
     import uuid
-    import random
-    # Hack for random used in sleep
-    global random
-    import random as rnd
-    random = rnd
-    
+
     if req.limit > 10:
         req.limit = 10 # 어뷰징 방지 하드 리밋
         

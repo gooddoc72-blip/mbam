@@ -21,6 +21,9 @@ def get_password_hash(password: str):
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str):
+    # 소셜 로그인 계정은 password가 None일 수 있음 → 크래시 대신 인증 실패 처리
+    if not plain_password or not hashed_password:
+        return False
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

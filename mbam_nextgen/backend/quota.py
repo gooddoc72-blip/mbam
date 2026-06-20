@@ -28,8 +28,9 @@ def check_quota(current_user: dict = Depends(get_current_user), db: Session = De
     if not user:
         raise HTTPException(status_code=401, detail="사용자 정보를 찾을 수 없습니다.")
         
-    # 2. 횟수 제한 체크
-    if user.usage_count >= user.max_usage:
+    # 2. 횟수 제한 체크 (None 값으로 인한 TypeError 방지, max_usage None은 무제한 취급)
+    usage = user.usage_count or 0
+    if user.max_usage is not None and usage >= user.max_usage:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"사용 가능한 횟수({user.max_usage}회)를 모두 소진하였습니다. 플랜을 업그레이드 해주세요."

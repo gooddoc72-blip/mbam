@@ -21,19 +21,20 @@ function GradeBadge({ grade, score, title }) {
       }}
     >
       <span style={{ fontSize: '0.9rem' }}>{grade}</span>
-      <span style={{ opacity: 0.8 }}>{Number(score).toFixed(0)}</span>
+      <span style={{ opacity: 0.8 }}>{Number(score || 0).toFixed(0)}</span>
     </span>
   );
 }
 
 export default function SeoResults({ data }) {
-  if (!data) return null;
-
-  const { keyword, metrics, top_keywords, formula, smart_blocks } = data;
   const [expandedRows, setExpandedRows] = useState({});
   const [selectedBlogs, setSelectedBlogs] = useState([]);
-  
-  const cafePopularBlocks = smart_blocks?.blocks?.filter(b => b.block_title.includes("카페")) || [];
+
+  if (!data) return null;
+
+  const { keyword, metrics = [], top_keywords = [], formula, smart_blocks } = data;
+
+  const cafePopularBlocks = smart_blocks?.blocks?.filter(b => b.block_title?.includes("카페")) || [];
   
   const toggleRow = (idx) => {
     setExpandedRows(prev => ({ ...prev, [idx]: !prev[idx] }));

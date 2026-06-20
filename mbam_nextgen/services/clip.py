@@ -10,8 +10,7 @@ class ClipGenerator:
     
     def __init__(self, output_dir: str = "mbam_nextgen/temp_clips"):
         self.output_dir = output_dir
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
     def generate_clip(self, image_paths: List[str], text_segments: List[str], output_name: str) -> str:
         """
