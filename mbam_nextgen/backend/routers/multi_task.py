@@ -1,7 +1,8 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
+import asyncio
 
 from mbam_nextgen.orchestrator import WorkflowOrchestrator, task_logger
 
@@ -25,6 +26,7 @@ class MultiTaskRequest(BaseModel):
     global_config: Dict[str, Any] = {}
 
 task_status_store = {}
+active_multi_tasks = {}
 
 async def run_multi_workflow(task_id: str, req: MultiTaskRequest):
     # Store statuses for each account as well, since the frontend wants to monitor each
@@ -128,14 +130,24 @@ async def run_multi_workflow(task_id: str, req: MultiTaskRequest):
         task_status_store[task_id]["status"] = "failed"
 
 @router.post("/")
-async def trigger_multi_task(req: MultiTaskRequest, background_tasks: BackgroundTasks):
+async def trigger_multi_task(req: MultiTaskRequest):
     task_id = str(uuid.uuid4())
-    background_tasks.add_task(run_multi_workflow, task_id, req)
+    task = asyncio.create_task(run_multi_workflow(task_id, req))
+    active_multi_tasks[task_id] = task
     return {
         "success": True, 
         "message": "멀티 작업이 백그라운드에서 시작되었습니다.", 
         "task_id": task_id
     }
+
+@router.post("/cancel/{task_id}")
+async def cancel_task(task_id: str):
+    if task_id in active_multi_tasks:
+        active_multi_tasks[task_id].cancel()
+        task_status_store[task_id]["status"] = "failed"
+        task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
+        return {"success": True, "message": "작업이 중단되었습니다."}
+    return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):

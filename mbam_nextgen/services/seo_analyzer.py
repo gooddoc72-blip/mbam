@@ -839,7 +839,7 @@ class SeoAnalyzer:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     html = await resp.text()
-                    match = re.search(r'window\.__NEXT_DATA__\s*=\s*(\{.*?\});', html)
+                    match = re.search(r'window\.__NEXT_DATA__\s*=\s*(\{.*\});\s*(?:window\.|</script>)', html, re.DOTALL)
                     if match:
                         data = json.loads(match.group(1))
                         user_info = data['props']['pageProps']['initialState']['user']['userInfo']
@@ -1322,39 +1322,7 @@ class SeoAnalyzer:
                 except Exception:
                     pass
 
-    async def calculate_batch_stats(self, urls: list, keyword: str) -> dict:
-        """여러 URL의 포스팅 데이터를 분석하여 통계 및 공통 단어 추출"""
-        all_results = []
-        all_words = {}
-        
-        for url in urls:
-            res = await self.analyze_specific_url(url)
-            if "error" not in res:
-                all_results.append(res)
-                # 단어 빈도 합산
-                for word, count in res.get("keywords", []):
-                    all_words[word] = all_words.get(word, 0) + count
-        
-        if not all_results:
-            return {"error": "분석 가능한 데이터가 없습니다."}
-            
-        # 통계 계산
-        avg_img = sum(r['img_count'] for r in all_results) / len(all_results)
-        avg_char = sum(r['char_count'] for r in all_results) / len(all_results)
-        
-        # 공통 사용 단어 TOP 30 (2개 이상의 블로그에서 등장한 단어 우선)
-        # 여기서는 단순 빈도순으로 정렬
-        sorted_words = sorted(all_words.items(), key=lambda x: x[1], reverse=True)[:30]
-        
-        return {
-            "individual": all_results,
-            "stats": {
-                "avg_img": round(avg_img, 1),
-                "avg_char": round(avg_char, 1),
-                "total_count": len(all_results)
-            },
-            "top_words": sorted_words
-        }
+
 
     async def fetch_latest_posts(self, blog_id: str, limit: int = 5) -> list:
         """블로그 아이디로 최신 포스팅 목록(URL, 제목) 가져오기"""

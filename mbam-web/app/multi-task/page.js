@@ -13,7 +13,7 @@ function TaskMonitorCard({ taskId }) {
     if (taskId && taskStatus !== "completed" && taskStatus !== "failed") {
       intervalId = setInterval(async () => {
         try {
-          const res = await fetchWithAuth(`http://127.0.0.1:8080/api/multi_task/status/${taskId}`);
+          const res = await fetchWithAuth(`/api/multi_task/status/${taskId}`);
           if (res.ok) {
             const data = await res.json();
             setStatusLogs(data.logs || []);
@@ -61,6 +61,22 @@ export default function MultiTaskPage() {
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const savedAccounts = localStorage.getItem("mbam_saved_accounts");
+    if (savedAccounts) {
+      try {
+        setAccounts(JSON.parse(savedAccounts));
+      } catch (e) {
+        console.error("Failed to parse saved accounts", e);
+      }
+    }
+  }, []);
+
+  const saveAccounts = () => {
+    localStorage.setItem("mbam_saved_accounts", JSON.stringify(accounts));
+    alert("입력하신 계정 정보가 브라우저에 안전하게 저장되었습니다.");
+  };
+
   const handleAddAccount = () => {
     setAccounts([...accounts, { id: "", pw: "" }]);
   };
@@ -101,7 +117,7 @@ export default function MultiTaskPage() {
         }
       };
       
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/multi_task/", {
+      const res = await fetchWithAuth("/api/multi_task/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -133,7 +149,10 @@ export default function MultiTaskPage() {
         <div style={{ flex: 1, background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
             <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>계정 리스트</h2>
-            <button onClick={handleAddAccount} style={{ padding: "0.4rem 0.8rem", background: "#f1f5f9", border: "1px solid #cbd5e1", cursor: "pointer", fontSize: "0.9rem" }}>+ 계정 추가</button>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button onClick={saveAccounts} style={{ padding: "0.4rem 0.8rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.9rem" }}>💾 저장</button>
+              <button onClick={handleAddAccount} style={{ padding: "0.4rem 0.8rem", background: "#f1f5f9", border: "1px solid #cbd5e1", cursor: "pointer", fontSize: "0.9rem" }}>+ 추가</button>
+            </div>
           </div>
           
           <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>

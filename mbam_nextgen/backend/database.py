@@ -97,6 +97,9 @@ class CafeSchedule(Base):
     account_id = Column(String, ForeignKey("naver_accounts.id", ondelete="CASCADE"))
     cafe_id = Column(String, ForeignKey("joined_cafes.id", ondelete="CASCADE"))
     schedule_time = Column(String) # e.g. "14:00"
+    content_category = Column(String, nullable=True) # e.g. "소상공인 24"
+    post_count_per_day = Column(Integer, default=1) # 1일 작성 횟수
+    post_qty_per_time = Column(Integer, default=1) # 1회당 작성 수량
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -191,6 +194,33 @@ class BlogspotKeywordTracker(Base):
     keyword = Column(String, index=True)
     current_rank = Column(Integer, default=0)
     last_checked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CoupangTrackedItem(Base):
+    __tablename__ = "coupang_tracked_items"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    item_id = Column(String, index=True) # 쿠팡 상품번호 (productId)
+    keyword = Column(String, index=True)
+    name = Column(String)
+    latest_places = Column(Text, nullable=True)
+    latest_report = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CoupangHistory(Base):
+    __tablename__ = "coupang_history"
+    
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tracked_id = Column(String, ForeignKey("coupang_tracked_items.id", ondelete="CASCADE"))
+    date_str = Column(String, index=True) # YYYY-MM-DD
+    rank = Column(Integer)
+    page = Column(Integer)
+    reviews = Column(Integer, default=0) # 상품평 수
+    rating = Column(String, default="0.0") # 별점
+    price = Column(Integer, default=0) # 판매가격
+    is_rocket = Column(Integer, default=0) # 로켓배송 여부 (1: True, 0: False)
+    n1 = Column(Integer, default=0) # 검색 적합도 임의 배점
+    n5 = Column(Integer, default=0) # 총점 임의 배점
     created_at = Column(DateTime, default=datetime.utcnow)
 
 def get_db():

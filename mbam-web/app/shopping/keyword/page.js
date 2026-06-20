@@ -60,20 +60,20 @@ export default function ShoppingKeyword() {
                                 <h4 style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#334155' }}>데이터 수집 현황</h4>
                                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#475569', fontSize: '0.95rem' }}>
                                     <li style={{ padding: '0.5rem 0', borderBottom: '1px solid #f1f5f9' }}>시드 키워드: <strong style={{ color: '#0f172a' }}>{result.seed_keyword}</strong></li>
-                                    <li style={{ padding: '0.5rem 0', borderBottom: '1px solid #f1f5f9' }}>분리된 시드 토큰: <strong>{result.seed_tokens.join(', ')}</strong></li>
+                                    <li style={{ padding: '0.5rem 0', borderBottom: '1px solid #f1f5f9' }}>분리된 시드 토큰: <strong>{(result.seed_tokens || []).join(', ')}</strong></li>
                                     <li style={{ padding: '0.5rem 0' }}>수집된 연관 키워드: <strong>{result.related_keywords_count}개</strong></li>
                                 </ul>
                             </div>
                             
                             <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                                 <h4 style={{ fontWeight: 'bold', marginBottom: '0.5rem', color: '#334155', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                    <Tag size={16} /> 클린 토큰 풀 (총 {result.valid_tokens_pool.length}개)
+                                    <Tag size={16} /> 클린 토큰 풀 (총 {(result.valid_tokens_pool || []).length}개)
                                 </h4>
                                 <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
                                     네이버 상위 10위 상품들의 핵심 키워드와 조회수 기반 롱테일 키워드가 병합된 토큰 풀입니다.
                                 </p>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                    {result.valid_tokens_pool.map((token, idx) => (
+                                    {(result.valid_tokens_pool || []).map((token, idx) => (
                                         <span key={idx} style={{ background: '#e0f2fe', color: '#0284c7', padding: '0.3rem 0.8rem', borderRadius: '999px', fontSize: '0.9rem', fontWeight: '500' }}>
                                             {token}
                                         </span>
@@ -105,8 +105,8 @@ export default function ShoppingKeyword() {
                                             })
                                         });
                                         const data = await res.json();
-                                        if(data.assembled_title) {
-                                            document.getElementById('assembledResult').innerText = data.assembled_title;
+                                        if(data.optimized_title) {
+                                            document.getElementById('assembledResult').innerText = data.optimized_title;
                                             document.getElementById('assembledLength').innerText = `총 ${data.length}자 (네이버 권장 50자 이내)`;
                                             document.getElementById('assembledLength').style.color = data.length > 50 ? 'red' : '#10b981';
                                         }

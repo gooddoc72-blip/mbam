@@ -36,7 +36,7 @@ function LoginContent() {
 
     try {
       const hwid = getBrowserHWID();
-      const res = await fetch("http://localhost:8000/api/auth/login", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -60,7 +60,7 @@ function LoginContent() {
   };
 
   const handleSocialLogin = (provider) => {
-    window.location.href = `http://localhost:8000/api/auth/login/${provider}`;
+    window.location.href = `/api/auth/login/${provider}`;
   };
 
   return (

@@ -51,7 +51,7 @@ export default function CommunicationPage() {
     if (taskId && taskStatus !== "completed" && taskStatus !== "failed") {
       intervalId = setInterval(async () => {
         try {
-          const res = await fetchWithAuth(`http://127.0.0.1:8080/api/communication/status/${taskId}`);
+          const res = await fetchWithAuth(`/api/communication/status/${taskId}`);
           if (res.ok) {
             const data = await res.json();
             setStatusLogs(data.logs || []);
@@ -102,7 +102,7 @@ export default function CommunicationPage() {
         comment_message: commentMessage
       };
 
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/communication/", {
+      const res = await fetchWithAuth("/api/communication/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

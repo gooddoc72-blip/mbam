@@ -17,20 +17,22 @@ try:
 except ImportError:
     kiwi = None
 
-SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송'}
+SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송', '무료', '배송', '포장', '용량', '박스', '주문', '사이즈'}
 
 def clean_and_tokenize(keyword: str) -> List[str]:
     """형태소 분리 및 필터링"""
     cleaned = re.sub(r'[!?,\[\]\(\)\{\}\<\>~*]', ' ', keyword)
     if not kiwi:
-        return [w for w in cleaned.split() if w not in SPAM_WORDS]
+        return [w for w in cleaned.split() if w not in SPAM_WORDS and len(w) > 1]
     
     tokens = kiwi.tokenize(cleaned)
     valid_tokens = []
     for t in tokens:
-        if t.tag.startswith('N') or t.tag == 'SL':
+        # 일반명사(NNG), 고유명사(NNP), 영어(SL)
+        if t.tag in ('NNG', 'NNP', 'SL'):
             word = t.form
-            if word not in SPAM_WORDS and not re.fullmatch(r'\d{4}', word):
+            # 1글자 단어(g, 개, x 등) 제거 및 스팸/숫자만 있는 단어 제거
+            if len(word) > 1 and word not in SPAM_WORDS and not re.fullmatch(r'\d+', word):
                 valid_tokens.append(word)
     return valid_tokens
 
@@ -76,14 +78,18 @@ async def fetch_search_ad_keywords(keyword: str) -> List[Dict[str, Any]]:
         "X-Signature": signature
     }
     
+    # Naver Ad API rejects spaces. Split by space to get individual words, then comma-separate them (max 5 hints)
+    words = list(dict.fromkeys(keyword.split()))[:5]
+    query_keyword = ",".join(words)
+    
     params = {
-        "hintKeywords": keyword,
+        "hintKeywords": query_keyword,
         "showDetail": "1"
     }
     
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get("https://api.naver.com/keywordstool", headers=headers, params=params, timeout=5.0)
+            resp = await client.get("https://api.naver.com/keywordstool", headers=headers, params=params, timeout=5.0, follow_redirects=True)
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get('keywordList', [])
@@ -104,19 +110,37 @@ async def analyze_seo_keyword(seed: str) -> Dict[str, Any]:
     filtered_tokens = [t for t in all_tokens if t not in seed_tokens]
     
     token_counts = Counter(filtered_tokens)
-    # Sort by frequency in top 10
-    top_10_tokens = [item[0] for item in token_counts.most_common(20)]
+    # 1. 넉넉하게 후보군 추출
+    raw_top_tokens = [item[0] for item in token_counts.most_common(100)]
     
     ad_keywords = await fetch_search_ad_keywords(seed)
     long_tail = []
     
+    top_10_tokens = raw_top_tokens[:20] # 기본값
+    
+    if ad_keywords:
+        ad_keywords_list = [k['relKeyword'] for k in ad_keywords]
+        
+        # 2. 연관검색어에 속해 있는 진짜 '검색 키워드'만 필터링 (g, kg, 개, ml 등 스팸/단위 제거)
+        valid_tokens = [t for t in raw_top_tokens if any(t in kw for kw in ad_keywords_list)]
+        
+        if valid_tokens:
+            top_10_tokens = valid_tokens[:20]
+
     if ad_keywords:
         # Sort by monthly search volume (PC + Mobile). '< 10' is returned as string by Naver, handle safely
         def parse_vol(v):
             if isinstance(v, str):
-                if v == '< 10': return 10
-                return int(v.replace(',', ''))
-            return v
+                if '<' in v:  # '< 10', '<10' 등
+                    return 10
+                try:
+                    return int(float(v.replace(',', '').strip()))
+                except (ValueError, TypeError):
+                    return 0
+            try:
+                return int(float(v))
+            except (ValueError, TypeError):
+                return 0
             
         for k in ad_keywords:
             vol = parse_vol(k.get('monthlyPcQcCnt', 0)) + parse_vol(k.get('monthlyMobileQcCnt', 0))
@@ -136,7 +160,7 @@ async def analyze_seo_keyword(seed: str) -> Dict[str, Any]:
         "seed_tokens": seed_tokens,
         "top_10_titles": titles,
         "top_10_tokens": top_10_tokens,
-        "long_tail_keywords": long_tail_tokens,
         "valid_tokens_pool": list(dict.fromkeys(top_10_tokens + long_tail_tokens)), # preserve order, remove duplicates
+        "related_keywords_count": len(ad_keywords) if ad_keywords else 0,
         "message": "분석 완료 (Top 10 기반)"
     }

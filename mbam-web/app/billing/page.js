@@ -11,7 +11,7 @@ export default function BillingPage() {
   useEffect(() => {
     Promise.all([
       fetchWithAuth('/api/auth/me').then(res => res.ok ? res.json() : null),
-      fetch('http://localhost:8000/api/admin/plans').then(res => res.ok ? res.json() : [])
+      fetch('/api/admin/plans').then(res => res.ok ? res.json() : [])
     ])
     .then(([userData, plansData]) => {
       setUserInfo(userData);

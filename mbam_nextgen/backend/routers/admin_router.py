@@ -7,17 +7,9 @@ import json
 import os
 
 from ..database import get_db, Advertiser, Agency, Distributor
-from ..auth import get_current_user
+from ..auth import get_current_user, verify_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
-
-def verify_admin(current_user: dict = Depends(get_current_user)):
-    if current_user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="관리자 권한이 필요합니다."
-        )
-    return current_user
 
 class QuotaUpdateRequest(BaseModel):
     plan_type: str

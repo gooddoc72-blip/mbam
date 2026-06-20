@@ -1,5 +1,6 @@
 import math
 import random
+import re
 
 class SeoCalculator:
     """
@@ -180,3 +181,136 @@ class SeoCalculator:
             advice = "C-Rank 점수가 높은 우수 블로거들의 질 좋은 포스팅 확산이 절대적으로 필요합니다."
             
         return f"1위 업체는 귀하의 매장보다 **{best_metric}** 지표에서 크게 앞서 1위를 차지했습니다. 1위를 탈환하려면 {advice}"
+
+    # =====================================================================
+    # [신규 엔진] 경쟁군 2-pass 군 정규화 기반 N1~N5 산출
+    #   - 고정 분모 정규화 대신 "같은 키워드 경쟁군" 내부 Min-Max 정규화
+    #   - rank 역주입 제거(순환 차단), N4는 곱셈 패널티
+    #   - 신규오픈 부스트는 시간감쇄 곱셈(현재 개업일 미수집 → 고정 배율)
+    #   - N5_eff(부스트/현 상태 반영) vs n5_organic(실력) 분리
+    #   설계: docs/place_nscore_design.md
+    # =====================================================================
+
+    def _save_bucket_mid(self, v):
+        """저장수는 네이버 미공개·버킷("12,000+","~100") → 숫자만 추출(대략 하한)."""
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return max(0, int(v))
+        digits = re.sub(r"[^\d]", "", str(v))
+        return int(digits) if digits else 0
+
+    def _mean_std(self, arr):
+        if not arr:
+            return (0.0, 0.0)
+        n = len(arr)
+        m = sum(arr) / n
+        var = sum((x - m) ** 2 for x in arr) / n
+        return (m, var ** 0.5)
+
+    def _new_open_boost(self, p):
+        """신규오픈 부스트 B(t). 개업일 미수집이라 고정 배율로 근사(추후 e^-λt로 교체)."""
+        if p.get("is_new"):
+            return 1.5
+        if p.get("has_revisit"):
+            return 1.15
+        return 1.0
+
+    def _calc_n4(self, p, rd_mean, rd_std, rkd_mean, rkd_std):
+        """
+        어뷰징 필터(곱셈, 0~1). 유입·저장이 미공개라 직접측정 불가 →
+        '순위는 비정상 급등(z_rank↑)인데 리뷰 증감은 평범/저조(z_rev↓)' 잔차로 역추적.
+        신규오픈은 면제(부스트로 동일 패턴이 정상).
+        """
+        if p.get("is_new"):
+            return 1.0
+        rank_delta = p.get("rank_delta", 0)   # +면 순위 상승(개선)
+        rev_delta = p.get("rev_delta", 0)
+        z_rank = (rank_delta - rkd_mean) / rkd_std if rkd_std > 1e-9 else 0.0
+        z_rev = (rev_delta - rd_mean) / rd_std if rd_std > 1e-9 else 0.0
+        residual = z_rank - z_rev              # 순위만 튄 정도
+        m = max(0.0, min(0.9, (residual - 1.5) / 3.0))  # residual>1.5부터 의심
+        return round(1.0 - m, 6)
+
+    def score_competitors(self, places: list, keyword: str) -> list:
+        """
+        경쟁군 전체(places)를 받아 군 내부 정규화로 N1~N5를 채워 반환한다.
+        입력 dict 필요 키: name, category, visitor_reviews, blog_reviews, saves,
+                           rev_delta, blog_delta, rank_delta, is_new, has_revisit
+        추가 키: n1, n2, n3, n4, n5(=eff), n5_organic
+        """
+        if not places:
+            return places
+
+        kw_tokens = [t for t in re.split(r"\s+", (keyword or "").strip()) if t]
+
+        def lg(x):
+            try:
+                return math.log1p(max(0.0, float(x)))
+            except (TypeError, ValueError):
+                return 0.0
+
+        rev_logs = [lg(p.get("visitor_reviews", 0)) for p in places]
+        blog_logs = [lg(p.get("blog_reviews", 0)) for p in places]
+        save_logs = [lg(self._save_bucket_mid(p.get("saves", 0))) for p in places]
+        revd_logs = [lg(max(0, p.get("rev_delta", 0))) for p in places]
+        blogd_logs = [lg(max(0, p.get("blog_delta", 0))) for p in places]
+
+        def mm(a):
+            return (min(a), max(a)) if a else (0.0, 0.0)
+
+        rev_lo, rev_hi = mm(rev_logs)
+        blog_lo, blog_hi = mm(blog_logs)
+        save_lo, save_hi = mm(save_logs)
+        revd_hi = max(revd_logs) if revd_logs else 0.0
+        blogd_hi = max(blogd_logs) if blogd_logs else 0.0
+
+        def nrm(v, lo, hi):
+            if hi - lo <= 1e-9:
+                return 0.5
+            return max(0.0, min(1.0, (v - lo) / (hi - lo)))
+
+        def nrm0(v, hi):  # 증감(0~hi) 정규화
+            if hi <= 1e-9:
+                return 0.0
+            return max(0.0, min(1.0, v / hi))
+
+        rd_mean, rd_std = self._mean_std([p.get("rev_delta", 0) for p in places])
+        rkd_mean, rkd_std = self._mean_std([p.get("rank_delta", 0) for p in places])
+
+        for i, p in enumerate(places):
+            # ── N1: 플레이스 정적 품질(키워드 적합도 중심) ──
+            name = p.get("name") or ""
+            cat = p.get("category") or ""
+            name_match = (sum(1 for t in kw_tokens if t in name) / len(kw_tokens)) if kw_tokens else 0.0
+            cat_match = 1.0 if any(t in cat for t in kw_tokens) else (0.5 if cat else 0.3)
+            info_quality = p.get("info_quality", 0.5)  # 소개글/사진/예약 미수집 → 중립
+            n1 = round(min(1.0, 0.45 * name_match + 0.30 * cat_match + 0.25 * info_quality), 6)
+
+            boost = self._new_open_boost(p)
+
+            # ── N2: 내부 인기(리뷰 누적+증감, 저장 약가중) ──
+            r_acc = nrm(rev_logs[i], rev_lo, rev_hi)
+            r_vel = nrm0(revd_logs[i], revd_hi)
+            s_acc = nrm(save_logs[i], save_lo, save_hi)
+            n2_org = round(min(1.0, 0.40 * r_acc + 0.35 * r_vel + 0.25 * s_acc), 6)
+            n2 = round(min(1.0, 0.40 * min(1.0, r_acc * boost) + 0.35 * min(1.0, r_vel * boost) + 0.25 * s_acc), 6)
+
+            # ── N3: 외부 확산(블로그) ──
+            b_acc = nrm(blog_logs[i], blog_lo, blog_hi)
+            b_vel = nrm0(blogd_logs[i], blogd_hi)
+            c_rank = p.get("c_rank", 0.5)  # C-Rank 미수집 → 중립
+            n3_org = round(min(1.0, 0.45 * b_acc + 0.25 * b_vel + 0.30 * c_rank), 6)
+            n3 = round(min(1.0, 0.45 * min(1.0, b_acc * boost) + 0.25 * min(1.0, b_vel * boost) + 0.30 * c_rank), 6)
+
+            # ── N4: 어뷰징 곱셈 필터 ──
+            n4 = self._calc_n4(p, rd_mean, rd_std, rkd_mean, rkd_std)
+
+            # ── N5: 종합 (rank 미사용) ──
+            n5_eff = round(min(1.0, (0.30 * n1 + 0.40 * n2 + 0.30 * n3) * n4), 6)
+            n5_org = round(min(1.0, 0.30 * n1 + 0.40 * n2_org + 0.30 * n3_org), 6)  # 부스트/조작 제거
+
+            p["n1"], p["n2"], p["n3"], p["n4"], p["n5"] = n1, n2, n3, n4, n5_eff
+            p["n5_organic"] = n5_org
+
+        return places

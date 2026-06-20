@@ -112,7 +112,7 @@ async def analyze_top3_seo(request: KeywordRequest, current_user: dict = Depends
         )
         
         # 쿼터 차감
-        increment_quota(current_user["sub"], db)
+        increment_quota(current_user["sub"], current_user.get("role", "advertiser"), db)
 
         return result
     except Exception as e:

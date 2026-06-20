@@ -16,7 +16,22 @@ export default function AdminDashboard() {
   const [keys, setKeys] = useState({ customer_id: "", access_license: "", secret_key: "" });
   const [devKeys, setDevKeys] = useState({ client_id: "", client_secret: "" });
   const [aiKeys, setAiKeys] = useState({ claude_key: "", gemini_key: "", openai_key: "" });
-  const [blogPrompts, setBlogPrompts] = useState({ claude_prompt: "", gemini_prompt: "" });
+  const [blogPrompts, setBlogPrompts] = useState({ 
+    product: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    hospital: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    app: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    place: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    service: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
+  });
+  const [activePromptCategory, setActivePromptCategory] = useState("product");
+
+  const promptCategories = [
+    { id: "product", name: "상품후기" },
+    { id: "hospital", name: "병원블로그 운영" },
+    { id: "app", name: "앱 및 서비스 홍보" },
+    { id: "place", name: "맛집 후기 및 리뷰블로그" },
+    { id: "service", name: "서비스업종 리뷰 및 후기 블로그" }
+  ];
   const [apiSaving, setApiSaving] = useState(false);
   const [apiMessage, setApiMessage] = useState(null);
 
@@ -33,7 +48,7 @@ export default function AdminDashboard() {
         return;
       }
       
-      const resUsers = await fetch("http://localhost:8000/api/admin/users", {
+      const resUsers = await fetch("/api/admin/users", {
         headers: { "Authorization": `Bearer ${token}` }
       });
       
@@ -47,7 +62,7 @@ export default function AdminDashboard() {
       const dataUsers = await resUsers.json();
       setUsers(dataUsers);
 
-      const resPlans = await fetch("http://localhost:8000/api/admin/plans");
+      const resPlans = await fetch("/api/admin/plans");
       if (resPlans.ok) {
         const dataPlans = await resPlans.json();
         setPlans(dataPlans);
@@ -55,10 +70,10 @@ export default function AdminDashboard() {
       
       // Fetch API Keys
       const [resNaver, resDev, resAi, resPrompts] = await Promise.all([
-        fetch("http://localhost:8000/api/settings/naver-api", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:8000/api/settings/naver-dev-api", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:8000/api/settings/ai-api", { headers: { "Authorization": `Bearer ${token}` } }),
-        fetch("http://localhost:8000/api/settings/blog-prompts", { headers: { "Authorization": `Bearer ${token}` } })
+        fetch("/api/settings/naver-api", { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch("/api/settings/naver-dev-api", { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch("/api/settings/ai-api", { headers: { "Authorization": `Bearer ${token}` } }),
+        fetch("/api/settings/blog-prompts", { headers: { "Authorization": `Bearer ${token}` } })
       ]);
       
       if (resNaver.ok) {
@@ -75,7 +90,7 @@ export default function AdminDashboard() {
       }
       if (resPrompts.ok) {
           const d = await resPrompts.json();
-          setBlogPrompts({ claude_prompt: d.claude_prompt || "", gemini_prompt: d.gemini_prompt || "" });
+          setBlogPrompts(d);
       }
     } catch (err) {
       setError(err.message);
@@ -92,10 +107,10 @@ export default function AdminDashboard() {
         const headers = { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
         
         const [res1, resDev, res2, resPrompts] = await Promise.all([
-            fetch("http://localhost:8000/api/settings/naver-api", { method: "POST", headers, body: JSON.stringify(keys) }),
-            fetch("http://localhost:8000/api/settings/naver-dev-api", { method: "POST", headers, body: JSON.stringify(devKeys) }),
-            fetch("http://localhost:8000/api/settings/ai-api", { method: "POST", headers, body: JSON.stringify(aiKeys) }),
-            fetch("http://localhost:8000/api/settings/blog-prompts", { method: "POST", headers, body: JSON.stringify(blogPrompts) })
+            fetch("/api/settings/naver-api", { method: "POST", headers, body: JSON.stringify(keys) }),
+            fetch("/api/settings/naver-dev-api", { method: "POST", headers, body: JSON.stringify(devKeys) }),
+            fetch("/api/settings/ai-api", { method: "POST", headers, body: JSON.stringify(aiKeys) }),
+            fetch("/api/settings/blog-prompts", { method: "POST", headers, body: JSON.stringify(blogPrompts) })
         ]);
         
         if (res1.ok && resDev.ok && res2.ok && resPrompts.ok) {
@@ -113,7 +128,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     try {
       const token = localStorage.getItem("mbam_token");
-      const res = await fetch(`http://localhost:8000/api/admin/users/${editingUser.id}/quota`, {
+      const res = await fetch(`/api/admin/users/${editingUser.id}/quota`, {
         method: "PUT",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -141,7 +156,7 @@ export default function AdminDashboard() {
     const handleUpdatePlans = async () => {
     try {
       const token = localStorage.getItem("mbam_token");
-      const res = await fetch(`http://localhost:8000/api/admin/plans`, {
+      const res = await fetch(`/api/admin/plans`, {
         method: "PUT",
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -163,7 +178,7 @@ export default function AdminDashboard() {
     if (!confirm("해당 회원의 모든 기기(PC) 등록 정보를 초기화하시겠습니까?\\n(초기화 후 새로운 기기 2대에서 접속이 가능해집니다.)")) return;
     try {
       const token = localStorage.getItem("mbam_token");
-      const res = await fetch(`http://localhost:8000/api/admin/users/${userId}/reset-devices`, {
+      const res = await fetch(`/api/admin/users/${userId}/reset-devices`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -353,16 +368,49 @@ export default function AdminDashboard() {
             
             {/* 블로그 시스템 프롬프트 */}
             <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "1.5rem", background: "#fafafa", gridColumn: "1 / -1" }}>
-              <h3 style={{ margin: "0 0 1rem 0", color: "#334155", fontSize: "1.05rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <span style={{width:"8px", height:"8px", borderRadius:"50%", background:"#8b5cf6"}}></span> 블로그 포스팅 AI 프롬프트 (시스템 지시어)
-              </h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <h3 style={{ margin: 0, color: "#334155", fontSize: "1.05rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <span style={{width:"8px", height:"8px", borderRadius:"50%", background:"#8b5cf6"}}></span> 블로그 포스팅 AI 프롬프트 (시스템 지시어)
+                </h3>
+                <button 
+                  onClick={handleSaveApiKeys}
+                  disabled={apiSaving}
+                  style={{ padding: "0.5rem 1rem", background: apiSaving ? "#94a3b8" : "#8b5cf6", color: "white", border: "none", borderRadius: "6px", cursor: apiSaving ? "not-allowed" : "pointer", fontWeight: "bold", display: "flex", alignItems: "center", gap: "0.5rem" }}
+                >
+                  <Save size={16} />
+                  {apiSaving ? "저장 중..." : "프롬프트 저장"}
+                </button>
+              </div>
               <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "1rem" }}>{`여기에서 설정한 프롬프트는 블로그 포스팅 자동화 시 AI(클로드/제미나이)에 기본 지시어로 주입됩니다. {keyword}, {combined_text} 등의 변수를 적절히 활용할 수 있습니다.`}</p>
+              
+              {/* 카테고리 탭 */}
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "1px solid #cbd5e1", paddingBottom: "0.5rem", overflowX: "auto" }}>
+                {promptCategories.map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActivePromptCategory(cat.id)}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      background: activePromptCategory === cat.id ? "#8b5cf6" : "transparent",
+                      color: activePromptCategory === cat.id ? "white" : "#64748b",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontWeight: activePromptCategory === cat.id ? "bold" : "normal",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
                   <div>
                       <label style={{ display: "block", fontSize: "0.85rem", color: "#64748b", marginBottom: "0.3rem", fontWeight: "bold" }}>Claude 시스템 프롬프트</label>
                       <textarea 
-                          value={blogPrompts.claude_prompt} 
-                          onChange={e => setBlogPrompts({...blogPrompts, claude_prompt: e.target.value})} 
+                          value={blogPrompts[activePromptCategory]?.claude_prompt || ""} 
+                          onChange={e => setBlogPrompts({...blogPrompts, [activePromptCategory]: { ...blogPrompts[activePromptCategory], claude_prompt: e.target.value }})} 
                           placeholder="Claude 엔진에 전달할 블로그 원고 작성용 프롬프트를 입력하세요."
                           style={{ width: "100%", height: "200px", padding: "0.8rem", borderRadius: "6px", border: "1px solid #cbd5e1", resize: "vertical", fontFamily: "inherit" }} 
                       />
@@ -370,13 +418,69 @@ export default function AdminDashboard() {
                   <div>
                       <label style={{ display: "block", fontSize: "0.85rem", color: "#64748b", marginBottom: "0.3rem", fontWeight: "bold" }}>Gemini 시스템 프롬프트</label>
                       <textarea 
-                          value={blogPrompts.gemini_prompt} 
-                          onChange={e => setBlogPrompts({...blogPrompts, gemini_prompt: e.target.value})} 
+                          value={blogPrompts[activePromptCategory]?.gemini_prompt || ""} 
+                          onChange={e => setBlogPrompts({...blogPrompts, [activePromptCategory]: { ...blogPrompts[activePromptCategory], gemini_prompt: e.target.value }})} 
                           placeholder="Gemini 엔진에 전달할 블로그 원고 작성용 프롬프트를 입력하세요."
                           style={{ width: "100%", height: "200px", padding: "0.8rem", borderRadius: "6px", border: "1px solid #cbd5e1", resize: "vertical", fontFamily: "inherit" }} 
                       />
                   </div>
               </div>
+
+              <div style={{ marginTop: "1.5rem", padding: "1rem", border: "1px dashed #cbd5e1", borderRadius: "6px", background: "white" }}>
+                <label style={{ display: "block", fontSize: "0.85rem", color: "#64748b", marginBottom: "0.5rem", fontWeight: "bold" }}>참고용 첨부파일 (필수 가이드라인 등)</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <input 
+                    type="file" 
+                    accept=".txt"
+                    multiple
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files);
+                      if (files.length > 0) {
+                        const newFiles = [];
+                        let loadedCount = 0;
+                        files.forEach(file => {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            newFiles.push({ name: file.name, content: event.target.result });
+                            loadedCount++;
+                            if (loadedCount === files.length) {
+                              const existingFiles = blogPrompts[activePromptCategory]?.reference_files || [];
+                              setBlogPrompts({...blogPrompts, [activePromptCategory]: { ...blogPrompts[activePromptCategory], reference_files: [...existingFiles, ...newFiles] }});
+                              // Clear input
+                              const input = document.querySelector('input[type="file"]');
+                              if(input) input.value = '';
+                            }
+                          };
+                          reader.readAsText(file, 'utf-8');
+                        });
+                      }
+                    }}
+                    style={{ fontSize: "0.85rem" }}
+                  />
+                  
+                  {(blogPrompts[activePromptCategory]?.reference_files || []).length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                      {blogPrompts[activePromptCategory].reference_files.map((file, idx) => (
+                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "#16a34a", background: "#f0fdf4", padding: "0.3rem 0.8rem", borderRadius: "4px", border: "1px solid #bbf7d0" }}>
+                          <span>📄 {file.name}</span>
+                          <button 
+                            onClick={() => {
+                                const newFiles = blogPrompts[activePromptCategory].reference_files.filter((_, i) => i !== idx);
+                                setBlogPrompts({...blogPrompts, [activePromptCategory]: { ...blogPrompts[activePromptCategory], reference_files: newFiles }});
+                            }}
+                            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#ef4444", fontWeight: "bold", marginLeft: "0.5rem" }}
+                            title="파일 삭제"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.5rem", marginBottom: 0 }}>* .txt 형식의 텍스트 파일만 업로드 권장. 업로드된 파일 내용은 원고 생성 시 AI 프롬프트 하단에 자동으로 주입됩니다.</p>
+              </div>
+
             </div>
             
           </div>

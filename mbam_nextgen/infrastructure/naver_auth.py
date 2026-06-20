@@ -26,42 +26,68 @@ class NaverAuthenticator:
         네이버 로그인 페이지로 이동하여 로그인 시도.
         캡챠 발생 시 2Captcha를 통해 우회.
         """
-        print(f"[Auth] '{account_id}' 자동 로그인 시도 중...")
+        pw_len = len(account_pw) if account_pw else 0
+        print(f"[Auth] '{account_id}' 자동 로그인 시도 중... (입력된 PW 길이: {pw_len})")
+        if pw_len == 0:
+            print("❌ [Auth] 비밀번호가 제공되지 않았습니다! (빈 문자열)")
+            
         try:
+            await page.bring_to_front()
             await page.goto("https://nid.naver.com/nidlogin.login")
             await asyncio.sleep(2)
+            await page.bring_to_front()
             
-            # 클립보드 복사-붙여넣기 방식 (네이버 봇 탐지 우회)
-            await page.evaluate(
-                "(args) => { document.querySelector(args.idSel).value = args.id; document.querySelector(args.pwSel).value = args.pw; }",
-                {"idSel": self.selectors['id'], "id": account_id, "pwSel": self.selectors['pw'], "pw": account_pw}
-            )
+            import pyperclip
+            
+            # 클립보드를 이용한 우회 로그인 (가장 안정적)
+            await page.click(self.selectors['id'])
+            pyperclip.copy(account_id)
+            await page.keyboard.down('Control')
+            await page.keyboard.press('v')
+            await page.keyboard.up('Control')
+            await asyncio.sleep(0.5)
+            
+            await page.click(self.selectors['pw'])
+            pyperclip.copy(account_pw)
+            await page.keyboard.down('Control')
+            await page.keyboard.press('v')
+            await page.keyboard.up('Control')
             await asyncio.sleep(1)
             
             await page.click(self.selectors['login_btn'])
             await asyncio.sleep(3)
             
-            # 캡챠 감지
-            if await page.locator(self.selectors['captcha_img']).count() > 0:
-                print("⚠️ [Auth] 네이버 캡챠(자동입력방지문자) 감지!")
-                if not self.api_key:
-                    print("❌ [Auth] 2Captcha API 키가 없습니다. 수동으로 캡챠를 풀어주세요.")
-                    return False
-                    
+            # 캡챠 감지 (2Captcha 키가 있는 경우만 자동 풀이 시도)
+            if self.api_key and await page.locator(self.selectors['captcha_img']).count() > 0:
+                print("⚠️ [Auth] 네이버 캡챠(자동입력방지문자) 감지! 2Captcha API로 자동 풀이 시도...")
                 success = await self._solve_captcha(page)
                 if success:
                     await page.click(self.selectors['login_btn'])
                     await asyncio.sleep(3)
-                else:
-                    return False
                     
-            # 로그인 성공 여부 확인 (내정보 페이지 혹은 로그인 버튼 소멸 확인)
-            if await page.locator(self.selectors['login_btn']).count() == 0:
+            # 로그인 성공 여부 1차 확인 (로그인 버튼 소멸 및 URL 변경)
+            if await page.locator(self.selectors['login_btn']).count() == 0 and "nidlogin.login" not in page.url:
                 print(f"✅ [Auth] '{account_id}' 자동 로그인 성공!")
                 return True
                 
-            print(f"❌ [Auth] '{account_id}' 로그인 실패 (비밀번호 오류 또는 추가 인증 필요)")
-            return False
+            # 실패했다면 (비번오류, 캡챠, 2단계 인증 등), 사용자에게 수동 해결 기회 60초 제공
+            print("⚠️ [Auth] 자동 로그인 실패(또는 캡챠/추가인증 발생). 브라우저 창에서 수동으로 로그인을 완료해 주세요. (60초 대기)")
+            try:
+                await page.bring_to_front()
+            except: pass
+            
+            try:
+                for _ in range(30):
+                    await asyncio.sleep(2)
+                    # 수동으로 로그인하여 로그인 페이지를 벗어났는지 확인
+                    if await page.locator(self.selectors['login_btn']).count() == 0 and "nidlogin.login" not in page.url:
+                        print("✅ [Auth] 수동 로그인 완료 감지!")
+                        return True
+                print("❌ [Auth] 60초 내에 수동 로그인이 완료되지 않았습니다.")
+                return False
+            except Exception as e:
+                print(f"❌ [Auth] 수동 로그인 대기 중 오류: {e}")
+                return False
             
         except Exception as e:
             print(f"⚠️ [Auth] 로그인 과정 중 오류: {e}")

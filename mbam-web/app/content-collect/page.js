@@ -296,7 +296,7 @@ export default function ContentCollectPage() {
                               keyword: item.keywords?.[0] || item.title.split(' ')[0],
                               source_data: `[제목] ${item.title}\n[요약] ${item.summary}\n[대상] ${item.target}\n[기간] ${item.deadline}\n[출처] ${item.source}\n[링크] ${item.url}`
                             });
-                            window.location.href = `/blog-auto?${params.toString()}`;
+                            window.location.href = `/blog-posting?${params.toString()}`;
                           }}>📝 블로그 작성 준비</button>
                         <button className="btn-primary" style={{ flex: 1, background: "#f59e0b" }} onClick={() => alert("준비중: 카페 자동화로 데이터 연동")}>☕ 카페 작성 준비</button>
                       </div>

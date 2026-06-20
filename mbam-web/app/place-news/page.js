@@ -148,7 +148,7 @@ export default function PlaceNewsPage() {
                 alert("생성 실패: " + data.error);
             }
         } catch (e) {
-            alert("생성 중 오류 발생");
+            alert("생성 중 오류 발생: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -388,11 +388,15 @@ export default function PlaceNewsPage() {
                                     </h3>
                                     <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "1rem" }}>*해당 사진들은 클립 영상(.mp4) 합성 재료로 자동 사용됩니다.</p>
                                     <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "0.5rem" }}>
-                                        {fetchedImages.map((img, idx) => (
-                                            <div key={idx} style={{ aspectRatio: "1/1", background: "#cbd5e1", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", color: "white" }}>
-                                                사진 {idx+1}
-                                            </div>
-                                        ))}
+                                        {fetchedImages.map((img, idx) => {
+                                            const filename = img.split('/').pop().split('\\').pop();
+                                            const imgUrl = `/api/images/${filename}?t=${new Date().getTime()}`;
+                                            return (
+                                                <div key={idx} style={{ aspectRatio: "1/1", background: "#cbd5e1", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", color: "white", overflow: "hidden" }}>
+                                                    <img src={imgUrl} alt={`수집된 사진 ${idx+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </>

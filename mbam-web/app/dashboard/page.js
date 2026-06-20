@@ -63,7 +63,7 @@ export default function SaaS_Dashboard() {
     { title: "SEO 정밀 분석", desc: "검색 상위 노출 벤치마킹", icon: TrendingUp, path: "/seo-analysis", bg: "linear-gradient(135deg, #3b82f6, #2563eb)" },
     { title: "플레이스 진단", desc: "N사 플레이스 순위 추적", icon: MapPin, path: "/place-seo", bg: "linear-gradient(135deg, #a855f7, #9333ea)" },
     { title: "쇼핑 순위 검색", desc: "상품 순위 트렌드 분석", icon: Search, path: "/shopping/rank", bg: "linear-gradient(135deg, #10b981, #059669)" },
-    { title: "블로그 자동화", desc: "AI 기반 원고 자동 포스팅", icon: PenTool, path: "/blog-auto", bg: "linear-gradient(135deg, #f97316, #ea580c)" },
+    { title: "블로그 자동화", desc: "AI 원고 자동 생성 및 다중 발행", icon: PenTool, path: "/blog-posting", bg: "linear-gradient(135deg, #f97316, #ea580c)" },
     { title: "카페 자동화", desc: "카페 자동 포스팅 및 소통", icon: Coffee, path: "/cafe-auto", bg: "linear-gradient(135deg, #f43f5e, #e11d48)" },
     { title: "멀티태스킹", desc: "통합 봇 동시 실행 관리", icon: Zap, path: "/multi-task", bg: "linear-gradient(135deg, #6366f1, #4f46e5)" }
   ];

@@ -167,7 +167,7 @@ class GovDataCollector:
         ]
         """
         try:
-            response_text = await self.soul._call_gemini(prompt)
+            response_text = await self.soul.generate_content(prompt)
             json_str = re.sub(r'```json\s*|```', '', response_text).strip()
             start = json_str.find('[')
             end = json_str.rfind(']') + 1

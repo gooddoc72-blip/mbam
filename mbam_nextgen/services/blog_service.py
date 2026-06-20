@@ -11,40 +11,54 @@ class BlogService:
         self.stealth = stealth
         self.selectors = {
             "write_btn": ".se-toolbar-button-image, .se-image-toolbar-button",
-            "title": ".se-placeholder, .se-title-text, span:has-text('제목')",
+            "title": ".se-documentTitle, .se-placeholder, .se-title-text, span:has-text('제목')",
             "body": ".se-content, .se-placeholder:has-text('본문')",
             "popup_close": "button.se-popup-button-cancel, button.se-help-close-button"
         }
 
-    async def auto_enter_editor(self, page):
-        """블로그 홈에서 [글쓰기] 버튼을 자동 클릭"""
+    async def auto_enter_editor(self, page, account_id: str):
+        """블로그 홈에서 글쓰기 URL로 다이렉트 진입 (버튼 클릭 우회)"""
+        print("\n" + "="*60)
+        print("🚨 [중요] 다이렉트 URL 진입 코드가 실행되고 있습니다! 🚨")
+        print("="*60 + "\n")
         try:
-            write_btn = page.locator("a:has-text('글쓰기'), button:has-text('글쓰기')")
-            await write_btn.first.wait_for(timeout=10000)
-            await write_btn.first.click()
-            print("[BlogService] ✅ [글쓰기] 버튼 자동 클릭 완료")
-            await asyncio.sleep(3)
+            if not account_id:
+                print("[BlogService] ⚠️ account_id가 전달되지 않아 글쓰기 우회를 시도하지 않습니다.")
+                return
+                
+            write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={account_id}"
+            print(f"[BlogService] 🚀 [글쓰기] 버튼 클릭 대신 안전한 다이렉트 URL로 바로 이동합니다: {write_url}")
+            await page.goto(write_url, wait_until="domcontentloaded")
+            await asyncio.sleep(5)
+            print("[BlogService] ✅ 다이렉트 URL 진입 완료!")
         except Exception as e:
-            print(f"[BlogService] ⚠️ 글쓰기 버튼 클릭 실패: {e}")
-            print("[BlogService] 📌 브라우저에서 직접 [글쓰기]를 눌러주세요.")
+            print(f"[BlogService] ⚠️ 글쓰기 진입 로직 오류: {e}")
 
     async def wait_for_editor(self, context, page):
-        """에디터 진입 시점을 포착하여 해당 프레임을 반환 (최대 15초 대기)"""
+        """에디터 진입 시점을 포착하여 해당 프레임을 반환 (최대 20초 대기)"""
         print("🔍 [BlogService] 에디터 진입 감시 중...")
-        for _ in range(15): # 15초 동안 시도
+        for _ in range(20): # 20초 동안 시도
             for p in context.pages:
+                # 1. mainFrame iframe이 있는지 확인 (네이버 블로그 에디터는 보통 iframe#mainFrame 안에 있음)
                 for f in p.frames:
+                    if f.name == "mainFrame":
+                        try:
+                            if await f.locator(self.selectors["body"]).count() > 0 or await f.locator(self.selectors["title"]).count() > 0:
+                                print(f"✨ [BlogService] mainFrame에서 에디터 포착: {f.name}")
+                                return f
+                        except: pass
+                    
+                    # 2. iframe이 아닐 경우 그냥 프레임 내용물로 확인
                     try:
-                        # 본문 영역이 존재하는지 확인
-                        if await f.locator(self.selectors["body"]).count() > 0:
+                        if await f.locator(self.selectors["body"]).count() > 0 or await f.locator(self.selectors["title"]).count() > 0:
                             print(f"✨ [BlogService] 에디터 포착: {f.name}")
                             return f
                     except: continue
             await asyncio.sleep(1)
         
         # 실패 시 현재 페이지의 메인 프레임 시도
-        print("⚠️ [BlogService] 에디터 감지 실패. 기본 프레임으로 진행합니다.")
-        return page.main_frame
+        print("⚠️ [BlogService] 에디터 감지 실패. 최신 페이지의 메인 프레임으로 진행합니다.")
+        return context.pages[-1].main_frame if context.pages else page.main_frame
 
     async def dismiss_popups(self, frame):
         """방해 팝업(임시저장, 도움말 등) 제거"""
@@ -64,19 +78,77 @@ class BlogService:
                     print(f"[BlogService] 팝업 제거 완료: {sel}")
             except: pass
 
-    async def write_post(self, frame, title: str, content: str, speed_mode: str = "normal", speed_multiplier: float = 1.0):
-        """원고 타이핑 (스텔스 적용, 속도 조절 가능)"""
+    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
+        """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
+        import os, asyncio, re
         print(f"[BlogService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
         
         # 제목 입력
-        await frame.wait_for_selector(self.selectors["title"], timeout=10000)
+        try:
+            await frame.wait_for_selector(self.selectors["title"], timeout=20000)
+        except Exception as e:
+            print(f"⚠️ [BlogService] 제목 필드 로딩 지연 중. 팝업 재확인 후 진행 시도... {e}")
+            await self.dismiss_popups(frame)
+            await frame.wait_for_selector(self.selectors["title"], timeout=10000)
+            
         await frame.click(self.selectors["title"])
         await self.stealth.human_type(frame, self.selectors["title"], title, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
         
-        # 본문 입력
+        # 본문 및 이미지 교차 입력
         await frame.click(self.selectors["body"])
-        await self.stealth.human_type(frame, self.selectors["body"], content, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-        print("✅ [BlogService] 원고 타이핑 완료")
+        
+        chunks = re.split(r'\[이미지\]', content)
+        images = images or []
+        img_idx = 0
+        pending_text = ""
+        
+        for i, chunk in enumerate(chunks):
+            if chunk.strip():
+                pending_text += chunk.strip() + "\n\n"
+            
+            # 중간에 이미지가 삽입되어야 하는 위치
+            if i < len(chunks) - 1 and img_idx < len(images):
+                img_path = images[img_idx]
+                if os.path.exists(img_path):
+                    if pending_text.strip():
+                        await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
+                        pending_text = ""
+                        
+                    await self.stealth.upload_image(frame, img_path)
+                    await asyncio.sleep(3)  # 업로드 대기
+                    # 포커스를 문서 맨 끝으로 이동
+                    await frame.locator(self.selectors["body"]).first.evaluate("""el => {
+                        const selection = window.getSelection();
+                        const range = document.createRange();
+                        range.selectNodeContents(el);
+                        range.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }""")
+                    await frame.keyboard.press("Enter")
+                img_idx += 1
+                
+        if pending_text.strip():
+            await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
+            
+        # 남은 이미지가 있다면 글 맨 하단에 추가 (안전장치)
+        while img_idx < len(images):
+            img_path = images[img_idx]
+            if os.path.exists(img_path):
+                await self.stealth.upload_image(frame, img_path)
+                await asyncio.sleep(3)
+                await frame.locator(self.selectors["body"]).first.evaluate("""el => {
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }""")
+                await frame.keyboard.press("Enter")
+            img_idx += 1
+            
+        print("✅ [BlogService] 원고 타이핑(이미지 교차) 완료")
 
     async def upload_images(self, frame, image_paths: list):
         """세척된 이미지 순차 업로드"""
@@ -94,10 +166,10 @@ class BlogService:
         
         try:
             # 1. 상단의 [발행] 버튼 클릭
-            publish_btn = frame.locator("button:has-text('발행'), a:has-text('발행')")
+            publish_btn = frame.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
             if await publish_btn.count() == 0:
                 # 프레임 밖(상위 페이지)에 있을 수 있음
-                publish_btn = page.locator("button:has-text('발행'), a:has-text('발행')")
+                publish_btn = page.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
             
             await publish_btn.first.click()
             await asyncio.sleep(2)
@@ -105,9 +177,10 @@ class BlogService:
             # 2. 발행 확인 다이얼로그에서 [발행] 확인 버튼 클릭
             confirm_selectors = [
                 "button.publish_btn__confirm",
-                "button:has-text('발행')",
+                "button:text-is('발행')",
                 ".se-popup-button-confirm",
-                "button.confirm"
+                "button.confirm",
+                ".btn_submit"
             ]
             
             for sel in confirm_selectors:
@@ -140,9 +213,9 @@ class BlogService:
         
         try:
             # 1. 상단의 [발행] 버튼 클릭 (발행 설정 패널 열기)
-            publish_btn = frame.locator("button:has-text('발행'), a:has-text('발행')")
+            publish_btn = frame.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
             if await publish_btn.count() == 0:
-                publish_btn = page.locator("button:has-text('발행'), a:has-text('발행')")
+                publish_btn = page.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
             
             await publish_btn.first.click()
             await asyncio.sleep(2)

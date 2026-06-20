@@ -1,6 +1,8 @@
 import asyncio
 import random
 import sys
+import os
+import glob
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 from .services.soul import SoulRewriter
 from .services.armor import ImageArmor
@@ -13,6 +15,7 @@ from .infrastructure.proxy import ProxyManager
 from .infrastructure.naver_auth import NaverAuthenticator
 from .infrastructure.database import DatabaseManager
 from .core.logger import logger
+from .core.stealth import StealthExecutor
 
 class WorkflowOrchestrator:
     """
@@ -50,7 +53,7 @@ class WorkflowOrchestrator:
         """블로그 소통(공감/댓글/이웃) 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
         
-        logger.info(f"🤝 [Orchestrator] 블로그 소통 워크플로우 시작: {account_id}")
+        logger.info(f"🚀 [Orchestrator] 블로그 소통 워크플로우 시작: {account_id}")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False)
@@ -64,7 +67,6 @@ class WorkflowOrchestrator:
             page = await context.new_page()
             
             if not has_session:
-                import os
                 pw = os.getenv("NAVER_PW", "")
                 await self.authenticator.login_with_bypass(page, account_id, pw)
                 await self.session_manager.save_session(context, account_id)
@@ -119,17 +121,14 @@ class WorkflowOrchestrator:
                     self.db.log_engagement(target_url=post_url, action_type="소통", comment_text="", status=f"실패: {e}")
                     results.append({"id": target_id, "success": False, "error": str(e)})
 
-            await self.session_manager.save_session(context, account_id)
-            await browser.close()
-            return results
 
     # ═══════════════════════════════════════════════
     # 공통 헬퍼
     # ═══════════════════════════════════════════════
 
     async def _generate_content_with_retry(
-        self, keyword: str, max_attempts: int = 3, timeout: float = 45.0, ai_provider: str = "claude", reference_data: dict = None,
-        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None
+        self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
+        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -155,7 +154,7 @@ class WorkflowOrchestrator:
             try:
                 content = await asyncio.wait_for(
                     self.soul.rewrite_for_blog("", enhanced_keyword, provider=ai_provider,
-                                               post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode),
+                                               post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode, api_key=api_key),
                     timeout=timeout,
                 )
                 logger.info(f"✅ [Orchestrator] 원고 생성 완료 ({attempt}회차)")
@@ -170,7 +169,7 @@ class WorkflowOrchestrator:
                     logger.warning(f"⚠️ [Orchestrator] AI 생성 {attempt}/{max_attempts} 실패: {e} — {wait}초 후 재시도")
                     await asyncio.sleep(wait)
         logger.error(f"❌ [Orchestrator] AI 생성 {max_attempts}회 모두 실패: {last_exc} — 기본 원고 사용")
-        return f"{keyword}에 대한 정보와 후기를 정리해 드립니다."
+        return f"제목: [오류] AI 원고 생성 실패\n현재 설정된 AI 엔진(API 키)에 문제가 발생했습니다.\n\n[상세 오류 내용]\n{str(last_exc)}\n\n* Gemini의 경우: 무료 크레딧 소진 또는 결제 필요\n* Claude의 경우: 계정 잔액 부족 또는 API 키 만료\n위 내용을 확인해주세요."
 
     async def execute_multi_blog_workflow(
         self,
@@ -183,9 +182,20 @@ class WorkflowOrchestrator:
     ):
         logger.info(f"🔄 [Orchestrator] 다중 계정 워크플로우 시작 (총 {len(accounts)}계정, 텀: {interval_mins}분)")
         log_callback = kwargs.pop("log_callback", None)
+        results = []
         
         for idx, acc in enumerate(accounts):
             account_id = acc.get("id")
+            account_pw = acc.get("pw")
+            
+            # USB 테더링 IP 변경 처리
+            use_tethering = kwargs.get("use_tethering", False)
+            if use_tethering:
+                if log_callback:
+                    log_callback("📱 [Orchestrator] USB 테더링 IP 전환 중...")
+                new_ip = await self.proxy_manager.rotate_tethering_ip()
+                if log_callback:
+                    log_callback(f"✨ [Orchestrator] 할당된 IP: {new_ip}")
             
             if log_callback:
                 log_callback(f"🚀 [{idx+1}/{len(accounts)}] 계정 {account_id} 작업 시작...")
@@ -206,6 +216,7 @@ class WorkflowOrchestrator:
             # 실행
             result = await self.execute_blog_workflow(
                 account_id=account_id,
+                account_pw=account_pw,
                 post_mode=post_mode,
                 manual_title=manual_title,
                 manual_content=manual_content,
@@ -213,6 +224,7 @@ class WorkflowOrchestrator:
                 image_folder_path=image_folder_path,
                 **kwargs
             )
+            results.append(result)
             
             if log_callback:
                 if result and result.get("success"):
@@ -223,10 +235,15 @@ class WorkflowOrchestrator:
             
             # 대기 (마지막 계정이 아니면)
             if idx < len(accounts) - 1:
-                wait_sec = interval_mins * 60
-                if log_callback:
-                    log_callback(f"⏳ 다음 계정 작업을 위해 {interval_mins}분 ({wait_sec}초) 대기합니다...")
-                await asyncio.sleep(wait_sec)
+                if result and result.get("success"):
+                    wait_sec = interval_mins * 60
+                    if log_callback:
+                        log_callback(f"⏳ 다음 계정 작업을 위해 {interval_mins}분 ({wait_sec}초) 대기합니다...")
+                    await asyncio.sleep(wait_sec)
+                else:
+                    if log_callback:
+                        log_callback(f"⏳ 작업 실패로 인해 긴 대기를 생략하고 10초 후 다음 계정으로 넘어갑니다...")
+                    await asyncio.sleep(10)
                 
         if log_callback:
             log_callback("🎉 모든 다중 계정 포스팅이 종료되었습니다.")
@@ -240,6 +257,7 @@ class WorkflowOrchestrator:
         self, 
         account_id: str, 
         keyword: str, 
+        account_pw: str = None,
         test_image: str = None, 
         speed_mode: str = "normal", 
         speed_multiplier: float = 1.0,
@@ -258,7 +276,8 @@ class WorkflowOrchestrator:
         wash_images: bool = False,
         image_folder_path: str = None,
         source_data: str = None,
-        generate_card_news: bool = False
+        generate_card_news: bool = False,
+        **kwargs
     ):
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
         proxy_label = f"프록시: {proxy[:30]}..." if proxy else "직접 연결"
@@ -294,7 +313,7 @@ class WorkflowOrchestrator:
             page = await context.new_page()
             
             if not has_session:
-                pw = os.getenv("NAVER_PW", "")
+                pw = account_pw or os.getenv("NAVER_PW", "")
                 await self.authenticator.login_with_bypass(page, account_id, pw)
                 await self.session_manager.save_session(context, account_id)
             
@@ -305,31 +324,53 @@ class WorkflowOrchestrator:
             
             await page.goto(f"https://blog.naver.com/{account_id}")
             
+            # 세션 만료 검증 및 재로그인 처리
+            await asyncio.sleep(2)
+            
+            # 다이렉트 글쓰기 URL로 진입하여 로그인 여부 확실하게 검증
+            write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={account_id}"
+            await page.goto(write_url, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+            
+            is_logged_out = "nidlogin" in page.url or "nid.naver.com" in page.url
+            
+            if is_logged_out:
+                logger.info("⚠️ [Orchestrator] 기존 세션이 만료되어 비로그인 상태입니다. 재로그인을 시도합니다.")
+                pw = account_pw or os.getenv("NAVER_PW", "")
+                success = await self.authenticator.login_with_bypass(page, account_id, pw)
+                if not success:
+                    error_msg = f"로그인 실패: 비밀번호 오류이거나 2단계 인증/새로운 기기 로그인 차단이 발생했습니다. 수동으로 로그인하여 인증 기기로 등록하거나 비밀번호를 확인해주세요."
+                    logger.error(f"❌ [Orchestrator] {error_msg}")
+                    return {"success": False, "error": error_msg}
+                await self.session_manager.save_session(context, account_id)
+                # 로그인 완료 후 다시 글쓰기 폼으로 이동
+                await page.goto(write_url, wait_until="domcontentloaded")
+            
             # 3. 콘텐츠 준비
             if post_mode == "manual_text" and manual_content:
-                logger.info(f"📝 [Orchestrator] 사용자가 제공한 수동 원고를 사용합니다.")
                 blog_content = manual_content
-                if manual_title:
-                    blog_content = f"[제목] {manual_title}\n\n{blog_content}"
+                blog_title = manual_title if manual_title else f"{keyword} 후기"
             else:
+                # AI 생성 모드 등 다른 모드
+                blog_title = f"{keyword} 후기"
                 logger.info(f"🤖 [Orchestrator] AI 원고 생성 시작... (Provider: {ai_provider})")
                 blog_content = await self._generate_content_with_retry(
                     keyword, ai_provider=ai_provider, reference_data=reference_data,
                     post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode,
                     source_data=source_data
                 )
+                if blog_content:
+                    import re
+                    blog_content = re.sub(r'(\*\*|~~|__)', '', blog_content)
             
             # 4. 이미지 세척 및 준비
             washed_images = []
             
-            import os
             # (A) 폴더 연동 방식
             if image_folder_path and os.path.exists(image_folder_path):
                 logger.info(f"📂 [Orchestrator] 로컬 폴더 연동 시작: {image_folder_path}")
-                import glob
                 img_paths = glob.glob(os.path.join(image_folder_path, "*.jpg")) + glob.glob(os.path.join(image_folder_path, "*.png"))
                 if len(img_paths) > 0:
-                    import random
                     selected_imgs = random.sample(img_paths, min(3, len(img_paths))) # 최대 3장 추출
                     for idx, img in enumerate(selected_imgs):
                         if wash_images:
@@ -354,25 +395,23 @@ class WorkflowOrchestrator:
 
             # 4. 글쓰기 자동 진입 및 에디터 감지
             logger.info("📝 [Orchestrator] 네이버 에디터 진입 시도...")
-            await self.blog.auto_enter_editor(page)
+            await self.blog.auto_enter_editor(page, account_id)
             editor_frame = await self.blog.wait_for_editor(context, page)
             
             # 5. 세션 업데이트
             await self.session_manager.save_session(context, account_id)
 
-            # 6. 포스팅 작업 수행
+            # 6. 포스팅 작업 수행 (이미지와 텍스트 교차 삽입)
             await self.blog.dismiss_popups(editor_frame)
             await self.blog.write_post(
-                editor_frame, f"{keyword} 후기", blog_content,
+                editor_frame, blog_title, blog_content,
+                images=washed_images,
                 speed_mode=speed_mode, speed_multiplier=speed_multiplier
             )
-            
-            if washed_images:
-                await self.blog.upload_images(editor_frame, washed_images)
 
             # 7. 발행 처리
             publish_result = False
-            if publish_mode == "now":
+            if publish_mode in ["now", "instant"]:
                 publish_result = await self.blog.publish_now(editor_frame)
             elif publish_mode == "schedule":
                 if schedule_date and schedule_time:
@@ -380,12 +419,15 @@ class WorkflowOrchestrator:
                 else:
                     logger.info("⚠️ [Orchestrator] 예약 발행에는 날짜와 시간이 필요합니다.")
             else:
-                logger.info("🏁 [Orchestrator] 수동 발행 모드: 직접 [발행] 버튼을 눌러주세요.")
+                logger.info("🏁 [Orchestrator] 수동 발행 모드: 직접 [발행] 버튼을 눌러주세요. (발행 완료 전까지 화면이 유지됩니다)")
                 publish_result = True
+                try:
+                    while "editor" in page.url:
+                        await asyncio.sleep(2)
+                    logger.info("✅ 수동 발행이 확인되었습니다. 다음 단계로 넘어갑니다.")
+                except Exception:
+                    pass
 
-            await asyncio.sleep(5)
-            await browser.close()
-            
             return {
                 "account_id": account_id,
                 "keyword": keyword,
@@ -453,14 +495,18 @@ class WorkflowOrchestrator:
                     "error": str(e)
                 })
             
-            # 마지막 계정이 아니면 랜덤 대기 (봇 탐지 회피)
+            # 마지막 계정이 아니면 대기
             if idx < total - 1:
-                delay = self.proxy_manager.get_random_delay(
-                    min_sec=config.get("min_delay", 180),
-                    max_sec=config.get("max_delay", 600)
-                )
-                logger.info(f"\n⏳ 다음 계정까지 {delay}초 ({delay//60}분 {delay%60}초) 대기 중...")
-                await asyncio.sleep(delay)
+                if result and result.get("success"):
+                    delay = self.proxy_manager.get_random_delay(
+                        min_sec=config.get("min_delay", 180),
+                        max_sec=config.get("max_delay", 600)
+                    )
+                    logger.info(f"\n⏳ 다음 계정까지 {delay}초 ({delay//60}분 {delay%60}초) 대기 중...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.info(f"\n⏳ 이전 계정 작업 실패로 긴 대기를 생략하고 10초 후 다음 계정으로 전환합니다...")
+                    await asyncio.sleep(10)
         
         # 실행 결과 리포트
         self._print_report(results)
@@ -515,6 +561,7 @@ class WorkflowOrchestrator:
         logger.info(f"   키워드: {keyword} | 자동등록: {'ON' if auto_submit else 'OFF'}")
         
         async with async_playwright() as p:
+            browser = None
             try:
                 browser = await p.chromium.launch(headless=False)
                 context_options = {
@@ -533,7 +580,6 @@ class WorkflowOrchestrator:
                 page = await context.new_page()
                 
                 if not has_session:
-                    import os
                     pw = os.getenv("NAVER_PW", "")
                     await self.authenticator.login_with_bypass(page, account_id, pw)
                     await self.session_manager.save_session(context, account_id)
@@ -566,8 +612,6 @@ class WorkflowOrchestrator:
                         submit_result = False
                         logger.info("⚠️ [Orchestrator] 게시판 진입 실패로 댓글 자동화를 중단합니다.")
                     
-                    await asyncio.sleep(5)
-                    await browser.close()
                     self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status="성공" if submit_result else "실패")
                     return {
                         "account_id": account_id,
@@ -622,9 +666,6 @@ class WorkflowOrchestrator:
                         logger.info("🏁 [Orchestrator] 수동 등록 모드: 직접 [등록] 버튼을 눌러주세요.")
                         submit_result = True
                     logger.info("\n✅ [Orchestrator] 카페 태스크 완료.")
-                    await asyncio.sleep(10)
-                    await browser.close()
-                    
                     self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status="성공" if submit_result else "실패")
                     
                     return {
@@ -634,10 +675,18 @@ class WorkflowOrchestrator:
                         "ip": current_ip,
                         "success": submit_result
                     }
+            except asyncio.CancelledError:
+                logger.info("🛑 [Orchestrator] 카페 작업이 취소되었습니다. 브라우저를 강제 종료합니다.")
+                raise
             except Exception as e:
                 logger.info(f"⚠️ [Orchestrator] 카페 워크플로우 오류: {e}")
                 self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status=f"실패: {str(e)[:50]}")
                 return {"account_id": account_id, "success": False, "error": str(e)}
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except: pass
 
     # ═══════════════════════════════════════════════
     # 카페 다중 계정 타겟 댓글 워크플로우
@@ -664,88 +713,98 @@ class WorkflowOrchestrator:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False)
             
-            for acc_idx, acc in enumerate(accounts_data):
-                account_id = acc["id"]
-                pw = acc.get("pw", "")
-                
-                logger_func(f"\n👉 [{acc_idx+1}/{len(accounts_data)}] 계정 로그인: {account_id}")
-                
-                context = await browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
-                
-                # 로그인
-                await self.authenticator.login_with_bypass(page, account_id, pw)
-                await asyncio.sleep(2)
-                
-                # 타겟 URL 순회
-                for url_idx, target_url in enumerate(target_urls):
-                    logger_func(f"  🔗 타겟 접속 ({url_idx+1}/{len(target_urls)}): {target_url}")
+            try:
+                for acc_idx, acc in enumerate(accounts_data):
+                    account_id = acc["id"]
+                    pw = acc.get("pw", "")
                     
-                    try:
-                        await page.goto(target_url)
-                        await asyncio.sleep(random.randint(3, 5))
+                    logger_func(f"\n👉 [{acc_idx+1}/{len(accounts_data)}] 계정 로그인: {account_id}")
+                    
+                    context = await browser.new_context(
+                        viewport={'width': 1920, 'height': 1080},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    )
+                    page = await context.new_page()
+                    
+                    # 로그인
+                    await self.authenticator.login_with_bypass(page, account_id, pw)
+                    await asyncio.sleep(2)
+                    
+                    # 타겟 URL 순회
+                    for url_idx, target_url in enumerate(target_urls):
+                        logger_func(f"  🔗 타겟 접속 ({url_idx+1}/{len(target_urls)}): {target_url}")
                         
-                        # 1. 카페 본문 읽기
-                        cafe_frame = page.frame(name="cafe_main")
-                        if not cafe_frame:
-                            logger_func("  ⚠️ cafe_main 프레임을 찾을 수 없습니다.")
-                            continue
-                            
-                        content_loc = cafe_frame.locator(".se-main-container, .se-content, .ContentRenderer")
-                        post_content_text = ""
-                        if await content_loc.count() > 0:
-                            post_content_text = await content_loc.first.inner_text()
-                            
-                        # 2. AI 댓글 생성
-                        prompt = f"다음 카페글 본문에 대해 '{keyword}'의 뉘앙스로 자연스럽게 동조/호응하는 짧은 1문장 댓글을 달아줘. 본문: {post_content_text[:300]}"
                         try:
-                            comment_text = await self.soul.rewrite_for_blog("", prompt, provider=ai_provider)
-                        except Exception as e:
-                            logger_func(f"  ⚠️ AI 생성 오류: {e}")
-                            comment_text = f"잘 읽었습니다! ({keyword})"
+                            await page.goto(target_url)
+                            await asyncio.sleep(random.randint(3, 5))
                             
-                        logger_func(f"  💬 작성 댓글: {comment_text}")
-                        
-                        # 3. 댓글 달기
-                        comment_input = cafe_frame.locator(".comment_inbox_text")
-                        if await comment_input.count() > 0:
-                            await comment_input.first.click()
-                            await asyncio.sleep(0.5)
-                            await self.stealth_engine.human_type(cafe_frame, ".comment_inbox_text", comment_text)
-                            await asyncio.sleep(1)
+                            # 1. 카페 본문 읽기
+                            cafe_frame = page.frame(name="cafe_main")
+                            if not cafe_frame:
+                                logger_func("  ⚠️ cafe_main 프레임을 찾을 수 없습니다.")
+                                continue
+                                
+                            content_loc = cafe_frame.locator(".se-main-container, .se-content, .ContentRenderer")
+                            post_content_text = ""
+                            if await content_loc.count() > 0:
+                                post_content_text = await content_loc.first.inner_text()
+                                
+                            # 2. AI 댓글 생성
+                            prompt = f"다음 카페글 본문에 대해 '{keyword}'의 뉘앙스로 자연스럽게 동조/호응하는 짧은 1문장 댓글을 달아줘. 본문: {post_content_text[:300]}"
+                            try:
+                                comment_text = await self.soul.rewrite_for_blog("", prompt, provider=ai_provider)
+                            except Exception as e:
+                                logger_func(f"  ⚠️ AI 생성 오류: {e}")
+                                comment_text = f"잘 읽었습니다! ({keyword})"
+                                
+                            logger_func(f"  💬 작성 댓글: {comment_text}")
                             
-                            submit_btn = cafe_frame.locator(".btn_register")
-                            if await submit_btn.count() > 0:
-                                await submit_btn.first.click()
-                                logger_func("  ✅ 등록 완료")
-                                self.db.log_cafe(account_id=account_id, cafe_id=target_url, keyword=keyword, status="타겟 댓글 성공")
+                            # 3. 댓글 달기
+                            comment_input = cafe_frame.locator(".comment_inbox_text")
+                            if await comment_input.count() > 0:
+                                await comment_input.first.click()
+                                await asyncio.sleep(0.5)
+                                await self.stealth_engine.human_type(cafe_frame, ".comment_inbox_text", comment_text)
+                                await asyncio.sleep(1)
+                                
+                                submit_btn = cafe_frame.locator(".btn_register")
+                                if await submit_btn.count() > 0:
+                                    await submit_btn.first.click()
+                                    logger_func("  ✅ 등록 완료")
+                                    self.db.log_cafe(account_id=account_id, cafe_id=target_url, keyword=keyword, status="타겟 댓글 성공")
+                                else:
+                                    logger_func("  ⚠️ 등록 버튼 찾기 실패")
                             else:
-                                logger_func("  ⚠️ 등록 버튼 찾기 실패")
-                        else:
-                            logger_func("  ⚠️ 댓글 입력창을 찾을 수 없습니다. (막힘 또는 에러)")
+                                logger_func("  ⚠️ 댓글 입력창을 찾을 수 없습니다. (막힘 또는 에러)")
+                                
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            logger_func(f"  ⚠️ 작업 중 예외 발생: {e}")
                             
-                    except Exception as e:
-                        logger_func(f"  ⚠️ 작업 중 예외 발생: {e}")
-                        
-                    # 마지막 타겟이 아니면 딜레이
-                    if url_idx < len(target_urls) - 1:
-                        delay = random.randint(delay_min, delay_max)
-                        logger_func(f"  ⏳ {delay}초 대기...")
-                        await asyncio.sleep(delay)
-                
-                # 컨텍스트(세션) 종료 후 다음 계정으로
-                await context.close()
-                
-                if acc_idx < len(accounts_data) - 1:
-                    logger_func(f"⏳ 계정 전환을 위해 10초 대기...")
-                    await asyncio.sleep(10)
+                        # 마지막 타겟이 아니면 딜레이
+                        if url_idx < len(target_urls) - 1:
+                            delay = random.randint(delay_min, delay_max)
+                            logger_func(f"  ⏳ {delay}초 대기...")
+                            await asyncio.sleep(delay)
                     
-            await browser.close()
-            logger_func("🎉 다중 타겟 댓글 작업 종료")
-            return True
+                    # 컨텍스트(세션) 종료 후 다음 계정으로
+                    await context.close()
+                    
+                    if acc_idx < len(accounts_data) - 1:
+                        logger_func(f"⏳ 계정 전환을 위해 10초 대기...")
+                        await asyncio.sleep(10)
+                        
+                logger_func("🎉 다중 타겟 댓글 작업 종료")
+                return True
+            except asyncio.CancelledError:
+                logger_func("🛑 다중 타겟 댓글 작업이 강제 취소되었습니다.")
+                raise
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except: pass
 
 from contextvars import ContextVar
 task_logger = ContextVar("task_logger", default=print)

@@ -126,7 +126,7 @@ export default function PlaceSeoDashboard() {
     
     try {
       // 1. API 호출: 300위 수집 및 분석
-      const res = await fetchWithAuth("http://127.0.0.1:8000/api/place/analyze-keyword", {
+      const res = await fetchWithAuth("/api/place/analyze-keyword", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword, target_mid: targetMid, compare_days: compareDays }),
@@ -158,7 +158,7 @@ export default function PlaceSeoDashboard() {
   const fetchMidInfo = async () => {
     if (!targetMid.trim()) return;
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8000/api/place/fetch-mid", {
+      const res = await fetchWithAuth("/api/place/fetch-mid", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mid: targetMid })
@@ -405,7 +405,8 @@ export default function PlaceSeoDashboard() {
                     <thead style={{ position: "sticky", top: 0, background: "#f1f5f9", zIndex: 10, borderBottom: "2px solid #cbd5e1" }}>
                       <tr>
                         <th style={{ padding: "0.8rem 0.5rem", width: "40px" }}>비교</th>
-                        <th style={{ padding: "0.8rem 0.5rem", width: "50px" }}>순위</th>
+                        <th style={{ padding: "0.8rem 0.5rem", width: "50px" }}>전국 순위</th>
+                        <th style={{ padding: "0.8rem 0.5rem", width: "50px", color: "#3b82f6" }}>로컬 순위</th>
                         <th style={{ padding: "0.8rem 1rem", textAlign: "left" }}>업체명/카테고리</th>
                         <th style={{ padding: "0.8rem 0.5rem" }}>방문자리뷰</th>
                         <th style={{ padding: "0.8rem 0.5rem" }}>블로그리뷰</th>
@@ -420,17 +421,17 @@ export default function PlaceSeoDashboard() {
                     <tbody>
                       {!result && !loading && (
                         <tr>
-                          <td colSpan="9" style={{ padding: "4rem", color: "#94a3b8" }}>상단 폼에서 조회 조건을 입력해주세요.</td>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#94a3b8" }}>상단 폼에서 조회 조건을 입력해주세요.</td>
                         </tr>
                       )}
                       {loading && (
                         <tr>
-                          <td colSpan="9" style={{ padding: "4rem", color: "#3b82f6", fontWeight: "bold" }}>네이버 플레이스 300위 스크롤 데이터를 수집하고 N지수를 연산하고 있습니다... (15~30초)</td>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#3b82f6", fontWeight: "bold" }}>네이버 플레이스 300위 듀얼 크롤링(전국/로컬)을 동시 진행하고 있습니다... (30~40초)</td>
                         </tr>
                       )}
                       {result && result.places && result.places.length === 0 && !loading && (
                         <tr>
-                          <td colSpan="9" style={{ padding: "4rem", color: "#94a3b8" }}>전체 순위 데이터가 없습니다. 상단의 [조회] 버튼을 눌러 새롭게 수집해주세요.</td>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#94a3b8" }}>전체 순위 데이터가 없습니다. 상단의 [조회] 버튼을 눌러 새롭게 수집해주세요.</td>
                         </tr>
                       )}
                       {result && result.places && result.places.map((place) => {
@@ -444,9 +445,12 @@ export default function PlaceSeoDashboard() {
                         return (
                           <tr key={place.mid} style={{ borderBottom: "1px solid #e2e8f0", background: isTarget ? "#eff6ff" : "white", fontWeight: isTarget ? "bold" : "normal" }}>
                             <td style={{ padding: "0.8rem 0.5rem" }}><input type="checkbox" /></td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: isTarget ? "white" : "#475569" }}>
+                            <td style={{ padding: "0.8rem 0.5rem", color: isTarget ? "white" : "#475569", background: isTarget ? "#1e293b" : "#f1f5f9" }}>
                               {isTarget ? <span style={{ background: "#3b82f6", padding: "0.2rem 0.6rem", borderRadius: "4px", fontWeight: "bold" }}>{place.rank}</span> : place.rank}
                               {place.delta_rank !== undefined && renderDeltaValue(place.delta_rank, true)}
+                            </td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: isTarget ? "white" : "#3b82f6", fontWeight: "bold", background: isTarget ? "#1e293b" : "#eff6ff" }}>
+                              {isTarget ? <span style={{ background: "#ef4444", padding: "0.2rem 0.6rem", borderRadius: "4px", fontWeight: "bold" }}>{place.local_rank || "-"}</span> : (place.local_rank || "-")}
                             </td>
                             <td style={{ padding: "0.8rem 1rem", textAlign: "left" }}>
                               <div style={{ color: isTarget ? "#1e40af" : "#1e293b", fontSize: "0.95rem" }}>

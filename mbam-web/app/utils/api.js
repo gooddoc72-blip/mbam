@@ -13,10 +13,14 @@ export const fetchWithAuth = async (url, options = {}) => {
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, { ...options, headers, credentials: "include" });
   if (response.status === 401) {
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      localStorage.removeItem("mbam_token");
+      localStorage.removeItem("access_token");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
   }
   return response;

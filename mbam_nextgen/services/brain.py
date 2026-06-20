@@ -19,8 +19,9 @@ class KeywordBrain:
     def __init__(self):
         self.api_url = "https://api.naver.com"
         self.access_license = os.getenv("NAVER_ACCESS_LICENSE")
-        self.secret_key = os.getenv("NAVER_CLIENT_SECRET")
-        self.customer_id = os.getenv("NAVER_CLIENT_ID") # Client ID often used as Customer ID in Ad API
+        # 네이버 "검색광고 API" 전용 키 (오픈API의 CLIENT_SECRET/CLIENT_ID와 다름)
+        self.secret_key = os.getenv("NAVER_SECRET_KEY")
+        self.customer_id = os.getenv("NAVER_CUSTOMER_ID")
 
     def _generate_signature(self, timestamp: str, method: str, path: str):
         """네이버 검색광고 API 호출을 위한 시그니처 생성"""

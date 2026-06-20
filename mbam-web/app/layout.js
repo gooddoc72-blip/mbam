@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import Sidebar from "./components/Sidebar";
+import AuthGuard from "./components/AuthGuard";
 
 export const metadata = {
   title: "마케팅연구소 Marketing lab's",
@@ -26,12 +27,14 @@ export default function RootLayout({ children }) {
         `}</style>
       </head>
       <body suppressHydrationWarning>
-        <div style={{ display: "flex", minHeight: "100vh" }}>
-          <Sidebar />
-          <main style={{ flex: 1, padding: "2rem", overflowY: "auto", height: "100vh" }}>
-            {children}
-          </main>
-        </div>
+        <AuthGuard>
+          <div style={{ display: "flex", minHeight: "100vh" }}>
+            <Sidebar />
+            <main style={{ flex: 1, padding: "2rem", overflowY: "auto", height: "100vh" }}>
+              {children}
+            </main>
+          </div>
+        </AuthGuard>
       </body>
     </html>
   );

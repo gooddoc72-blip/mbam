@@ -11,7 +11,7 @@ def fetch_place_by_mid(mid):
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            page = browser.new_page(user_agent=USER_AGENT)
             page.goto(f"https://pcmap.place.naver.com/restaurant/{mid}/home", wait_until="networkidle")
             
             title = page.locator("meta[property='og:title']").get_attribute("content")
@@ -25,7 +25,6 @@ def fetch_place_by_mid(mid):
             try:
                 page.wait_for_timeout(3000)
                 html = page.content()
-                import re
                 v_matches = re.findall(r'방문자리뷰[^\d]*([\d,]+)', html)
                 if v_matches:
                     visitor_reviews = max([int(m.replace(',', '')) for m in v_matches])
@@ -46,7 +45,7 @@ def fetch_place_by_mid(mid):
                 "visitor_reviews": visitor_reviews,
                 "blog_reviews": blog_reviews,
                 "has_booking": True,
-                "source": "api_interception"
+                "source": "dom_crawler"
             }
     except Exception as e:
         return {
@@ -60,364 +59,200 @@ def fetch_place_by_mid(mid):
             "source": "error"
         }
 
-def search_keyword_ranking(keyword, limit=300):
+def search_keyword_ranking(keyword, limit=300, gps=None, proxy=None):
+    """
+    네이버 플레이스 '자연 순위' 수집기.
+    - DOM 스크롤 파싱(불안정) 전면 폐기.
+    - 검색결과 list API(restaurant/list · place/list · hairshop/list 등)의
+      window.__APOLLO_STATE__ 안에서 '가장 큰 placeList'(=진짜 검색결과)만 순서대로 파싱.
+    - 작은 placeList(새로오픈 추천 등 '가짜' 리스트)는 무시.
+    - start 파라미터로 페이지네이션하여 limit까지 수집.
+    """
+    import urllib.parse
+
+    def _extract_apollo(html):
+        """__APOLLO_STATE__ 객체를 균형 중괄호로 정확히 추출."""
+        idx = html.find("__APOLLO_STATE__")
+        if idx < 0:
+            return None
+        j = html.find("{", idx)
+        if j < 0:
+            return None
+        depth = 0; instr = False; esc = False
+        for k in range(j, len(html)):
+            c = html[k]
+            if instr:
+                if esc: esc = False
+                elif c == "\\": esc = True
+                elif c == '"': instr = False
+            else:
+                if c == '"': instr = True
+                elif c == "{": depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(html[j:k + 1])
+                        except Exception:
+                            return None
+        return None
+
+    def _largest_placelist(data):
+        """ROOT_QUERY 안에서 가장 큰 placeList(진짜 검색결과)의 items를 반환."""
+        rq = data.get("ROOT_QUERY", {})
+        best = []
+        for kk, v in rq.items():
+            if kk.startswith("placeList") and isinstance(v, dict) and isinstance(v.get("businesses"), dict):
+                items = v["businesses"].get("items", [])
+                if len(items) > len(best):
+                    best = items
+        return best
+
+    def _int(v):
+        d = re.sub(r"[^0-9]", "", str(v or ""))
+        return int(d) if d else 0
+
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(user_agent=USER_AGENT)
+            launch_args = {"headless": True}
+            if proxy:
+                launch_args["proxy"] = {"server": proxy}
+            browser = p.chromium.launch(**launch_args)
+            context = browser.new_context(
+                user_agent=USER_AGENT,
+                viewport={"width": 1280, "height": 800},
+            )
+            # 본문(document)·xhr·script는 통과(필요), 무거운 리소스만 차단
+            context.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "media", "font", "stylesheet"] else r.continue_())
             page = context.new_page()
-            
-            results = []
-            seen_mids = set()
-            
-            def handle_response(response):
+
+            # 1) 지도 검색으로 세션 워밍업 + 실제 list API URL(엔드포인트 타입/좌표/파라미터) 캡처
+            list_url = {"u": None}
+
+            def on_resp(r):
                 try:
-                    url = response.url
-                    if "api/search/allSearch" in url and response.status == 200:
-                        data = response.json()
-                        places = data.get("result", {}).get("place", {}).get("list", [])
-                    elif "pcmap-api.place.naver.com/graphql" in url and response.status == 200:
-                        data = response.json()
-                        if isinstance(data, list):
-                            data = data[0]
-                        d_data = data.get("data", {})
-                        places = []
-                        for k, v in d_data.items():
-                            if isinstance(v, dict) and "businesses" in v:
-                                places.extend(v["businesses"].get("items", []))
-                    elif ("restaurant/list" in url or "place/list" in url) and response.status == 200:
-                        import re
-                        html = response.text()
-                        match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});\s*window\.', html, re.DOTALL)
-                        places = []
-                        if match:
-                            data = json.loads(match.group(1))
-                            rq = data.get("ROOT_QUERY", {})
-                            target_refs = []
-                            max_len = 0
-                            for k, v in rq.items():
-                                if k.startswith("placeList") and isinstance(v, dict) and "businesses" in v:
-                                    items = v["businesses"].get("items", [])
-                                    if len(items) > max_len:
-                                        max_len = len(items)
-                                        target_refs = items
-                            
-                            for ref_obj in target_refs:
-                                ref_key = ref_obj.get("__ref", "")
-                                if ref_key and ref_key in data:
-                                    item_data = data[ref_key]
-                                    if isinstance(item_data, dict) and "name" in item_data and "id" in item_data:
-                                        places.append(item_data)
-                    else:
-                        return
-                        
-                    for p_data in places:
-                        p_data = p_data.get("item", p_data) # GraphQL Wrapping 방어
-                        mid = p_data.get("id") or p_data.get("apolloCacheId")
-                        if mid and mid not in seen_mids:
-                            seen_mids.add(mid)
-                            name = p_data.get("name", "")
-                            if name.startswith("예약"):
-                                name = name.replace("예약", "", 1).strip()
-                            
-                            p_json_str = json.dumps(p_data, ensure_ascii=False)
-                            is_new = p_data.get("isNew") or p_data.get("newOpen") or ("새로오픈" in name) or ("신규" in name) or ("새로오픈" in p_json_str)
-                            has_revisit = "재방문 많은" in p_json_str or "재방문율" in p_json_str
-                            
-                            category = p_data.get("category", "")
-                            if category and isinstance(category, list):
-                                category = category[-1] if len(category) > 0 else "음식점"
-                                
-                            import re
-                            # Robustly parse numbers
-                            v_rev = p_data.get("placeReviewCount") or p_data.get("visitorReviewScore") or p_data.get("visitorReviewCount") or 0
-                            visitor_reviews = int(re.sub(r'[^0-9]', '', str(v_rev))) if re.sub(r'[^0-9]', '', str(v_rev)) else 0
-                            
-                            b_rev = p_data.get("blogCafeReviewCount") or p_data.get("reviewCount") or 0
-                            blog_reviews = int(re.sub(r'[^0-9]', '', str(b_rev))) if re.sub(r'[^0-9]', '', str(b_rev)) else 0
-                            
-                            saves_raw = p_data.get("saveCount") or 0
-                            saves = int(re.sub(r'[^0-9]', '', str(saves_raw))) if re.sub(r'[^0-9]', '', str(saves_raw)) else 0
-                            
-                            # mock changes for ui display
-                            rec_d = random.choice([2, 5, 8, 12, 18, 25, 45, 110]) if len(results) % 2 == 0 else random.choice([-2, -5, -8, -12, -25])
-                            blog_d = random.choice([1, 2, 4, 9, 15, 21, 41]) if len(results) % 2 == 0 else random.choice([-1, -3, -7])
-                            
-                            if saves > 50000:
-                                save_str = f"{saves // 1000 * 1000:,}+"
-                            elif saves > 1000:
-                                save_str = f"{saves // 100 * 100:,}+"
-                            else:
-                                save_str = f"~{saves // 50 * 50}"
-                            
-                            results.append({
-                                "mid": str(mid),
-                                "name": name,
-                                "cat": category,
-                                "rec": visitor_reviews,
-                                "rec_d": rec_d,
-                                "blog": blog_reviews,
-                                "blog_d": blog_d,
-                                "save": save_str,
-                                "is_new": is_new,
-                            })
-                except Exception as e:
+                    if re.search(r"pcmap\.place\.naver\.com/[a-z]+/list", r.url) and r.status == 200 and list_url["u"] is None:
+                        list_url["u"] = r.url
+                except Exception:
                     pass
-            page.on("response", handle_response)
-            
-            # 1. Load Naver Map to get cookies and context
-            page.goto(f"https://map.naver.com/p/search/{keyword}", wait_until="networkidle")
-            
-            try:
-                page.wait_for_selector("#searchIframe", timeout=15000)
-                iframe = page.frame_locator("#searchIframe")
-                iframe.locator(".place_bluelink, .UEzoS").first.wait_for(timeout=15000)
-                
-                # 1.5 Scroll on page 1 to trigger lazy loading of ranks 21-50
-                for _ in range(4):
-                    try:
-                        iframe.locator("#_pcmap_list_scroll_container").evaluate("el => el.scrollTo(0, el.scrollHeight)", timeout=5000)
-                    except:
-                        pass
-                    page.wait_for_timeout(500)
-            except Exception as e:
-                pass
-                
-            page.wait_for_timeout(2000)
-            
-            # 2. Iterate pages 2 to 6 to collect up to 300
-            for i in range(2, 7):
-                if len(results) >= limit:
-                    break
-                
+
+            page.on("response", on_resp)
+            page.goto(f"https://map.naver.com/p/search/{urllib.parse.quote(keyword)}", wait_until="domcontentloaded")
+            page.wait_for_timeout(4000)
+
+            base = list_url["u"] or (
+                f"https://pcmap.place.naver.com/place/list?query={urllib.parse.quote(keyword)}&display=70&start=1&locale=ko"
+            )
+
+            # gps(좌표) 주입 → 거리 기준점(매장 인근). 한국 좌표는 경도(>124) > 위도(<43)로 자동 판별.
+            if gps:
                 try:
-                    iframe = page.frame_locator("#searchIframe")
-                    for _ in range(4):
-                        try:
-                            iframe.locator("#_pcmap_list_scroll_container").evaluate("el => el.scrollTo(0, el.scrollHeight)", timeout=5000)
-                        except:
-                            pass
-                        page.wait_for_timeout(500)
-                        
-                    try:
-                        btn = iframe.locator("a.mBN2s").get_by_text(str(i), exact=True)
-                        if btn.count() > 0:
-                            btn.first.click(timeout=3000)
-                        else:
-                            raise Exception("No mBN2s exact text match")
-                    except Exception as e1:
-                        try:
-                            iframe.locator(f".zRM9F a:has-text('{i}')").first.click(timeout=3000)
-                        except Exception as e2:
-                            iframe.locator(f"a:has-text('{i}')").last.click(timeout=3000)
-                            
-                    page.wait_for_timeout(2500)
-                except Exception as e:
-                    break # No more pages
-                        
+                    a, b = [float(x) for x in re.split(r"[ ,;]+", gps.strip())[:2]]
+                    lng, lat = (max(a, b), min(a, b))
+                    for kx in ["x", "clientX"]:
+                        base = re.sub(r"([?&]" + kx + r"=)[^&]*", r"\g<1>" + str(lng), base)
+                    for ky in ["y", "clientY"]:
+                        base = re.sub(r"([?&]" + ky + r"=)[^&]*", r"\g<1>" + str(lat), base)
+                except Exception:
+                    pass
+
+            results = []
+            seen = set()
+            per = 70
+
+            # 2) start를 늘려가며 list API를 직접 호출 → placeList를 순서대로 누적
+            for start in range(1, limit + 1, per):
+                u = re.sub(r"([?&]start=)\d+", r"\g<1>" + str(start), base)
+                if "start=" not in u:
+                    u += f"&start={start}"
+                u = re.sub(r"([?&]display=)\d+", r"\g<1>" + str(per), u)
+                if "display=" not in u:
+                    u += f"&display={per}"
+                try:
+                    page.goto(u, wait_until="domcontentloaded")
+                    html = page.content()
+                except Exception:
+                    break
+
+                data = _extract_apollo(html)
+                if not data:
+                    break
+                items = _largest_placelist(data)
+                if not items:
+                    break
+
+                added = 0
+                for it in items:
+                    ref = it.get("__ref", "") if isinstance(it, dict) else ""
+                    d = data.get(ref, {}) if ref else {}
+                    name = (d.get("name") or "").strip()
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+
+                    cat = d.get("category") or ""
+                    if isinstance(cat, list):
+                        cat = cat[-1] if cat else ""
+
+                    saves = _int(d.get("saveCount"))
+                    if saves > 50000:
+                        save_str = f"{saves // 1000 * 1000:,}+"
+                    elif saves > 1000:
+                        save_str = f"{saves // 100 * 100:,}+"
+                    else:
+                        save_str = f"~{saves // 50 * 50}"
+
+                    results.append({
+                        "mid": str(d.get("id") or (ref.split(":")[-1] if ":" in ref else ref) or "0"),
+                        "name": name,
+                        "cat": cat,
+                        "rec": _int(d.get("visitorReviewCount")),
+                        "rec_d": 0,
+                        "blog": _int(d.get("blogCafeReviewCount")),
+                        "blog_d": 0,
+                        "save": save_str,
+                        "is_new": bool(d.get("newOpening")) or ("새로오픈" in str(d.get("markerLabel") or "")),
+                        "has_revisit": bool(d.get("repeatVisit")),
+                    })
+                    added += 1
+                    if len(results) >= limit:
+                        break
+
+                if added == 0 or len(results) >= limit:
+                    break
+
             browser.close()
             return results[:limit]
-            
     except Exception as e:
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print(json.dumps({"error": "Invalid arguments"}))
-        sys.exit(1)
-        
-    cmd = sys.argv[1]
-    arg = sys.argv[2]
-    
-    if cmd == "detail":
-        res = fetch_place_by_mid(arg)
+    if len(sys.argv) >= 3 and sys.argv[1] == "detail":
+        res = fetch_place_by_mid(sys.argv[2])
         print(json.dumps(res))
-    elif cmd == "search":
-        limit = int(sys.argv[3]) if len(sys.argv) > 3 else 300
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=False,
-                    args=[
-                        '--window-position=-32000,-32000',
-                        '--disable-blink-features=AutomationControlled',
-                    ]
-                )
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={"width": 1280, "height": 800}
-                )
-                
-                # Block heavy resources to speed up crawling
-                context.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-                
-                page = context.new_page()
-                
-                results = []
-                seen_mids = set()
-                
-                def handle_response(response):
-                    try:
-                        url = response.url
-                        if "api/search/allSearch" in url and response.status == 200:
-                            data = response.json()
-                            places = data.get("result", {}).get("place", {}).get("list", [])
-                        elif "pcmap-api.place.naver.com/graphql" in url and response.status == 200:
-                            data = response.json()
-                            if isinstance(data, list):
-                                data = data[0]
-                            d_data = data.get("data", {})
-                            places = []
-                            for k, v in d_data.items():
-                                if isinstance(v, dict) and "businesses" in v:
-                                    places.extend(v["businesses"].get("items", []))
-                        elif ("restaurant/list" in url or "place/list" in url) and response.status == 200:
-                            import re
-                            html = response.text()
-                            match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});\s*window\.', html, re.DOTALL)
-                            places = []
-                            if match:
-                                data = json.loads(match.group(1))
-                                rq = data.get("ROOT_QUERY", {})
-                                target_refs = []
-                                max_len = 0
-                                for k, v in rq.items():
-                                    if k.startswith("placeList") and isinstance(v, dict) and "businesses" in v:
-                                        items = v["businesses"].get("items", [])
-                                        if len(items) > max_len:
-                                            max_len = len(items)
-                                            target_refs = items
-                                
-                                for ref_obj in target_refs:
-                                    ref_key = ref_obj.get("__ref", "")
-                                    if ref_key and ref_key in data:
-                                        item_data = data[ref_key]
-                                        if isinstance(item_data, dict) and "name" in item_data and "id" in item_data:
-                                            places.append(item_data)
-                        else:
-                            return
-                            
-                        import re
-                        for p_data in places:
-                            p_data = p_data.get("item", p_data) # GraphQL Wrapping 방어
-                            mid = p_data.get("id") or p_data.get("apolloCacheId")
-                            if mid and mid not in seen_mids:
-                                seen_mids.add(mid)
-                                name = p_data.get("name", "")
-                                if name.startswith("예약"):
-                                    name = name.replace("예약", "", 1).strip()
-                                
-                                p_json_str = json.dumps(p_data, ensure_ascii=False)
-                                is_new = p_data.get("isNew") or p_data.get("newOpen") or ("새로오픈" in name) or ("신규" in name) or ("새로오픈" in p_json_str)
-                                has_revisit = "재방문 많은" in p_json_str or "재방문율" in p_json_str
-                                
-                                category = p_data.get("category", "")
-                                if category and isinstance(category, list):
-                                    category = category[-1] if len(category) > 0 else "음식점"
-                                    
-                                # Robustly parse numbers
-                                v_rev = p_data.get("placeReviewCount") or p_data.get("visitorReviewScore") or p_data.get("visitorReviewCount") or 0
-                                v_rev = int(re.sub(r'[^0-9]', '', str(v_rev))) if re.sub(r'[^0-9]', '', str(v_rev)) else 0
-                                    
-                                b_rev = p_data.get("blogCafeReviewCount") or p_data.get("reviewCount") or 0
-                                b_rev = int(re.sub(r'[^0-9]', '', str(b_rev))) if re.sub(r'[^0-9]', '', str(b_rev)) else 0
-                                    
-                                saves = p_data.get("saveCount") or 0
-                                saves = int(re.sub(r'[^0-9]', '', str(saves))) if re.sub(r'[^0-9]', '', str(saves)) else 0
-                                
-                                rec_d = random.choice([2, 5, 8, 12, 18, 25, 45, 110]) if len(results) % 2 == 0 else random.choice([-2, -5, -8, -12, -25])
-                                blog_d = random.choice([1, 2, 4, 9, 15, 21, 41]) if len(results) % 2 == 0 else random.choice([-1, -3, -7])
-                                
-                                if saves > 50000:
-                                    save_str = f"{saves // 1000 * 1000:,}+"
-                                elif saves > 1000:
-                                    save_str = f"{saves // 100 * 100:,}+"
-                                else:
-                                    save_str = f"~{saves // 50 * 50}"
-                                
-                                results.append({
-                                    "mid": str(mid),
-                                    "name": name,
-                                    "cat": category,
-                                    "rec": v_rev,
-                                    "rec_d": rec_d,
-                                    "blog": b_rev,
-                                    "blog_d": blog_d,
-                                    "save": save_str,
-                                    "is_new": is_new,
-                                })
-                    except Exception as e:
-                        pass
-                            
-                page.on("response", handle_response)
-                
-                # 1. Load Naver Map
-                page.goto(f"https://map.naver.com/p/search/{arg}", wait_until="domcontentloaded")
-                
+    elif len(sys.argv) >= 3 and sys.argv[1] == "search":
+        keyword = sys.argv[2]
+        limit = 300
+        gps = None
+        proxy = None
+        
+        i = 3
+        while i < len(sys.argv):
+            if sys.argv[i] == "--limit" and i + 1 < len(sys.argv):
+                limit = int(sys.argv[i+1])
+                i += 2
+            elif sys.argv[i] == "--gps" and i + 1 < len(sys.argv):
+                gps = sys.argv[i+1]
+                i += 2
+            elif sys.argv[i] == "--proxy" and i + 1 < len(sys.argv):
+                proxy = sys.argv[i+1]
+                i += 2
+            else:
                 try:
-                    page.wait_for_selector("#searchIframe", timeout=15000)
-                    iframe = page.frame_locator("#searchIframe")
-                    iframe.locator(".place_bluelink, .UEzoS").first.wait_for(timeout=15000)
-                except Exception as e:
+                    limit = int(sys.argv[i])
+                except ValueError:
                     pass
+                i += 1
                 
-                # 2. Iterate pages 2 to 6 to collect up to 300
-                for i in range(2, 7):
-                    if len(results) >= limit:
-                        break
-                    
-                    try:
-                        iframe = page.frame_locator("#searchIframe")
-                        
-                        # Scroll the exact scroll container to the bottom multiple times
-                        for _ in range(4):
-                            try:
-                                iframe.locator("#_pcmap_list_scroll_container").evaluate("el => el.scrollTo(0, el.scrollHeight)", timeout=5000)
-                            except:
-                                pass
-                            page.wait_for_timeout(500)
-                        
-                        if i <= 5:
-                            # Try to click the specific page number
-                            try:
-                                btn = iframe.locator("a.mBN2s").get_by_text(str(i), exact=True)
-                                if btn.count() > 0:
-                                    btn.first.click(timeout=3000)
-                                    clicked = True
-                                else:
-                                    clicked = False
-                            except:
-                                clicked = False
-                        else:
-                            # We need to click the 'Next' button
-                            try:
-                                # Naver Map pagination next button is usually the last anchor tag in the pagination container
-                                iframe.locator(".zRM9F > a:last-child, .O8qbU > a:last-child, .pagination > a:last-child").last.click(timeout=3000)
-                                clicked = True
-                            except:
-                                try:
-                                    # Fallback: find any 'a' with '다음'
-                                    iframe.locator("a:has-text('다음')").last.click(timeout=3000)
-                                    clicked = True
-                                except:
-                                    clicked = False
-                        
-                        if clicked:
-                            page.wait_for_timeout(800) # Reduced extremely to avoid proxy timeouts
-                        else:
-                            break
-                    except Exception as e:
-                        break
-                            
-                browser.close()
-                print(json.dumps(results[:limit]))
-                
-        except Exception as e:
-            print(json.dumps({"error": str(e)}))
-            
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) >= 4 and sys.argv[1] == "search":
-        search_keyword_ranking(sys.argv[2], int(sys.argv[3]))
-    elif len(sys.argv) >= 3 and sys.argv[1] == "detail":
-        fetch_place_by_mid(sys.argv[2])
+        res = search_keyword_ranking(keyword, limit, gps=gps, proxy=proxy)
+        print(json.dumps(res))

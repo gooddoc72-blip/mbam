@@ -1,6 +1,7 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
 import { useState, useEffect } from "react";
+import ManuscriptLoaderModal from "../components/ManuscriptLoaderModal";
 
 export default function CafeAutoPage() {
   const [mainTab, setMainTab] = useState("single"); // "single", "target", "nurture"
@@ -39,12 +40,17 @@ export default function CafeAutoPage() {
   const [newSchAccId, setNewSchAccId] = useState("");
   const [newSchCafeId, setNewSchCafeId] = useState("");
   const [newSchTime, setNewSchTime] = useState("");
+  const [newSchCategory, setNewSchCategory] = useState("");
+  const [newSchCount, setNewSchCount] = useState(1);
+  const [newSchQty, setNewSchQty] = useState(1);
+  const [categories, setCategories] = useState([]);
 
   // --- Common ---
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState(null);
   const [statusLogs, setStatusLogs] = useState([]);
   const [taskStatus, setTaskStatus] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     // Load accounts and schedules if in nurture or target tab
@@ -54,9 +60,22 @@ export default function CafeAutoPage() {
     }
   }, [mainTab]);
 
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const res = await fetchWithAuth("/api/content/categories");
+        if (res.ok) {
+          const data = await res.json();
+          setCategories(data.categories || []);
+        }
+      } catch (err) {}
+    };
+    fetchCategories();
+  }, []);
+
   const fetchAccounts = async () => {
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/accounts");
+      const res = await fetchWithAuth("/api/cafe-nurture/accounts");
       if (res.ok) {
         setAccounts(await res.json());
       }
@@ -67,7 +86,7 @@ export default function CafeAutoPage() {
 
   const fetchSchedules = async () => {
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/schedules");
+      const res = await fetchWithAuth("/api/cafe-nurture/schedules");
       if (res.ok) {
         setSchedules(await res.json());
       }
@@ -84,8 +103,8 @@ export default function CafeAutoPage() {
         try {
           // Check which endpoint to poll based on tab
           const endpoint = mainTab === "target" 
-            ? `http://127.0.0.1:8080/api/cafe-nurture/status/${taskId}`
-            : `http://127.0.0.1:8080/api/auto_post/status/${taskId}`;
+            ? `/api/cafe-nurture/status/${taskId}`
+            : `/api/auto_post/status/${taskId}`;
             
           const res = await fetchWithAuth(endpoint);
           if (res.ok) {
@@ -119,13 +138,19 @@ export default function CafeAutoPage() {
         publish_mode: "instant", cafe_url: cafeUrl, board_name: boardName,
         images: images, cafe_action_type: actionType, reference_data: referenceData
       };
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/auto_post/", {
+      const res = await fetchWithAuth("/api/auto_post/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) setTaskId(data.task_id);
       else { alert("실패했습니다."); setLoading(false); }
     } catch (e) { alert("서버 오류"); setLoading(false); }
+  };
+
+  const handleLoadManuscript = (manuscript) => {
+    setTitle(manuscript.title);
+    setContent(manuscript.content);
+    alert("원고가 성공적으로 불러와졌습니다.");
   };
 
   // --- Handlers Tab 2 ---
@@ -142,13 +167,33 @@ export default function CafeAutoPage() {
         delay_min: delayMin,
         delay_max: delayMax
       };
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/trigger-targeted", {
+      const res = await fetchWithAuth("/api/cafe-nurture/trigger-targeted", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) setTaskId(data.task_id);
       else { alert(data.detail || "실패했습니다."); setLoading(false); }
     } catch (e) { alert("서버 오류"); setLoading(false); }
+  };
+
+  const handleCancelTask = async () => {
+    if (!taskId) return;
+    if (!window.confirm("정말 진행 중인 작업을 중단하시겠습니까?")) return;
+    try {
+      const endpoint = mainTab === "target" 
+        ? `/api/cafe-nurture/cancel/${taskId}`
+        : `/api/auto_post/cancel/${taskId}`;
+      const res = await fetchWithAuth(endpoint, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTaskStatus("failed");
+        setLoading(false);
+      } else {
+        alert(data.message || "작업 중지에 실패했습니다.");
+      }
+    } catch(e) {
+      alert("작업 중지 오류: " + e.message);
+    }
   };
 
   const toggleAccountSelection = (id) => {
@@ -159,7 +204,7 @@ export default function CafeAutoPage() {
   const handleAddAccount = async () => {
     if (!newAccId || !newAccPw) return;
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/accounts", {
+      const res = await fetchWithAuth("/api/cafe-nurture/accounts", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naver_id: newAccId, naver_pw: newAccPw })
       });
       if (res.ok) { alert("추가 완료"); setNewAccId(""); setNewAccPw(""); fetchAccounts(); }
@@ -170,7 +215,7 @@ export default function CafeAutoPage() {
   const handleAddCafe = async () => {
     if (!newCafeAccId || !newCafeUrl || !newCafeBoard) return;
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/cafes", {
+      const res = await fetchWithAuth("/api/cafe-nurture/cafes", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: newCafeAccId, cafe_url: newCafeUrl, board_name: newCafeBoard })
       });
       if (res.ok) { alert("추가 완료"); fetchAccounts(); }
@@ -180,8 +225,15 @@ export default function CafeAutoPage() {
   const handleAddSchedule = async () => {
     if (!newSchAccId || !newSchCafeId || !newSchTime) return;
     try {
-      const res = await fetchWithAuth("http://127.0.0.1:8080/api/cafe-nurture/schedules", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: newSchAccId, cafe_id: newSchCafeId, schedule_time: newSchTime })
+      const res = await fetchWithAuth("/api/cafe-nurture/schedules", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ 
+            account_id: newSchAccId, 
+            cafe_id: newSchCafeId, 
+            schedule_time: newSchTime,
+            content_category: newSchCategory || null,
+            post_count_per_day: Number(newSchCount),
+            post_qty_per_time: Number(newSchQty)
+        })
       });
       if (res.ok) { alert("추가 완료"); fetchSchedules(); }
     } catch (e) { alert("오류"); }
@@ -248,14 +300,26 @@ export default function CafeAutoPage() {
                 )}
               </div>
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>원고 (키워드)</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>원고 (키워드)</h2>
+                  <button onClick={() => setIsModalOpen(true)} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                    ☁️ 웹에서 불러오기
+                  </button>
+                </div>
                 <input type="text" placeholder="타겟 키워드 (AI 댓글 생성용)" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
                 {actionType === "post" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => setTitle(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />}
                 <textarea placeholder="직접 본문 작성 시 (비워두면 AI 자동작성)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: "100px", padding: "0.8rem" }} />
               </div>
-              <button onClick={handleStartSingle} disabled={loading} style={{ padding: "1rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
-                {loading ? "작업 중..." : "일반 작업 시작하기"}
-              </button>
+              <div style={{ display: "flex", gap: "1rem" }}>
+                <button onClick={handleStartSingle} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
+                  {loading ? "작업 중..." : "일반 작업 시작하기"}
+                </button>
+                {loading && (
+                  <button onClick={handleCancelTask} style={{ padding: "1rem 2rem", background: "#ef4444", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer" }}>
+                    ■ 작업 강제 중지
+                  </button>
+                )}
+              </div>
             </>
           )}
 
@@ -296,9 +360,16 @@ export default function CafeAutoPage() {
                 </div>
               </div>
               
-              <button onClick={handleStartTargetMulti} disabled={loading} style={{ padding: "1rem", background: loading ? "#94a3b8" : "#0f172a", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
-                {loading ? "작업 중..." : "다중 타겟 댓글 작업 시작"}
-              </button>
+              <div style={{ display: "flex", gap: "1rem" }}>
+                <button onClick={handleStartTargetMulti} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#0f172a", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
+                  {loading ? "작업 중..." : "다중 타겟 댓글 작업 시작"}
+                </button>
+                {loading && (
+                  <button onClick={handleCancelTask} style={{ padding: "1rem 2rem", background: "#ef4444", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer" }}>
+                    ■ 작업 강제 중지
+                  </button>
+                )}
+              </div>
             </>
           )}
 
@@ -363,7 +434,7 @@ export default function CafeAutoPage() {
               {/* 3. Scheduling */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>3. 일일 자동 방문(육성) 스케줄</h2>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
                   <select value={newSchAccId} onChange={e => {
                     setNewSchAccId(e.target.value); setNewSchCafeId("");
                   }} style={{ padding: "0.5rem" }}>
@@ -379,6 +450,20 @@ export default function CafeAutoPage() {
                   </select>
 
                   <input type="time" value={newSchTime} onChange={e => setNewSchTime(e.target.value)} style={{ padding: "0.5rem" }} />
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+                  <select value={newSchCategory} onChange={e => setNewSchCategory(e.target.value)} style={{ padding: "0.5rem", flex: 1 }}>
+                    <option value="">글감 선택 안함 (일반 육성)</option>
+                    {categories.map((c, i) => <option key={i} value={c}>{c}</option>)}
+                  </select>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
+                    <span style={{fontSize: '0.9rem'}}>일일횟수</span>
+                    <input type="number" min="1" value={newSchCount} onChange={e => setNewSchCount(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
+                  </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
+                    <span style={{fontSize: '0.9rem'}}>1회수량</span>
+                    <input type="number" min="1" value={newSchQty} onChange={e => setNewSchQty(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
+                  </div>
                   <button onClick={handleAddSchedule} style={{ padding: "0.5rem 1rem", background: "#0f172a", color: "white", border: "none" }}>예약</button>
                 </div>
                 
@@ -388,6 +473,7 @@ export default function CafeAutoPage() {
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>실행 시간</th>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>대상 계정</th>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>대상 카페</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left" }}>글감 연동</th>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>상태</th>
                     </tr>
                   </thead>
@@ -397,6 +483,9 @@ export default function CafeAutoPage() {
                         <td style={{ padding: "0.5rem", fontWeight: "bold" }}>매일 {sch.schedule_time}</td>
                         <td style={{ padding: "0.5rem" }}>{sch.naver_id}</td>
                         <td style={{ padding: "0.5rem" }}>{sch.cafe_url} ({sch.board_name})</td>
+                        <td style={{ padding: "0.5rem", fontSize: "0.85rem", color: "#475569" }}>
+                          {sch.content_category ? `${sch.content_category} (${sch.post_count_per_day}회/${sch.post_qty_per_time}개)` : "-"}
+                        </td>
                         <td style={{ padding: "0.5rem" }}>
                           <span style={{ background: sch.is_active ? "#dcfce7" : "#f1f5f9", color: sch.is_active ? "#166534" : "#64748b", padding: "0.2rem 0.5rem", borderRadius: "4px" }}>
                             {sch.is_active ? "활성화" : "정지"}
@@ -432,6 +521,12 @@ export default function CafeAutoPage() {
           )}
         </div>
       </div>
+
+      <ManuscriptLoaderModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSelect={handleLoadManuscript} 
+      />
     </div>
   );
 }

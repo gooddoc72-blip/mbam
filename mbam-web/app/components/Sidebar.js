@@ -23,6 +23,7 @@ import {
 
 const MENU_ITEMS = [
     { name: "홈", path: "/dashboard", icon: LayoutDashboard },
+    { name: "원고 관리", path: "/manuscript", icon: ScrollText },
     { name: "글감 수집", path: "/content-collect", icon: FileText },
     { name: "SEO 분석", path: "/seo-analysis", icon: TrendingUp },
     { 
@@ -38,9 +39,9 @@ const MENU_ITEMS = [
         icon: PenTool,
         submenus: [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
-            { name: "블로그 포스팅", path: "/blog-posting", icon: PenTool },
-            { name: "블로그 자동화", path: "/blog-auto", icon: PenTool },
-            { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake }
+            { name: "블로그 자동 포스팅", path: "/blog-posting", icon: PenTool },
+            { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
+            { name: "이미지 세탁소", path: "/image-wash", icon: PenTool }
         ]
     },
     { name: "구글 블로그스팟 자동화", path: "/blogspot", icon: PenTool },
@@ -58,7 +59,8 @@ const MENU_ITEMS = [
         submenus: [
             { name: "네이버 쇼핑 순위 검색", path: "/shopping/rank", icon: TrendingUp },
             { name: "키워드 분석", path: "/shopping/keyword", icon: Search },
-            { name: "상품명 키워드 조합", path: "/shopping/combine", icon: FileText }
+            { name: "상품명 키워드 조합", path: "/shopping/combine", icon: FileText },
+            { name: "쿠팡 순위 분석", path: "/coupang/rank", icon: TrendingUp }
         ]
     },
     { name: "멀티 실행", path: "/multi-task", icon: Layers },

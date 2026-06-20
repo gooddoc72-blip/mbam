@@ -91,7 +91,9 @@ class SchedulerService:
                 logger.info(f"Analyzing Shopping Item: {item.name} / Keyword: {item.keyword}")
                 try:
                     req = AnalyzeRequest(keyword=item.keyword, target_mid=item.mid)
-                    res = await analyze_keyword_shopping(req, db)
+                    # FastAPI 의존성(check_quota) 우회: 스케줄러는 시스템 권한으로 직접 호출.
+                    # current_user를 명시적으로 넘기지 않으면 Depends 객체가 들어와 increment_quota에서 크래시함.
+                    res = await analyze_keyword_shopping(req, db, {"sub": "system_scheduler", "role": "admin"})
                     if res.get('found') and res.get('places'):
                         target_stat = next((p for p in res['places'] if p.get('is_target')), None)
                         if target_stat:
@@ -99,30 +101,30 @@ class SchedulerService:
                             # Check if history exists for today
                             existing_hist = db.query(ShoppingHistory).filter(ShoppingHistory.tracked_id == item.id, ShoppingHistory.date_str == date_str).first()
                             if existing_hist:
-                                existing_hist.rank = target_stat['rank']
-                                existing_hist.page = (target_stat['rank'] - 1) // 40 + 1
-                                existing_hist.saves = target_stat['keeps']
-                                existing_hist.visitor_reviews = target_stat['reviews']
-                                existing_hist.purchases = target_stat['purchases']
-                                existing_hist.n1 = target_stat['n1']
-                                existing_hist.n2 = target_stat['n2']
-                                existing_hist.n3 = target_stat['n3']
-                                existing_hist.n4 = target_stat['n4']
-                                existing_hist.n5 = target_stat['n5']
+                                existing_hist.rank = target_stat.get('rank', 0)
+                                existing_hist.page = (target_stat.get('rank', 0) - 1) // 40 + 1 if target_stat.get('rank', 0) > 0 else 1
+                                existing_hist.saves = target_stat.get('keeps', 0)
+                                existing_hist.visitor_reviews = target_stat.get('reviews', 0)
+                                existing_hist.purchases = target_stat.get('purchases', 0)
+                                existing_hist.n1 = target_stat.get('n1', 0)
+                                existing_hist.n2 = target_stat.get('n2', 0)
+                                existing_hist.n3 = target_stat.get('n3', 0)
+                                existing_hist.n4 = target_stat.get('n4', 0)
+                                existing_hist.n5 = target_stat.get('n5', 0)
                             else:
                                 new_hist = ShoppingHistory(
                                     tracked_id=item.id,
                                     date_str=date_str,
-                                    rank=target_stat['rank'],
-                                    page=(target_stat['rank'] - 1) // 40 + 1,
-                                    saves=target_stat['keeps'],
-                                    visitor_reviews=target_stat['reviews'],
-                                    purchases=target_stat['purchases'],
-                                    n1=target_stat['n1'],
-                                    n2=target_stat['n2'],
-                                    n3=target_stat['n3'],
-                                    n4=target_stat['n4'],
-                                    n5=target_stat['n5']
+                                    rank=target_stat.get('rank', 0),
+                                    page=(target_stat.get('rank', 0) - 1) // 40 + 1 if target_stat.get('rank', 0) > 0 else 1,
+                                    saves=target_stat.get('keeps', 0),
+                                    visitor_reviews=target_stat.get('reviews', 0),
+                                    purchases=target_stat.get('purchases', 0),
+                                    n1=target_stat.get('n1', 0),
+                                    n2=target_stat.get('n2', 0),
+                                    n3=target_stat.get('n3', 0),
+                                    n4=target_stat.get('n4', 0),
+                                    n5=target_stat.get('n5', 0)
                                 )
                                 db.add(new_hist)
                             db.commit()
@@ -195,14 +197,43 @@ class SchedulerService:
             import os
             os.environ["NAVER_PW"] = acc.naver_pw # Temporarily pass password via env if needed
             
-            await orchestrator.execute_cafe_workflow(
-                account_id=acc.naver_id,
-                cafe_id=cafe.cafe_url,
-                board_name=cafe.board_name,
-                keyword="소통", # General keyword for nurturing
-                auto_submit=True,
-                action_type="comment"
-            )
+            # Check if this schedule is for Content Category posting
+            if hasattr(sch, 'content_category') and sch.content_category:
+                logger.info(f"🚀 [Scheduler] Running content-based cafe post for category: {sch.content_category}")
+                from mbam_nextgen.services.gov_data import GovDataCollector
+                import random
+                
+                collector = GovDataCollector()
+                items = collector.load_cache(sch.content_category)
+                
+                qty = getattr(sch, 'post_qty_per_time', 1)
+                if not items:
+                    logger.warning(f"No items found for category {sch.content_category}")
+                    return
+                
+                # Pick top N items or random N items
+                selected_items = items[:qty] if len(items) >= qty else items
+                
+                for i, item in enumerate(selected_items):
+                    logger.info(f"  -> Posting item {i+1}/{len(selected_items)}: {item.get('title')}")
+                    await orchestrator.execute_cafe_workflow(
+                        account_id=acc.naver_id,
+                        cafe_id=cafe.cafe_url,
+                        board_name=cafe.board_name,
+                        keyword=item.get('title', '정보 제공'),
+                        content=f"제목: {item.get('title')}\n\n내용:\n{item.get('content', '')}",
+                        auto_submit=True,
+                        action_type="post"
+                    )
+            else:
+                await orchestrator.execute_cafe_workflow(
+                    account_id=acc.naver_id,
+                    cafe_id=cafe.cafe_url,
+                    board_name=cafe.board_name,
+                    keyword="소통", # General keyword for nurturing
+                    auto_submit=True,
+                    action_type="comment"
+                )
         except Exception as e:
             logger.error(f"Cafe nurture job failed: {e}")
         finally:

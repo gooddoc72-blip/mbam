@@ -2,6 +2,10 @@ import asyncio
 import sys
 import uvicorn
 
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -15,4 +19,4 @@ if __name__ == "__main__":
         except Exception: pass
         conn.commit()
 
-    uvicorn.run("mbam_nextgen.backend.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("mbam_nextgen.backend.main:app", host="0.0.0.0", port=8000)

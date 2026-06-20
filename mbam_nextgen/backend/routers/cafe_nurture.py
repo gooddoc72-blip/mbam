@@ -34,6 +34,9 @@ class ScheduleCreate(BaseModel):
     account_id: str
     cafe_id: str
     schedule_time: str
+    content_category: Optional[str] = None
+    post_count_per_day: Optional[int] = 1
+    post_qty_per_time: Optional[int] = 1
 
 class TargetPostRequest(BaseModel):
     urls: List[str]
@@ -129,7 +132,10 @@ async def add_schedule(req: ScheduleCreate, db: Session = Depends(get_db), curre
         user_id=user_id,
         account_id=req.account_id,
         cafe_id=req.cafe_id,
-        schedule_time=req.schedule_time
+        schedule_time=req.schedule_time,
+        content_category=req.content_category,
+        post_count_per_day=req.post_count_per_day,
+        post_qty_per_time=req.post_qty_per_time
     )
     db.add(new_sch)
     db.commit()
@@ -148,10 +154,15 @@ async def get_schedules(db: Session = Depends(get_db), current_user: dict = Depe
         if acc and cafe:
             result.append({
                 "id": s.id,
+                "account_id": s.account_id,
                 "naver_id": acc.naver_id,
+                "cafe_id": s.cafe_id,
                 "cafe_url": cafe.cafe_url,
                 "board_name": cafe.board_name,
                 "schedule_time": s.schedule_time,
+                "content_category": s.content_category,
+                "post_count_per_day": s.post_count_per_day,
+                "post_qty_per_time": s.post_qty_per_time,
                 "is_active": s.is_active
             })
     return result
@@ -167,6 +178,7 @@ async def delete_schedule(schedule_id: str, db: Session = Depends(get_db), curre
 # --- 4. Targeted Auto Comment Trigger ---
 # In-memory status store for monitoring (prototype level)
 multi_task_status_store = {}
+active_nurture_tasks = {}
 
 async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_data: list):
     multi_task_status_store[task_id] = {"status": "running", "logs": ["[다중 타겟팅] 작업을 시작합니다..."]}
@@ -199,7 +211,8 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
         multi_task_status_store[task_id]["status"] = "failed"
 
 @router.post("/trigger-targeted", summary="다중 아이디로 타겟 게시글 댓글 작업 시작")
-async def trigger_targeted(req: TargetPostRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    import asyncio
     user_id = get_user_id(current_user)
     
     accounts_data = []
@@ -212,9 +225,19 @@ async def trigger_targeted(req: TargetPostRequest, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="선택된 계정이 없거나 권한이 없습니다.")
         
     task_id = str(uuid.uuid4())
-    background_tasks.add_task(run_multi_target_task, task_id, req, accounts_data)
+    task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data))
+    active_nurture_tasks[task_id] = task
     
     return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다."}
+
+@router.post("/cancel/{task_id}")
+async def cancel_task(task_id: str):
+    if task_id in active_nurture_tasks:
+        active_nurture_tasks[task_id].cancel()
+        multi_task_status_store[task_id]["status"] = "failed"
+        multi_task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
+        return {"success": True, "message": "작업이 중단되었습니다."}
+    return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):

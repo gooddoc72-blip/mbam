@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
-from .database import get_db, Advertiser
+from .database import get_db, Advertiser, Agency, Distributor
 from .auth import get_current_user
 
 def check_quota(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -11,11 +11,20 @@ def check_quota(current_user: dict = Depends(get_current_user), db: Session = De
     """
     user_email = current_user.get("sub")
     
+    role = current_user.get("role")
+    
     # 1. 최고관리자는 예외 (무제한)
-    if current_user.get("role") == "admin":
+    if role == "admin":
         return current_user
         
-    user = db.query(Advertiser).filter(Advertiser.email == user_email).first()
+    user = None
+    if role == "advertiser":
+        user = db.query(Advertiser).filter(Advertiser.email == user_email).first()
+    elif role == "agency":
+        user = db.query(Agency).filter(Agency.login_id == user_email).first()
+    elif role == "distributor":
+        user = db.query(Distributor).filter(Distributor.login_id == user_email).first()
+        
     if not user:
         raise HTTPException(status_code=401, detail="사용자 정보를 찾을 수 없습니다.")
         
@@ -40,11 +49,18 @@ def check_quota(current_user: dict = Depends(get_current_user), db: Session = De
     current_user["db_user_id"] = user.id
     return current_user
 
-def increment_quota(user_email: str, db: Session):
+def increment_quota(user_email: str, role: str, db: Session):
     """
     작업 성공 시 사용 횟수를 1 증가시킵니다.
     """
-    user = db.query(Advertiser).filter(Advertiser.email == user_email).first()
+    user = None
+    if role == "advertiser":
+        user = db.query(Advertiser).filter(Advertiser.email == user_email).first()
+    elif role == "agency":
+        user = db.query(Agency).filter(Agency.login_id == user_email).first()
+    elif role == "distributor":
+        user = db.query(Distributor).filter(Distributor.login_id == user_email).first()
+        
     if user:
         user.usage_count += 1
         db.commit()

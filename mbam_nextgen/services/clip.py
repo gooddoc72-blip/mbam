@@ -35,7 +35,7 @@ class ClipGenerator:
         
         try:
             processed_images = []
-            target_size = (1080, 1920) # 9:16 vertical video
+            target_size = (720, 1280) # 9:16 vertical video (optimized for speed)
             
             for i, img_path in enumerate(image_paths):
                 # 1. Resize and crop image to 9:16
@@ -88,7 +88,7 @@ class ClipGenerator:
             
             # 4. Export to MP4
             print(f"[Clip] Writing video to {output_path}...")
-            clip.write_videofile(output_path, fps=24, codec="libx264", audio=False, logger=None)
+            clip.write_videofile(output_path, fps=12, codec="libx264", audio=False, logger=None)
             
             return output_path
             

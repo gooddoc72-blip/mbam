@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import os
+import re
 
 import subprocess
 
@@ -18,10 +19,13 @@ def fetch_place_by_mid_cli(mid):
     except Exception as e:
         return {"error": str(e)}
 
-def search_keyword_ranking_cli(keyword, limit=300):
+def search_keyword_ranking_cli(keyword, limit=300, gps=None):
     crawler_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "services", "naver_crawler.py")
     try:
-        result = subprocess.run(["python", crawler_path, "search", keyword, str(limit)], capture_output=True, text=True, check=True)
+        args = ["python", crawler_path, "search", keyword, "--limit", str(limit)]
+        if gps:
+            args.extend(["--gps", gps])
+        result = subprocess.run(args, capture_output=True, text=True, check=True, timeout=45)
         output = result.stdout
         start_idx = output.find('[')
         end_idx = output.rfind(']') + 1
@@ -38,6 +42,15 @@ db_manager = DatabaseManager()
 
 router = APIRouter()
 calculator = SeoCalculator()
+
+def _save_to_int(v):
+    """저장수 버킷("12,000+","~100")에서 숫자만 추출. 없으면 0."""
+    if v is None:
+        return 0
+    if isinstance(v, (int, float)):
+        return max(0, int(v))
+    digits = re.sub(r"[^\d]", "", str(v))
+    return int(digits) if digits else 0
 
 class TrackRequest(BaseModel):
     mid: str
@@ -202,11 +215,15 @@ class KeywordAnalysisRequest(BaseModel):
     keyword: str
     target_mid: str
     compare_days: int = 1
+    force_refresh: bool = True
 
-def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
+def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, force_refresh: bool = True):
     """
     300위 심층 분석 핵심 로직. (API와 자동화 스케줄러 양쪽에서 공통 사용)
     """
+    # 오전/오후 순위 변동을 실시간으로 반영하기 위해 무조건 강제 새로고침 적용
+    force_refresh = True
+    
     # 0. Check DB for today's snapshot to skip crawling
     today_str = datetime.now().strftime("%Y-%m-%d")
     import sqlite3
@@ -224,23 +241,46 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
             import json
             parsed = json.loads(row[0])
             if parsed and len(parsed) >= 20:
-                cached_competitors = [{"mid": p["mid"], "name": p["name"], "cat": p["category"], "rec": p["visitor_reviews"], "blog": p["blog_reviews"], "save": p["saves"], "rec_d": p.get("c_rec_d", 0), "blog_d": p.get("c_blog_d", 0), "is_new": p.get("is_new", False), "has_revisit": p.get("has_revisit", False)} for p in parsed if p.get("rank", 300) < 300]
+                cached_competitors = [{"mid": p["mid"], "name": p["name"], "cat": p["category"], "rec": p["visitor_reviews"], "blog": p["blog_reviews"], "save": p["saves"], "rec_d": p.get("c_rec_d", 0), "blog_d": p.get("c_blog_d", 0), "is_new": p.get("is_new", False), "has_revisit": p.get("has_revisit", False), "local_rank": p.get("local_rank")} for p in parsed if p.get("rank", 300) < 300]
     except Exception as e:
         pass
     finally:
         conn.close()
 
+    # 강제 새로고침 시 캐시 무시하고 재크롤
+    if force_refresh:
+        cached_competitors = None
+
     # 1. 300개 매장 수집 (스크롤) - 캐시가 없으면 실행
     if cached_competitors:
         competitors = cached_competitors
     else:
+        # 전국 통합 크롤러 (Crawler A)
         competitors = search_keyword_ranking_cli(keyword, limit=300)
-    
-    # 만약 에러가 발생했거나 배열이 아닌 경우 예외 처리
-    if isinstance(competitors, dict) and "error" in competitors:
-        raise Exception(f"크롤러 에러: {competitors['error']}")
-    if not isinstance(competitors, list):
-        raise Exception(f"크롤러 응답 오류: {competitors}")
+        
+        # 내 매장 기준 로컬 크롤러 (Crawler B - GPS Spoofing)
+        # TODO: 실제 target_mid의 주소를 Geocoding하여 위경도 주입 (현재는 전포동 테스트용 GPS 강제 주입)
+        dummy_gps = "35.1555,129.0620"
+        competitors_local = search_keyword_ranking_cli(keyword, limit=300, gps=dummy_gps)
+        
+        # 에러 처리
+        if isinstance(competitors, dict) and "error" in competitors:
+            raise Exception(f"크롤러 에러: {competitors['error']}")
+        if not isinstance(competitors, list):
+            raise Exception(f"크롤러 응답 오류: {competitors}")
+            
+        # 로컬 순위 병합
+        if isinstance(competitors_local, dict) and "error" in competitors_local:
+            print(f"LOCAL CRAWLER ERROR: {competitors_local['error']}")
+            # For debugging, we inject the error into the first competitor's name
+            if competitors:
+                competitors[0]["name"] = f"[ERR] {competitors_local['error'][:20]} {competitors[0]['name']}"
+
+        if isinstance(competitors_local, list):
+            local_map = {str(c.get("mid")): idx + 1 for idx, c in enumerate(competitors_local)}
+            for c in competitors:
+                mid_str = str(c.get("mid"))
+                c["local_rank"] = local_map.get(mid_str, None)
         
     # 2. 내 매장 상세 정보 수집 (타겟이 검색 결과에 이미 있다면 불필요한 크롤링 생략하여 속도 최적화)
     target_comp = next((c for c in competitors if str(c["mid"]).strip() == str(target_mid).strip()), None)
@@ -304,7 +344,7 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
             my_rec = target_info.get("visitor_reviews", 0)
             my_blog = target_info.get("blog_reviews", 0)
             if my_blog == 0: my_blog = int(my_rec * 0.45)
-            my_save = my_rec * 3 + 120
+            my_save = _save_to_int(target_info.get("saves", 0))
             has_booking = target_info.get("has_booking", False)
             c_name = target_info.get("name", comp.get("name", ""))
             c_cat = target_info.get("category", comp.get("cat", ""))
@@ -312,62 +352,44 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
             my_rec = comp.get("rec", 100)
             my_blog = comp.get("blog", 0)
             if my_blog == 0: my_blog = int(my_rec * 0.35)
-            save_str = str(comp.get("save", "0")).replace(",", "").replace("+", "").replace("~", "")
-            my_save = int(save_str) if save_str.isdigit() and int(save_str) > 0 else (my_rec * 3 + 50)
+            my_save = _save_to_int(comp.get("save", 0))  # 저장수=버킷, 숫자만(없으면 0)
             has_booking = True if rank < 50 else False
             c_name = comp.get("name", "")
             c_cat = comp.get("cat", "")
             
-        c_is_new = comp.get("is_new", False) or ("새로오픈" in c_name) or ("워킹홀리데이" in c_name) or ("김모찌" in c_name)
-        c_has_revisit = comp.get("has_revisit", False) or ("양산도" in c_name)
+        c_is_new = comp.get("is_new", False) or ("새로오픈" in c_name)
+        c_has_revisit = comp.get("has_revisit", False)
             
         # Extract crawler's random deltas for fallback
         c_rec_d = comp.get("rec_d", 0)
         c_blog_d = comp.get("blog_d", 0)
         
-        # Calculate real deltas from DB for Velocity
+        # 실제 증감(velocity) 및 순위 변동 (군 정규화/어뷰징 잔차용). 과거 스냅샷 없으면 0(데이터 축적 중).
         pmid = str(comp["mid"]).strip()
         if pmid in prev_map:
             prev_p = prev_map[pmid]
             real_rec_d = my_rec - prev_p.get("visitor_reviews", my_rec)
             real_blog_d = my_blog - prev_p.get("blog_reviews", my_blog)
-            
-            prev_saves = prev_p.get("saves", my_save)
-            if prev_saves == 0 and my_save > 0:
-                prev_saves = my_save # 과거 수집 실패/미수집으로 0인 경우 폭증 방지
-            real_save_d = my_save - prev_saves
+            rank_delta = prev_p.get("rank", rank) - rank  # +면 순위 상승(개선)
         else:
-            real_rec_d = c_rec_d
-            real_blog_d = c_blog_d
-            real_save_d = max(0, real_rec_d * 2)
-            
-        # Velocity Score: 블로그 1건은 영수증 2.5건의 가치. 1주일 기준 합산 50점 이상이면 만점(1.0)
-        m_recent = min(1.0, (real_rec_d * 0.4 + real_blog_d * 1.0) / 30.0) if (real_rec_d > 0 or real_blog_d > 0) else 0.1
-        if c_is_new:
-            m_recent = 1.0 # 신규 오픈은 속도 점수(최신성) 무조건 만점 부여
-        
-        # s_fit: 키워드와 매장명 매칭
-        s_fit = 0.9 if keyword in c_name else 0.6
-        
-        n1 = calculator.calculate_n1(reviews=my_rec, recent_reviews=real_rec_d, is_revisit=c_has_revisit)
-        n2 = calculator.calculate_n2(saves_delta=real_save_d, is_new=c_is_new, views=my_rec * 15) # 가상 조회수
-        n3 = calculator.calculate_n3(blog_reviews=my_blog, recent_blogs=real_blog_d)
-        n4 = calculator.calculate_n4(saves_delta=real_save_d, total_saves=my_save, reviews_delta=real_rec_d, total_reviews=my_rec)
-        n5 = calculator.calculate_n5_total_score(s_fit, n1, n2, n3, n4, c_is_new, c_has_revisit, rank=rank)
-        
+            real_rec_d = 0
+            real_blog_d = 0
+            rank_delta = 0
+
+        c_local_rank = comp.get("local_rank")
+
         places_data.append({
             "rank": rank,
+            "local_rank": c_local_rank,
             "mid": comp["mid"],
             "name": c_name,
             "category": c_cat,
             "visitor_reviews": my_rec,
             "blog_reviews": my_blog,
             "saves": my_save,
-            "n1": n1,
-            "n2": n2,
-            "n3": n3,
-            "n4": n4,
-            "n5": n5,
+            "rev_delta": real_rec_d,
+            "blog_delta": real_blog_d,
+            "rank_delta": rank_delta,
             "is_target": is_target,
             "c_rec_d": c_rec_d,
             "c_blog_d": c_blog_d,
@@ -379,16 +401,11 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
     if target_rank == 300:
         my_rec = target_info.get("visitor_reviews", 0)
         my_blog = target_info.get("blog_reviews", 0)
-        my_save = my_rec * 3 + 120
+        my_save = _save_to_int(target_info.get("saves", 0))
         c_name = target_info.get("name", "내 매장 (순위 밖)")
-        has_booking = target_info.get("has_booking", False)
-        
-        n1 = calculator.calculate_n1(reviews=my_rec, recent_reviews=0, is_revisit=False)
-        n2 = calculator.calculate_n2(saves_delta=0, is_new=False, views=my_rec * 15)
-        n3 = calculator.calculate_n3(blog_reviews=my_blog, recent_blogs=0)
-        n4 = calculator.calculate_n4(saves_delta=0, total_saves=my_save, reviews_delta=0, total_reviews=my_rec)
-        n5 = calculator.calculate_n5_total_score(s_fit=0.9, n1=n1, n2=n2, n3=n3, n4=n4, is_new=False, is_revisit=False, rank=300)
-        
+
+        c_local_rank = local_map.get(str(target_mid), None) if 'local_map' in locals() else None
+
         places_data.append({
             "mid": target_mid,
             "name": c_name,
@@ -396,17 +413,19 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
             "visitor_reviews": my_rec,
             "blog_reviews": my_blog,
             "saves": my_save,
-            "n1": n1,
-            "n2": n2,
-            "n3": n3,
-            "n4": n4,
-            "n5": n5,
+            "rev_delta": 0,
+            "blog_delta": 0,
+            "rank_delta": 0,
             "rank": 300,
+            "local_rank": c_local_rank,
             "is_target": True,
             "is_new": False,
             "has_revisit": False
         })
-        
+
+    # ── N1~N5 산출: 경쟁군 전체 기준 2-pass 군 정규화 (rank 순환 제거, N4 곱셈) ──
+    places_data = calculator.score_competitors(places_data, keyword)
+
     # 내 매장의 순위/저장수 히스토리 DB 기록
     import sqlite3
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
@@ -490,14 +509,8 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1):
             p["delta_n1"] = 0.0
             p["delta_n2"] = 0.0
             p["delta_n3"] = 0.0
-            
-        # Fallback to crawler's pseudo-random deltas
-        import random
-        if p["delta_visitor_reviews"] == 0: p["delta_visitor_reviews"] = p.get("c_rec_d", 0)
-        if p["delta_blog_reviews"] == 0: p["delta_blog_reviews"] = p.get("c_blog_d", 0)
-        if p["delta_saves"] == 0 and p["delta_visitor_reviews"] != 0: p["delta_saves"] = p["delta_visitor_reviews"] * 3
-        if p["delta_n2"] == 0.0: p["delta_n2"] = round(random.uniform(-0.015, 0.025), 6)
-        if p["delta_n3"] == 0.0: p["delta_n3"] = round(random.uniform(-0.02, 0.03), 6)
+            p["delta_n5"] = 0.0
+        # (가짜 random 증감 주입 제거 — 데이터 없으면 0으로 표기)
             
     import json
     snapshot_json = json.dumps(places_data, ensure_ascii=False)
@@ -551,7 +564,7 @@ def analyze_keyword(request: KeywordAnalysisRequest):
     300위 심층 분석용 통합 API
     """
     try:
-        return run_place_analysis(request.keyword, request.target_mid, request.compare_days)
+        return run_place_analysis(request.keyword, request.target_mid, request.compare_days, request.force_refresh)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

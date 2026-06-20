@@ -57,7 +57,7 @@ export default function Home() {
     setSelectedUrls([]);
 
     try {
-      const res = await fetchWithAuth(`http://localhost:8000/api/seo/search?keyword=${encodeURIComponent(keyword)}`);
+      const res = await fetchWithAuth(`/api/seo/search?keyword=${encodeURIComponent(keyword)}`);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.detail || "리스트 검색에 실패했습니다.");
@@ -105,7 +105,7 @@ export default function Home() {
     setError(null);
 
     try {
-      const res = await fetchWithAuth("http://localhost:8000/api/seo/analyze", {
+      const res = await fetchWithAuth("/api/seo/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword, target_urls: selectedUrls }),

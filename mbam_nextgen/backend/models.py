@@ -11,3 +11,13 @@ class AnalysisHistory(Base):
     
     # 분석 결과를 JSON 형태의 문자열로 저장
     result_data = Column(Text)
+
+class SavedManuscript(Base):
+    __tablename__ = "saved_manuscripts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)
+    content = Column(Text)
+    keyword = Column(String, index=True, nullable=True)
+    account_id = Column(String, index=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

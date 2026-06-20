@@ -32,12 +32,12 @@ class PlaceReviewService:
             }
             
             async with httpx.AsyncClient() as client:
-                res = await client.get(review_url, headers=headers, timeout=15.0)
+                res = await client.get(review_url, headers=headers, timeout=15.0, follow_redirects=True)
                 if res.status_code != 200:
                     raise Exception(f"Failed to fetch page, status: {res.status_code}")
                 
                 html = res.text
-                match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});', html, re.DOTALL)
+                match = re.search(r'window\.__APOLLO_STATE__\s*=\s*({.*?});\s*(?:window\.|</script>)', html, re.DOTALL)
                 if not match:
                     raise Exception("Apollo State not found in HTML (Bot detection or DOM change)")
                 
@@ -63,7 +63,7 @@ class PlaceReviewService:
                         elif 'type=' not in high_res_url:
                             high_res_url += '&type=w640'
                             
-                        img_res = await client.get(high_res_url, timeout=10.0)
+                        img_res = await client.get(high_res_url, timeout=10.0, follow_redirects=True)
                         if img_res.status_code == 200:
                             path = os.path.join(self.download_dir, f"review_img_{i}.jpg")
                             with open(path, "wb") as f:

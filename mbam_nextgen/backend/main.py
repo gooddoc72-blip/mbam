@@ -1,3 +1,13 @@
+import sys
+import os
+
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -5,12 +15,18 @@ from dotenv import load_dotenv
 import sys
 import asyncio
 
+if sys.platform == 'win32':
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path)
 
-from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router
+from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router
 from mbam_nextgen.backend.database import engine, Base
-from mbam_nextgen.backend.auth import get_current_user
+from mbam_nextgen.backend.auth import get_current_user, verify_admin
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -56,7 +72,7 @@ app.include_router(auth_router.router, prefix="/api/auth", tags=["Authentication
 
 # 라우터 연결 (인증 필수 라우터)
 app.include_router(seo.router, prefix="/api/seo", tags=["SEO Analysis"], dependencies=[Depends(get_current_user)])
-app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(get_current_user)])
+app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(verify_admin)])
 app.include_router(rank.router, prefix="/api/seo/rank", tags=["Ranking Tracker"], dependencies=[Depends(get_current_user)])
 app.include_router(content.router, prefix="/api/content", tags=["Content Collect"], dependencies=[Depends(get_current_user)])
 app.include_router(place.router, prefix="/api/place", tags=["Place SEO"], dependencies=[Depends(get_current_user)])
@@ -69,6 +85,13 @@ app.include_router(shopping_router.router, dependencies=[Depends(get_current_use
 app.include_router(admin_router.router)
 app.include_router(blogspot_router.router, dependencies=[Depends(get_current_user)])
 app.include_router(cafe_nurture.router, dependencies=[Depends(get_current_user)])
+app.include_router(coupang.router, prefix="/api/coupang", tags=["Coupang"], dependencies=[Depends(get_current_user)])
+app.include_router(manuscript_router.router, dependencies=[Depends(get_current_user)])
+# 수집된 사진 서빙
+from fastapi.staticfiles import StaticFiles
+images_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_clips", "images")
+os.makedirs(images_dir, exist_ok=True)
+app.mount("/api/images", StaticFiles(directory=images_dir), name="images")
 
 # 설치형 배포 시 Next.js 정적 파일 서빙 로직
 from fastapi.staticfiles import StaticFiles

@@ -130,7 +130,7 @@ export default function CafeAnalysisPage() {
         if (!content.trim()) { alert('카페 글 본문을 입력해주세요.'); return; }
         setLoading(true); setError(''); setResult(null);
         try {
-            const res = await fetchWithAuth('http://localhost:8000/api/seo/analyze-cafe-post', {
+            const res = await fetchWithAuth('/api/seo/analyze-cafe-post', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ keyword, content })
@@ -174,7 +174,7 @@ export default function CafeAnalysisPage() {
         if (urls.length > 5) { alert('한 번에 최대 5개까지 분석할 수 있습니다.'); return; }
         setUrlLoading(true); setUrlError(''); setUrlItems(null); setUrlErrors([]);
         try {
-            const res = await fetchWithAuth('http://localhost:8000/api/seo/analyze-cafe-urls', {
+            const res = await fetchWithAuth('/api/seo/analyze-cafe-urls', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ urls })

@@ -3,6 +3,10 @@ import asyncio
 from typing import List, Optional
 from dotenv import load_dotenv
 
+# Explicitly load .env from mbam_nextgen directory
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+load_dotenv(dotenv_path=env_path)
+
 # 최신 구글 제미나이 SDK
 try:
     from google import genai
@@ -20,8 +24,6 @@ try:
     import openai
 except ImportError:
     openai = None
-
-load_dotenv()
 
 class SoulRewriter:
     """
@@ -41,7 +43,7 @@ class SoulRewriter:
             self.gemini_client = None
 
         # 2. Claude Init
-        self.claude_key = os.getenv("CLAUDE_API_KEY")
+        self.claude_key = os.getenv("ANTHROPIC_API_KEY")
         if anthropic and self.claude_key:
             self.claude_client = anthropic.AsyncAnthropic(api_key=self.claude_key)
         else:
@@ -55,16 +57,37 @@ class SoulRewriter:
             self.openai_client = None
 
     async def rewrite_for_blog(self, raw_data: str, keyword: str, provider: str = None, 
-                               post_purpose: str = None, promo_type: str = None, distribution_mode: str = None) -> str:
+                               post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, api_key: str = None) -> str:
         target_provider = (provider or self.provider).lower()
         prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode)
 
-        if target_provider == "gemini" and self.gemini_client:
-            return await self._call_gemini(prompt)
-        elif target_provider == "claude" and self.claude_client:
-            return await self._call_claude(prompt)
-        elif target_provider == "openai" and self.openai_client:
-            return await self._call_openai(prompt)
+        if target_provider == "gemini":
+            if api_key and genai:
+                temp_client = genai.Client(api_key=api_key)
+                return await self._call_gemini_client(temp_client, prompt)
+            elif self.gemini_client:
+                return await self._call_gemini_client(self.gemini_client, prompt)
+
+        elif target_provider == "claude":
+            try:
+                if api_key and anthropic:
+                    temp_client = anthropic.AsyncAnthropic(api_key=api_key)
+                    return await self._call_claude_client(temp_client, prompt)
+                elif self.claude_client:
+                    return await self._call_claude_client(self.claude_client, prompt)
+            except Exception as e:
+                print(f"⚠️ Claude API failed ({e}), falling back to Gemini.")
+                if self.gemini_client:
+                    return await self._call_gemini_client(self.gemini_client, prompt)
+                raise
+
+        elif target_provider == "openai":
+            if api_key and openai:
+                temp_client = openai.AsyncOpenAI(api_key=api_key)
+                return await self._call_openai_client(temp_client, prompt)
+            elif self.openai_client:
+                return await self._call_openai_client(self.openai_client, prompt)
+
         # 설정 오류는 raise — 호출자(orchestrator)가 폴백 처리. string 반환 시 본문에 그대로 게시됨
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 없음 또는 라이브러리 미설치)")
 
@@ -72,6 +95,8 @@ class SoulRewriter:
         # 1. 포스팅 목적 (Tone & Manner)
         if post_purpose == "intro":
             tone_guide = "객관적이고 전문적인 어조로 매장이나 상품의 장점을 소개하는 '홍보/소개' 글로 작성해주세요. (3인칭 관찰자 혹은 브랜드 에디터 시점)"
+        elif post_purpose == "info":
+            tone_guide = "독자에게 유용한 지식을 전달하는 '정보 제공성' 글로 작성해주세요. (전문적이고 신뢰감 있는 톤, 지나친 홍보나 과장된 감정표현 자제)"
         else: # 기본값은 review
             tone_guide = "직접 다녀오거나 사용해본 것처럼 생생하고 감성적인 '내돈내산 체험 후기' 느낌으로 작성해주세요. (1인칭 시점, 경험 중심)"
 
@@ -97,21 +122,50 @@ class SoulRewriter:
 
         # 4. Check Custom Prompts
         custom_prompt = ""
+        ref_injection = ""
         prompts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts.json")
         if os.path.exists(prompts_path):
             import json
             try:
                 with open(prompts_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    # Legacy check
+                    if "claude_prompt" in data and not any(k in data for k in ["product", "hospital", "app", "place", "service"]):
+                        cat_data = data
+                    else:
+                        cat_data = data.get(promo_type, {}) if promo_type else {}
+                    
                     if target_provider == "claude":
-                        custom_prompt = data.get("claude_prompt", "")
+                        custom_prompt = cat_data.get("claude_prompt", "")
                     elif target_provider == "gemini":
-                        custom_prompt = data.get("gemini_prompt", "")
-            except:
+                        custom_prompt = cat_data.get("gemini_prompt", "")
+                        
+                    ref_files = []
+                    if "reference_file_content" in cat_data and cat_data["reference_file_content"]:
+                        ref_files.append({"name": cat_data.get("reference_file_name", "reference.txt"), "content": cat_data["reference_file_content"]})
+                    
+                    if "reference_files" in cat_data:
+                        ref_files.extend(cat_data["reference_files"])
+                        
+                    if ref_files:
+                        docs = []
+                        for i, file in enumerate(ref_files, 1):
+                            docs.append(f'<document index="{i}">\n<source>{file.get("name", "document")}</source>\n<document_content>\n{file.get("content", "")}\n</document_content>\n</document>')
+                        
+                        docs_str = "\n".join(docs)
+                        ref_injection = f"\n\n[프로젝트 첨부 지식/가이드라인]\n<documents>\n{docs_str}\n</documents>\n\n★중요★ 위 <documents> 태그에 포함된 파일의 내용을 완벽하게 숙지하고 가장 우선적으로 참고하여 원고를 작성하세요."
+                        
+                    if ref_injection and custom_prompt.strip():
+                        custom_prompt += ref_injection
+            except Exception as e:
                 pass
 
         if custom_prompt.strip():
+            if "{keyword}" not in custom_prompt:
+                custom_prompt += "\n\n위 가이드라인에 따라 아래의 타겟 키워드로 블로그 원고를 작성해주세요.\n\n[기본 정보]\n- 타겟(핵심) 키워드: {keyword}\n- 참고 데이터: {raw_data}\n\n[작성 가이드라인]\n1. 어조: {tone_guide}\n2. 분량 및 구조: {length_guide}\n3. 마크다운 기호 금지: 별표(*), 물결표(~), 샵(#) 등 마크다운 기호를 절대 사용하지 마세요. (단, 해시태그에는 샵 허용)\n4. 이모지 금지: 글에 어떠한 이모지(아이콘)도 절대 사용하지 마세요.\n5. 이미지 삽입 위치 지정: 내용이 전환되거나 문단이 끝나는 적절한 위치(본문 사이사이)에 `[이미지]` 라는 특수 태그를 3~5회 정도 삽입하세요.\n6. 해시태그 추가: 본문 작성이 모두 끝난 후, 맨 마지막 줄에는 이 글과 관련된 검색용 해시태그를 5개 내외로 작성해 주세요. (예: `#해시태그1 #해시태그2`)\n{special_guide}\n\n첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요."
             return custom_prompt.replace("{keyword}", str(keyword)).replace("{raw_data}", str(raw_data)).replace("{combined_text}", str(raw_data)).replace("{tone_guide}", str(tone_guide)).replace("{length_guide}", str(length_guide)).replace("{special_guide}", str(special_guide))
+        
+        # 기본 프롬프트에 첨부파일이 있다면 추가
 
         return f"""
         당신은 네이버 블로그 전문 파워블로거이자 마케팅 전문가입니다.
@@ -124,43 +178,50 @@ class SoulRewriter:
         [작성 가이드라인]
         1. 어조: {tone_guide}
         2. 분량 및 구조: {length_guide}
-        3. 이모지 활용: 글이 지루하지 않게 문단 사이에 적절한 이모지를 사용하세요.
+        3. 마크다운 기호 금지: 별표(*), 물결표(~), 샵(#) 등 마크다운 기호를 절대 사용하지 마세요. (단, 해시태그에는 샵 허용)
+        4. 이모지 금지: 글에 어떠한 이모지(아이콘)도 절대 사용하지 마세요.
+        5. 이미지 삽입 위치 지정: 내용이 전환되거나 문단이 끝나는 적절한 위치(본문 사이사이)에 `[이미지]` 라는 특수 태그를 3~5회 정도 삽입하세요.
+        6. 해시태그 추가: 본문 작성이 모두 끝난 후, 맨 마지막 줄에는 이 글과 관련된 검색용 해시태그를 5개 내외로 작성해 주세요. (예: `#해시태그1 #해시태그2`)
         {special_guide}
+        {ref_injection}
         
-        본문만 바로 출력해주세요. (제목은 제외)
+        첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요.
         """
 
     async def generate_content(self, prompt: str) -> str:
         """자유 형식의 프롬프트를 처리 (가용한 첫 번째 AI 사용)"""
         if self.gemini_client:
-            return await self._call_gemini(prompt)
+            return await self._call_gemini_client(self.gemini_client, prompt)
         elif self.claude_client:
-            return await self._call_claude(prompt)
+            return await self._call_claude_client(self.claude_client, prompt)
         elif self.openai_client:
-            return await self._call_openai(prompt)
+            return await self._call_openai_client(self.openai_client, prompt)
         raise RuntimeError("사용 가능한 AI 클라이언트가 없습니다. 환경변수(.env)에 API 키를 설정해주세요.")
 
     # 세 메서드 모두 예외를 raise — 호출자(orchestrator)가 retry/폴백 결정.
     # 예외를 string으로 swallow하면 "Gemini Error: 401" 같은 텍스트가 그대로 블로그 본문이 됨.
-    async def _call_gemini(self, prompt: str) -> str:
+    async def _call_gemini_client(self, client, prompt: str) -> str:
         # Run sync generate_content in a thread pool to avoid async event loop locks on Windows/Streamlit
         response = await asyncio.to_thread(
-            self.gemini_client.models.generate_content,
+            client.models.generate_content,
             model="gemini-2.5-flash",
             contents=prompt,
         )
         return response.text
 
-    async def _call_claude(self, prompt: str) -> str:
-        response = await self.claude_client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
+    async def _call_claude_client(self, client, prompt: str) -> str:
+        try:
+            response = await client.messages.create(
+                model="claude-opus-4-8",
+                max_tokens=2500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text
+        except Exception as e:
+            raise e
 
-    async def _call_openai(self, prompt: str) -> str:
-        response = await self.openai_client.chat.completions.create(
+    async def _call_openai_client(self, client, prompt: str) -> str:
+        response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
         )
@@ -178,11 +239,11 @@ class SoulRewriter:
         target_provider = (provider or self.provider).lower()
         prompt = self._get_cafe_prompt(main_keyword, sub_keywords, reference_text, post_style)
         if target_provider == "gemini" and self.gemini_client:
-            return await self._call_gemini(prompt)
+            return await self._call_gemini_client(self.gemini_client, prompt)
         elif target_provider == "claude" and self.claude_client:
-            return await self._call_claude(prompt)
+            return await self._call_claude_client(self.claude_client, prompt)
         elif target_provider == "openai" and self.openai_client:
-            return await self._call_openai(prompt)
+            return await self._call_openai_client(self.openai_client, prompt)
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 확인)")
 
     def _get_cafe_prompt(self, main_keyword, sub_keywords, reference_text, post_style):
@@ -204,7 +265,7 @@ class SoulRewriter:
             f"- 메인 키워드: {main_keyword} (제목과 본문에 자연스럽게, 최소 3회)",
             f"- 서브 키워드: {sub_str} (본문에 자연스럽게 분산 배치)",
             "- 분량: 600~1200자 (공백 포함)",
-            "- 형식: 카페글 특유의 구어체, 줄바꿈 활용, 이모지 적절히 사용",
+            "- 형식: 카페글 특유의 구어체, 줄바꿈 활용, 마크다운(별표, 물결표) 및 이모지 사용 금지",
             ref_part,
             "",
             "[출력 형식]",
@@ -301,7 +362,7 @@ class SoulRewriter:
 {theme_guide}
 
 [작성 조건]
-1. 제목은 이모지를 포함하여 클릭하고 싶게 만들 것.
+1. 제목은 클릭하고 싶게 만들 것. (이모지 및 특수기호 사용 금지)
 2. 본문은 정해진 테마({theme})에 맞춰서, 리뷰 내용을 자연스럽게 언급하며 친근한 톤으로 작성할 것.
 3. 클립 숏폼 영상에 들어갈 짧은 자막 텍스트 5개(각 15자 이내)를 추출할 것.
 
