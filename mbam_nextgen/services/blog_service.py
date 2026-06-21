@@ -55,9 +55,19 @@ class BlogService:
                             return f
                     except: continue
             await asyncio.sleep(1)
-        
-        # 실패 시 예외 발생
-        raise Exception("블로그 에디터를 찾을 수 없습니다. (블로그 미개설, 휴면 상태, 비밀번호 변경 캠페인 등을 확인하세요)")
+
+        # 실패 시: 현재 페이지 상태(URL/제목)를 남겨 원인(미개설/보안/추가인증 등) 파악
+        try:
+            info = []
+            for p in context.pages:
+                try:
+                    info.append(f"{p.url} | {await p.title()}")
+                except Exception:
+                    info.append(getattr(p, 'url', '?'))
+            print("⚠️ [BlogService] 에디터 미포착. 현재 페이지: " + " || ".join(info))
+        except Exception:
+            pass
+        raise Exception("블로그 에디터를 찾을 수 없습니다. (블로그 미개설/휴면/보안·추가인증 페이지 가능 — 로그의 '현재 페이지' URL을 확인하세요)")
 
     async def dismiss_popups(self, frame):
         """방해 팝업(임시저장, 도움말 등) 제거"""
@@ -179,40 +189,45 @@ class BlogService:
 
             await publish_btn.first.click()
 
-            # 2. 발행 설정 패널의 최종 [발행] 확인 버튼을 '명시적으로' 대기 후 클릭
-            #    (상단 발행 버튼을 다시 누르지 않도록 publish_btn__confirm 을 우선 대기)
+            # 2. 발행 설정 레이어의 최종 [발행] 확인 버튼 클릭
+            #    네이버 SE confirm 버튼 클래스가 난독화/변경되므로, 명시 클래스 우선 +
+            #    '레이어에 새로 나타난 발행 버튼(보이는 것 중 마지막)' 텍스트 기반 폴백.
             clicked = False
-            confirm = None
-            for root in (frame, page):
-                try:
-                    await root.wait_for_selector("button.publish_btn__confirm", timeout=8000, state="visible")
-                    confirm = root.locator("button.publish_btn__confirm")
-                    break
-                except Exception:
-                    continue
-            if confirm is not None and await confirm.count() > 0:
-                await confirm.first.click(timeout=5000)
-                clicked = True
-                print("✅ [BlogService] 발행 확인 버튼 클릭")
-            else:
-                # 폴백: 보이는 발행/확인 버튼 탐색
-                for sel in ["button.publish_btn__confirm", ".se-popup-button-confirm", "button.confirm"]:
-                    for root in (frame, page):
+            for _ in range(20):  # 최대 ~10초 레이어 대기
+                # (a) 명시적 confirm 후보
+                for root in (frame, page):
+                    for sel in ("button.publish_btn__confirm", ".se-popup-button-confirm",
+                                ".layer_btn_area button:has-text('발행')", ".btn_area button:has-text('발행')"):
                         try:
                             loc = root.locator(sel)
                             cnt = await loc.count()
                             for i in range(cnt - 1, -1, -1):
                                 if await loc.nth(i).is_visible():
-                                    await loc.nth(i).click(timeout=5000)
+                                    await loc.nth(i).click(timeout=4000)
                                     clicked = True
-                                    print(f"✅ [BlogService] 발행 확인 클릭 (폴백: {sel})")
+                                    print(f"✅ [BlogService] 발행 확인 클릭 ({sel})")
                                     break
-                            if clicked:
-                                break
                         except Exception:
-                            continue
+                            pass
+                        if clicked:
+                            break
                     if clicked:
                         break
+                if clicked:
+                    break
+                # (b) 폴백: 보이는 '발행' 버튼이 2개 이상이면 마지막(레이어 내 확인) 클릭
+                try:
+                    loc = page.locator("button:has-text('발행'), a:has-text('발행')")
+                    cnt = await loc.count()
+                    vis = [i for i in range(cnt) if await loc.nth(i).is_visible()]
+                    if len(vis) >= 2:
+                        await loc.nth(vis[-1]).click(timeout=4000)
+                        clicked = True
+                        print("✅ [BlogService] 발행 확인 클릭(폴백: 마지막 발행 버튼)")
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
 
             if not clicked:
                 print("⚠️ [BlogService] 발행 확인 버튼을 찾지 못했습니다. 수동 확인 필요.")

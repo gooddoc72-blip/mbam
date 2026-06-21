@@ -128,6 +128,16 @@ class WorkflowOrchestrator:
     # 공통 헬퍼
     # ═══════════════════════════════════════════════
 
+    def _strip_markdown(self, text: str) -> str:
+        """네이버 에디터에서 자동 서식(굵게/취소선/헤딩/리스트)으로 오변환되는 마크다운 기호 제거."""
+        import re
+        if not text:
+            return text
+        text = re.sub(r'(\*\*+|~~+|__+|`+)', '', text)                    # **굵게** ~~취소선~~ __ `코드`
+        text = re.sub(r'^\s{0,3}#{1,6}\s*', '', text, flags=re.MULTILINE)  # ## 헤딩
+        text = re.sub(r'^\s{0,3}[-*]\s+', '', text, flags=re.MULTILINE)    # - / * 리스트 기호
+        return text
+
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
         post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None
@@ -256,9 +266,10 @@ class WorkflowOrchestrator:
                         log_callback(f"⏳ 작업 실패로 인해 긴 대기를 생략하고 10초 후 다음 계정으로 넘어갑니다...")
                     await asyncio.sleep(10)
                 
+        ok = sum(1 for r in results if r and r.get("success"))
         if log_callback:
-            log_callback("🎉 모든 다중 계정 포스팅이 종료되었습니다.")
-        return {"success": True}
+            log_callback(f"🎉 다중 계정 포스팅 종료: 성공 {ok} / 총 {len(results)}건")
+        return {"success": ok > 0, "succeeded": ok, "total": len(results), "results": results}
 
     # ═══════════════════════════════════════════════
     # 단일 계정 워크플로우
@@ -375,9 +386,10 @@ class WorkflowOrchestrator:
                     post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode,
                     source_data=source_data
                 )
-                if blog_content:
-                    import re
-                    blog_content = re.sub(r'(\*\*|~~|__)', '', blog_content)
+
+            # 마크다운 기호 제거 (모든 모드 공통) — 네이버 에디터의 굵게/취소선/헤딩/리스트 자동변환 방지
+            if blog_content:
+                blog_content = self._strip_markdown(blog_content)
             
             # 본문에 [제목]이 포함되어 있다면 추출해서 실제 제목으로 사용
             if blog_content:
@@ -720,7 +732,8 @@ class WorkflowOrchestrator:
                         cafe_content = content
                     else:
                         cafe_content = await self._generate_content_with_retry(keyword, ai_provider=ai_provider, reference_data=reference_data)
-                    
+                    cafe_content = self._strip_markdown(cafe_content)
+
                     # 4. 이미지 세척 / 대체
                     washed_images = []
                     if test_image:
