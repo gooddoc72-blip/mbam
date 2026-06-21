@@ -48,7 +48,7 @@ class StealthExecutor:
         await page.mouse.move(target_x, target_y)
 
     @staticmethod
-    async def human_type(obj, selector: str, text: str, speed_mode: str = "normal", speed_multiplier: float = 1.0):
+    async def human_type(obj, selector: str, text: str, speed_mode: str = "normal", speed_multiplier: float = 1.0, do_click: bool = True):
         """
         채널별 속도에 따른 인간형 타이핑 (Page/Frame 호환)
         
@@ -70,16 +70,17 @@ class StealthExecutor:
         
         print(f"[Stealth] 타이핑 시작 (모드: {speed_mode}, 배수: {speed_multiplier}x, 평균딜레이: {mean_delay:.3f}s)")
         
-        # 에디터 클릭
-        await StealthExecutor.human_mouse_move(obj, selector)
-        await obj.locator(selector).first.click()
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-
-        # 중앙 클릭이 (앞서 삽입된) 이미지를 선택했을 수 있음 → 커서를 본문 맨 끝으로 이동시켜
-        # 선택 해제. 안 하면 다음 글자 입력 시 선택된 이미지가 글자로 대체(삭제)됨.
+        # 에디터 포커스: 본문 타이핑(do_click=False)은 중앙 클릭을 생략한다.
+        # 중앙 클릭이 (앞서 삽입된) 이미지를 '선택'하면 다음 글자 입력 시 이미지가 글자로 대체(삭제)되기 때문.
+        if do_click:
+            await StealthExecutor.human_mouse_move(obj, selector)
+            await obj.locator(selector).first.click()
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+        # 커서를 본문 맨 끝으로 이동(선택 해제) → 이미지 보존하며 이어쓰기
         try:
             await obj.locator(selector).first.evaluate("""el => {
                 if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+                    el.focus();
                     const r = document.createRange();
                     r.selectNodeContents(el);
                     r.collapse(false);

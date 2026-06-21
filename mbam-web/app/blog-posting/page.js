@@ -754,12 +754,12 @@ function BlogPostingContent() {
             {loading ? "다중 포스팅 작업 중..." : "다중 계정 자동 포스팅 시작하기"}
           </button>
           
-          {loading && (
+          {(loading || taskStatus === "running" || taskId) && (
             <button
               onClick={handleCancelTask}
               style={{
                 padding: "1rem 2rem", background: "#ef4444", color: "white",
-                fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer"
+                fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer", whiteSpace: "nowrap"
               }}>
               ■ 작업 강제 중지
             </button>

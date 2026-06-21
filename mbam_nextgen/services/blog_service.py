@@ -243,7 +243,7 @@ class BlogService:
                 img_path = images[img_idx]
                 if os.path.exists(img_path):
                     if pending_text.strip():
-                        await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
+                        await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
                         pending_text = ""
                         
                     await self.stealth.upload_image(frame, img_path)
@@ -261,8 +261,8 @@ class BlogService:
                 img_idx += 1
                 
         if pending_text.strip():
-            await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-            
+            await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+
         # 남은 이미지가 있다면 글 맨 하단에 추가 (안전장치)
         while img_idx < len(images):
             img_path = images[img_idx]
