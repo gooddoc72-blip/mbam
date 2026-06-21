@@ -175,6 +175,30 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"Error loading cafe schedules: {e}")
 
+    def add_cafe_schedule_job(self, schedule_id, schedule_time):
+        """단건 카페 육성 예약을 '실행 중인' 스케줄러에 즉시 등록 (UI 추가 즉시 반영)."""
+        try:
+            hour, minute = map(int, str(schedule_time).split(":"))
+            job_id = f"cafe_nurture_{schedule_id}"
+            self.scheduler.add_job(
+                self.run_cafe_nurture_job, 'cron',
+                hour=hour, minute=minute, args=[schedule_id],
+                id=job_id, replace_existing=True
+            )
+            logger.info(f"카페 예약 즉시 등록: {job_id} @ {hour:02d}:{minute:02d}")
+            return True
+        except Exception as e:
+            logger.error(f"카페 예약 등록 실패({schedule_id}): {e}")
+            return False
+
+    def remove_cafe_schedule_job(self, schedule_id):
+        """단건 카페 육성 예약을 스케줄러에서 제거."""
+        try:
+            self.scheduler.remove_job(f"cafe_nurture_{schedule_id}")
+            logger.info(f"카페 예약 제거: cafe_nurture_{schedule_id}")
+        except Exception:
+            pass
+
     async def run_cafe_nurture_job(self, schedule_id: str):
         db = SessionLocal()
         try:

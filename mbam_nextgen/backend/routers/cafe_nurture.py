@@ -157,8 +157,14 @@ async def add_schedule(req: ScheduleCreate, db: Session = Depends(get_db), curre
     )
     db.add(new_sch)
     db.commit()
-    # TODO: Reload APScheduler
-    return {"message": "스케줄이 등록되었습니다."}
+    db.refresh(new_sch)
+    # 실행 중인 스케줄러에 즉시 등록 (서버 재시작 없이 바로 예약 동작)
+    try:
+        from mbam_nextgen.services.scheduler_service import scheduler_service
+        scheduler_service.add_cafe_schedule_job(new_sch.id, new_sch.schedule_time)
+    except Exception as e:
+        print(f"[cafe_nurture] 스케줄러 즉시 등록 실패: {e}")
+    return {"message": "스케줄이 등록되었습니다.", "id": new_sch.id}
 
 @router.get("/schedules")
 async def get_schedules(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -195,6 +201,11 @@ async def delete_schedule(schedule_id: str, db: Session = Depends(get_db), curre
     if sch:
         db.delete(sch)
         db.commit()
+        try:
+            from mbam_nextgen.services.scheduler_service import scheduler_service
+            scheduler_service.remove_cafe_schedule_job(schedule_id)
+        except Exception:
+            pass
     return {"message": "스케줄이 삭제되었습니다."}
 
 # --- 4. Targeted Auto Comment Trigger ---

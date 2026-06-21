@@ -298,12 +298,15 @@ export default function CafeAutoPage() {
   };
 
   const handleAddSchedule = async () => {
-    if (!newSchAccId || !newSchCafeId || !newSchTime) return;
+    if (!newSchAccId || !newSchCafeId || !newSchTime) {
+      alert("계정, 매핑된 카페, 예약 시간을 모두 선택해주세요.");
+      return;
+    }
     try {
       const res = await fetchWithAuth("/api/cafe-nurture/schedules", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ 
-            account_id: newSchAccId, 
-            cafe_id: newSchCafeId, 
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+            account_id: newSchAccId,
+            cafe_id: newSchCafeId,
             schedule_time: newSchTime,
             content_category: newSchCategory || null,
             content_item_id: newSchContentItem || null,
@@ -312,8 +315,14 @@ export default function CafeAutoPage() {
             post_qty_per_time: Number(newSchQty)
         })
       });
-      if (res.ok) { alert("추가 완료"); fetchSchedules(); }
-    } catch (e) { alert("오류"); }
+      if (res.ok) {
+        alert(`예약이 등록되었습니다. (매일 ${newSchTime})`);
+        fetchSchedules();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert("예약 등록 실패: " + (d.detail || `HTTP ${res.status}`));
+      }
+    } catch (e) { alert("오류: 서버 연결 실패"); }
   };
 
   return (
