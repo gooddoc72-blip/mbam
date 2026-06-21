@@ -51,6 +51,7 @@ export default function CafeAutoPage() {
   // --- Common ---
   const [loading, setLoading] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
+  const [promptCategory, setPromptCategory] = useState(null);
 
   const loadRegistered = async () => {
     try {
@@ -115,11 +116,15 @@ export default function CafeAutoPage() {
       const params = new URLSearchParams(window.location.search);
       const source = params.get("source_data");
       const kw = params.get("keyword");
+      const pc = params.get("prompt_category");
       if (source) {
         setContent(source);
       }
       if (kw) {
         setTargetKeyword(kw);
+      }
+      if (pc) {
+        setPromptCategory(pc);
       }
     }
   }, []);
@@ -190,7 +195,8 @@ export default function CafeAutoPage() {
         post_mode: activeTab === "ai" ? "ai_generate" : "manual_text",
         target_keyword: targetKeyword, title, content,
         publish_mode: "instant", cafe_url: cafeUrl, board_name: boardName,
-        images: images, cafe_action_type: actionType, reference_data: referenceData
+        images: images, cafe_action_type: actionType, reference_data: referenceData,
+        source_data: content, prompt_category: promptCategory
       };
       const res = await fetchWithAuth("/api/auto_post/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)

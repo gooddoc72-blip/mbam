@@ -659,7 +659,9 @@ class WorkflowOrchestrator:
         content: str = None,
         reference_data: dict = None,
         proxy: str = None,
-        naver_pw: str = None
+        naver_pw: str = None,
+        source_data: str = None,
+        prompt_category: str = None
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -739,10 +741,17 @@ class WorkflowOrchestrator:
                 else:
                     # 3. AI 콘텐츠 생성
                     logger.info("[Orchestrator] AI 카페 원고 생성 중...")
-                    if content:
+                    if prompt_category and (content or source_data):
+                        # 글감수집 등 지정 프롬프트로 AI 생성 (content/source_data를 소스로 사용)
+                        cafe_content = await self._generate_content_with_retry(
+                            keyword, ai_provider=ai_provider, reference_data=reference_data,
+                            source_data=(source_data or content), prompt_category=prompt_category)
+                    elif content:
                         cafe_content = content
                     else:
-                        cafe_content = await self._generate_content_with_retry(keyword, ai_provider=ai_provider, reference_data=reference_data)
+                        cafe_content = await self._generate_content_with_retry(
+                            keyword, ai_provider=ai_provider, reference_data=reference_data,
+                            source_data=source_data, prompt_category=prompt_category)
                     cafe_content = self._strip_markdown(cafe_content)
 
                     # 4. 이미지 세척 / 대체

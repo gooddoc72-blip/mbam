@@ -220,7 +220,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 action_type=req.cafe_action_type,
                 content=req.content,
                 reference_data=req.reference_data,
-                naver_pw=req.naver_pw
+                naver_pw=req.naver_pw,
+                source_data=req.source_data,
+                prompt_category=req.prompt_category
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
