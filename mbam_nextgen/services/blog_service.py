@@ -16,21 +16,55 @@ class BlogService:
             "popup_close": "button.se-popup-button-cancel, button.se-help-close-button"
         }
 
+    async def _editor_present(self, page) -> bool:
+        """현재 페이지(또는 그 프레임들)에 에디터 본문/제목 필드가 있는지 확인."""
+        try:
+            for f in page.frames:
+                try:
+                    if await f.locator(self.selectors["body"]).count() > 0 or await f.locator(self.selectors["title"]).count() > 0:
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return False
+
     async def auto_enter_editor(self, page, account_id: str):
-        """블로그 홈에서 글쓰기 URL로 다이렉트 진입 (버튼 클릭 우회)"""
-        print("\n" + "="*60)
-        print("🚨 [중요] 다이렉트 URL 진입 코드가 실행되고 있습니다! 🚨")
-        print("="*60 + "\n")
+        """글쓰기 에디터 진입: 다이렉트 URL 시도 → 실패(홈으로 튕김) 시 '글쓰기' 버튼 클릭 폴백.
+        로그인 ID와 블로그 URL 주소가 다른 계정(ch_2101 등)은 다이렉트 URL이 안 먹혀
+        블로그 홈으로 튕기므로, 홈의 '글쓰기' 버튼을 눌러 ID 무관하게 에디터를 연다."""
         try:
             if not account_id:
-                print("[BlogService] ⚠️ account_id가 전달되지 않아 글쓰기 우회를 시도하지 않습니다.")
+                print("[BlogService] ⚠️ account_id 없음 — 글쓰기 진입 생략")
                 return
-                
+
             write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={account_id}"
-            print(f"[BlogService] 🚀 [글쓰기] 버튼 클릭 대신 안전한 다이렉트 URL로 바로 이동합니다: {write_url}")
+            print(f"[BlogService] 🚀 다이렉트 글쓰기 URL 이동: {write_url}")
             await page.goto(write_url, wait_until="domcontentloaded")
-            await asyncio.sleep(5)
-            print("[BlogService] ✅ 다이렉트 URL 진입 완료!")
+            await asyncio.sleep(4)
+
+            if await self._editor_present(page):
+                print("[BlogService] ✅ 다이렉트 URL로 에디터 진입 성공")
+                return
+
+            # 폴백: 다이렉트 URL이 블로그 홈으로 튕긴 상태 → 현재 페이지(홈)의 '글쓰기' 버튼 클릭
+            # (로그인 ID ≠ 블로그 URL 주소인 계정 대응. 새 탭으로 에디터가 열릴 수 있음)
+            print("[BlogService] ⚠️ 다이렉트 URL이 에디터를 못 열어 '글쓰기' 버튼 클릭으로 폴백합니다.")
+            await asyncio.sleep(2)
+            for sel in ["a.btn_write", "a:has-text('글쓰기')", "button:has-text('글쓰기')",
+                        "a[href*='postwrite']", "a[href*='Redirect=Write']", "a[href*='GoBlogWrite']"]:
+                try:
+                    loc = page.locator(sel)
+                    n = await loc.count()
+                    for i in range(n):
+                        if await loc.nth(i).is_visible():
+                            await loc.nth(i).click()
+                            print(f"[BlogService] ✅ '글쓰기' 버튼 클릭 ({sel})")
+                            await asyncio.sleep(5)
+                            return
+                except Exception:
+                    continue
+            print("[BlogService] ⚠️ '글쓰기' 버튼을 찾지 못했습니다.")
         except Exception as e:
             print(f"[BlogService] ⚠️ 글쓰기 진입 로직 오류: {e}")
 
