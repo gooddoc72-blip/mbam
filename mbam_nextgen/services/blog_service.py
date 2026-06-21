@@ -87,6 +87,30 @@ class BlogService:
                     print(f"[BlogService] 팝업 제거 완료: {sel}")
             except: pass
 
+    async def _reset_text_format(self, frame):
+        """이전 세션에서 켜진 채 기억된 글자 서식 토글(취소선/굵게/기울임/밑줄)을 끔 (best-effort).
+        영구 프로필이 마지막 서식 상태를 기억해 모든 본문에 취소선이 적용되는 문제 방지."""
+        selectors = [
+            "button[class*='strikethrough']", "button[class*='strike']",
+            "button[data-name='strikethrough']", "button[class*='bold']",
+            "button[class*='italic']", "button[class*='underline']",
+        ]
+        for sel in selectors:
+            try:
+                btns = frame.locator(sel)
+                cnt = await btns.count()
+                for i in range(cnt):
+                    b = btns.nth(i)
+                    cls = (await b.get_attribute("class")) or ""
+                    pressed = (await b.get_attribute("aria-pressed")) or ""
+                    # 활성화(선택)된 토글만 클릭해서 해제
+                    if "active" in cls or "selected" in cls or "on" in cls.split() or pressed == "true":
+                        if await b.is_visible():
+                            await b.click()
+                            print(f"[BlogService] 활성 서식 해제: {sel}")
+            except Exception:
+                continue
+
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
@@ -111,7 +135,9 @@ class BlogService:
         
         # 본문 및 이미지 교차 입력
         await frame.click(self.selectors["body"])
-        
+        # 이전 세션에서 켜진 채 기억된 서식(취소선/굵게 등) 해제 — best effort
+        await self._reset_text_format(frame)
+
         chunks = re.split(r'\[이미지\]', content)
         images = images or []
         img_idx = 0

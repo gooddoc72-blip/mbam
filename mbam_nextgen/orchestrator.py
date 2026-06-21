@@ -136,6 +136,8 @@ class WorkflowOrchestrator:
         text = re.sub(r'(\*\*+|~~+|__+|`+)', '', text)                    # **굵게** ~~취소선~~ __ `코드`
         text = re.sub(r'^\s{0,3}#{1,6}\s*', '', text, flags=re.MULTILINE)  # ## 헤딩
         text = re.sub(r'^\s{0,3}[-*]\s+', '', text, flags=re.MULTILINE)    # - / * 리스트 기호
+        text = re.sub(r'^\s{0,3}\d+[.)]\s+', '', text, flags=re.MULTILINE)  # 1. 2. 번호 (네이버 자동 번호목록 방지)
+        text = re.sub(r'^\s*[-–—=]{2,}\s*$', '', text, flags=re.MULTILINE)  # --- === 구분선 줄
         return text
 
     async def _generate_content_with_retry(
