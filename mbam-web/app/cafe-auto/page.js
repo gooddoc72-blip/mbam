@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import ManuscriptLoaderModal from "../components/ManuscriptLoaderModal";
 
 export default function CafeAutoPage() {
-  const [mainTab, setMainTab] = useState("single"); // "single", "target", "nurture"
+  const [mainTab, setMainTab] = useState("post"); // "post"(즉시+예약 통합), "target"
 
   // --- Tab 1: Single/Loop ---
   const [activeTab, setActiveTab] = useState("manual"); // "manual", "ai"
@@ -67,10 +67,10 @@ export default function CafeAutoPage() {
 
   useEffect(() => {
     // Load accounts and schedules if in nurture or target tab
-    if (mainTab === "nurture" || mainTab === "target") {
+    if (mainTab === "post" || mainTab === "target") {
       fetchAccounts();
       loadRegistered();
-      if (mainTab === "nurture") fetchSchedules();
+      if (mainTab === "post") fetchSchedules();
     }
   }, [mainTab]);
 
@@ -334,9 +334,8 @@ export default function CafeAutoPage() {
           <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "1rem" }}>카페 전문 육성 & 자동화</h1>
           <div style={{ display: "flex", gap: "1rem", borderBottom: "2px solid #e2e8f0" }}>
             {[
-              { id: "single", label: "일반 포스팅/순회" },
-              { id: "target", label: "타겟 게시글 다중 작업" },
-              { id: "nurture", label: "계정 육성 관리 (스케줄)" }
+              { id: "post", label: "포스팅 & 육성 (즉시·예약)" },
+              { id: "target", label: "타겟 게시글 다중 작업" }
             ].map(tab => (
               <button key={tab.id} onClick={() => setMainTab(tab.id)}
                 style={{
@@ -355,8 +354,8 @@ export default function CafeAutoPage() {
         {/* Content Area */}
         <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", overflowY: "auto" }}>
           
-          {/* TAB 1: SINGLE / LOOP */}
-          {mainTab === "single" && (
+          {/* TAB 1(병합): 즉시 포스팅 + 계정/카페/예약 육성 */}
+          {mainTab === "post" && (
             <>
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>작업 유형</h2>
@@ -425,7 +424,7 @@ export default function CafeAutoPage() {
                       {acc.naver_id}
                     </label>
                   ))}
-                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>'계정 육성 관리' 탭에서 아이디를 먼저 등록해주세요.</span>}
+                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>'포스팅 & 육성' 탭에서 아이디를 먼저 등록해주세요.</span>}
                 </div>
               </div>
 
@@ -459,8 +458,8 @@ export default function CafeAutoPage() {
             </>
           )}
 
-          {/* TAB 3: NURTURE */}
-          {mainTab === "nurture" && (
+          {/* 병합: 계정/카페 관리 + 예약(육성) 스케줄 — 위 즉시 포스팅과 같은 탭에 표시 */}
+          {mainTab === "post" && (
             <>
               <div style={{ padding: "1rem", background: "#fdf2f8", color: "#831843", border: "1px solid #fbcfe8", borderRadius: "8px" }}>
                 💡 <b>계정 자동 육성</b>: 내 네이버 아이디들을 등록하고 가입된 카페를 매핑한 뒤, 스케줄을 설정해두면 백그라운드 서버가 알아서 매일 방문하여 소통(댓글) 작업을 수행합니다.
