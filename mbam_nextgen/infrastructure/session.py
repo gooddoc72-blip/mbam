@@ -31,6 +31,21 @@ def mark_registered(account_id: str):
         pass
 
 
+def clear_stale_locks(account_id: str):
+    """
+    이전 비정상 종료(서버 강제종료/크래시)로 남은 Chromium 프로필 잠금 파일 제거.
+    제거하지 않으면 '새 창은 뜨는데 프로필을 못 열어 시작 못함' 증상이 발생한다.
+    주의: 같은 계정의 브라우저 창이 '실제로' 열려 있을 때 호출하면 충돌할 수 있으니,
+    한 계정당 한 창만 띄우는 전제로 사용한다.
+    """
+    d = get_profile_dir(account_id)
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"):
+        try:
+            os.remove(os.path.join(d, name))
+        except OSError:
+            pass
+
+
 class SessionManager:
     """
     [L4. Stealth - Session Module]
@@ -57,6 +72,9 @@ class SessionManager:
 
     def mark_registered(self, account_id: str):
         mark_registered(account_id)
+
+    def clear_stale_locks(self, account_id: str):
+        clear_stale_locks(account_id)
 
     # ---- 쿠키 기반 (하위 호환) ----
     def _get_session_path(self, account_id: str):

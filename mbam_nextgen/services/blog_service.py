@@ -81,8 +81,9 @@ class BlogService:
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
         
-        # 원고에 마침표가 있으면 줄바꿈 처리 (숫자 소수점 제외, 마침표 뒤 공백 제거)
-        content = re.sub(r'(\.+)(?!\d)\s*', r'\1\n', content)
+        # 한 문장이 끝나면(. ! ? 뒤) 줄바꿈. 목록 번호("1."), 소수점("3.5")은 제외.
+        # 닫는 따옴표/괄호는 문장에 붙여둠.
+        content = re.sub(r'(?<![0-9])([.!?]+["\'”’)\]]*)(?!\d)[ \t]*', r'\1\n', content)
         content = re.sub(r'\n{3,}', '\n\n', content)
 
         print(f"[BlogService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
@@ -169,42 +170,67 @@ class BlogService:
         print("[BlogService] 🚀 즉시 발행 시도 중...")
         
         try:
-            # 1. 상단의 [발행] 버튼 클릭
+            start_url = page.url
+            # 1. 상단의 [발행] 버튼 클릭 → 발행 설정 패널 열기
             publish_btn = frame.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
             if await publish_btn.count() == 0:
                 # 프레임 밖(상위 페이지)에 있을 수 있음
                 publish_btn = page.locator(".btn_submit, button.publish_btn__confirm, button:text-is('발행'), span:text-is('발행')")
-            
+
             await publish_btn.first.click()
-            await asyncio.sleep(2)
-            
-            # 2. 발행 확인 다이얼로그에서 [발행] 확인 버튼 클릭
-            confirm_selectors = [
-                "button.publish_btn__confirm",
-                "button:text-is('발행')",
-                ".se-popup-button-confirm",
-                "button.confirm",
-                ".btn_submit"
-            ]
-            
-            for sel in confirm_selectors:
+
+            # 2. 발행 설정 패널의 최종 [발행] 확인 버튼을 '명시적으로' 대기 후 클릭
+            #    (상단 발행 버튼을 다시 누르지 않도록 publish_btn__confirm 을 우선 대기)
+            clicked = False
+            confirm = None
+            for root in (frame, page):
                 try:
-                    for root in [frame, page]:
-                        confirm = root.locator(sel)
-                        count = await confirm.count()
-                        if count > 0:
-                            # 보이는 버튼만 필터링
-                            for i in range(count - 1, -1, -1):
-                                if await confirm.nth(i).is_visible():
-                                    await confirm.nth(i).click(timeout=5000)
-                                    print(f"✅ [BlogService] 즉시 발행 완료! (선택자: {sel})")
-                                    await asyncio.sleep(3)
-                                    return True
-                except: continue
-            
-            print("⚠️ [BlogService] 발행 확인 버튼을 찾지 못했습니다. 수동 확인 필요.")
-            return False
-            
+                    await root.wait_for_selector("button.publish_btn__confirm", timeout=8000, state="visible")
+                    confirm = root.locator("button.publish_btn__confirm")
+                    break
+                except Exception:
+                    continue
+            if confirm is not None and await confirm.count() > 0:
+                await confirm.first.click(timeout=5000)
+                clicked = True
+                print("✅ [BlogService] 발행 확인 버튼 클릭")
+            else:
+                # 폴백: 보이는 발행/확인 버튼 탐색
+                for sel in ["button.publish_btn__confirm", ".se-popup-button-confirm", "button.confirm"]:
+                    for root in (frame, page):
+                        try:
+                            loc = root.locator(sel)
+                            cnt = await loc.count()
+                            for i in range(cnt - 1, -1, -1):
+                                if await loc.nth(i).is_visible():
+                                    await loc.nth(i).click(timeout=5000)
+                                    clicked = True
+                                    print(f"✅ [BlogService] 발행 확인 클릭 (폴백: {sel})")
+                                    break
+                            if clicked:
+                                break
+                        except Exception:
+                            continue
+                    if clicked:
+                        break
+
+            if not clicked:
+                print("⚠️ [BlogService] 발행 확인 버튼을 찾지 못했습니다. 수동 확인 필요.")
+                return False
+
+            # 3. 실제 발행 완료 대기 — 편집 화면을 벗어나(게시글로 이동) 발행이 끝날 때까지
+            for _ in range(30):  # 최대 ~15초
+                await asyncio.sleep(0.5)
+                cur = page.url
+                if ("PostWriteForm" not in cur) and ("editor" not in cur) and (cur != start_url):
+                    print(f"✅ [BlogService] 즉시 발행 완료! (이동: {cur})")
+                    await asyncio.sleep(1)
+                    return True
+            # URL 변화가 안 잡혀도 확인 클릭은 됐으므로, 발행 반영 여유 대기 후 성공 처리
+            await asyncio.sleep(3)
+            print("✅ [BlogService] 발행 확인 완료 (URL 변화 미감지 — 여유 대기 후 종료)")
+            return True
+
         except Exception as e:
             print(f"⚠️ [BlogService] 발행 중 오류: {e}")
             return False

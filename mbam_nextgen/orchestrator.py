@@ -302,6 +302,7 @@ class WorkflowOrchestrator:
             try:
                 # 계정별 영구 프로필 → 네이버가 '신뢰 기기'로 기억하여 2단계 인증 재요구를 줄임
                 profile_dir = self.session_manager.get_profile_dir(account_id)
+                self.session_manager.clear_stale_locks(account_id)  # 이전 비정상 종료 잠금 정리
                 persistent_opts = dict(
                     headless=False,
                     args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
@@ -481,6 +482,7 @@ class WorkflowOrchestrator:
             context = None
             try:
                 profile_dir = self.session_manager.get_profile_dir(account_id)
+                self.session_manager.clear_stale_locks(account_id)  # 이전 비정상 종료 잠금 정리
                 context = await p.chromium.launch_persistent_context(
                     profile_dir,
                     headless=False,
@@ -644,6 +646,7 @@ class WorkflowOrchestrator:
             try:
                 # 계정별 영구 프로필 (네이버 신뢰 기기 유지 → 2단계 인증 재요구 감소)
                 profile_dir = self.session_manager.get_profile_dir(account_id)
+                self.session_manager.clear_stale_locks(account_id)  # 이전 비정상 종료 잠금 정리
                 persistent_opts = dict(
                     headless=False,
                     args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
