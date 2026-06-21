@@ -11,7 +11,7 @@ function BlogPostingContent() {
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
 
-  const [accounts, setAccounts] = useState([{ id: "", pw: "" }]);
+  const [accounts, setAccounts] = useState([{ id: "", pw: "", checked: true }]);
   const [intervalMins, setIntervalMins] = useState(5);
   const [useTethering, setUseTethering] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
@@ -24,7 +24,7 @@ function BlogPostingContent() {
     } catch (e) { /* 서버 미기동 시 조용히 무시 */ }
   };
 
-  const addAccount = () => setAccounts([...accounts, { id: "", pw: "" }]);
+  const addAccount = () => setAccounts([...accounts, { id: "", pw: "", checked: true }]);
   const removeAccount = (index) => setAccounts(accounts.filter((_, i) => i !== index));
   const updateAccount = (index, field, value) => {
     const newAcc = [...accounts];
@@ -281,7 +281,7 @@ function BlogPostingContent() {
       alert("타겟 키워드를 입력해주세요.");
       return;
     }
-    const validAccounts = accounts.filter(a => a.id.trim() !== "");
+    const validAccounts = accounts.filter(a => a.id.trim() !== "" && a.checked !== false);
     if (validAccounts.length === 0) {
       alert("원고를 생성할 계정을 최소 1개 이상 입력해주세요.");
       return;
@@ -416,7 +416,7 @@ function BlogPostingContent() {
   };
 
   const handleStartAutomation = async () => {
-    const validAccounts = accounts.filter(a => a.id.trim() !== "");
+    const validAccounts = accounts.filter(a => a.id.trim() !== "" && a.checked !== false);
     if (validAccounts.length === 0) {
       alert("계정을 1개 이상 입력해주세요.");
       return;
@@ -537,6 +537,7 @@ function BlogPostingContent() {
           <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
             {accounts.map((acc, idx) => (
               <div key={idx} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input type="checkbox" checked={acc.checked !== false} onChange={(e) => updateAccount(idx, "checked", e.target.checked)} title="이 계정으로 발행" style={{ width: "18px", height: "18px", cursor: "pointer" }} />
                 <span style={{ width: "20px", fontWeight: "bold", color: "#64748b" }}>{idx+1}.</span>
                 <input type="text" placeholder="네이버 아이디" value={acc.id} onChange={(e) => updateAccount(idx, "id", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 <input type="password" placeholder="비밀번호" value={acc.pw} onChange={(e) => updateAccount(idx, "pw", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />

@@ -97,11 +97,17 @@ class CardNewsGenerator:
         return filepath
 
     def _extract_headings(self, content: str) -> list:
-        """원고의 H태그(소제목) 추출. '[소제목] 텍스트' 형식 우선."""
+        """원고의 H태그(소제목) 추출. '[소제목] 텍스트' 또는 '■ 텍스트'(헤딩 불릿) 인식."""
         import re
         if not content:
             return []
+        BULLETS = "■▶◆●▣◼▪□▷"
         heads = re.findall(r'^\s*\[소제목\]\s*(.+?)\s*$', content, flags=re.MULTILINE)
+        if not heads:
+            for line in content.splitlines():
+                s = line.strip()
+                if s and s[0] in BULLETS and len(s) <= 50:
+                    heads.append(s.lstrip(BULLETS + " ").strip())
         return [h.strip() for h in heads if h.strip()]
 
     def _extract_points(self, content: str, n: int):

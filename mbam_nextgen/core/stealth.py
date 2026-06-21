@@ -93,12 +93,20 @@ class StealthExecutor:
             pass
 
         SUBTITLE_MARK = "[소제목]"
+        HEADING_BULLETS = ("■", "▶", "◆", "●", "▣", "◼", "▪", "□", "▷")
         paragraphs = text.split('\n')
         for p_idx, paragraph in enumerate(paragraphs):
-            # 소제목([소제목] 토큰) 줄 → 굵게(Ctrl+B) ON 후 입력, 끝나면 OFF
-            is_sub = paragraph.lstrip().startswith(SUBTITLE_MARK)
+            # 소제목 줄 → 굵게(Ctrl+B) ON 후 입력, 끝나면 OFF
+            # 마커: '[소제목]'(토큰) 또는 줄 맨 앞 헤딩 불릿(■ ▶ ◆ 등, 짧은 줄)
+            stripped = paragraph.lstrip()
+            is_sub = False
+            if stripped.startswith(SUBTITLE_MARK):
+                paragraph = stripped[len(SUBTITLE_MARK):].lstrip()
+                is_sub = True
+            elif stripped[:1] in HEADING_BULLETS and len(stripped) <= 50:
+                paragraph = stripped  # 불릿(■ 등)은 유지하고 굵게만
+                is_sub = True
             if is_sub:
-                paragraph = paragraph.lstrip()[len(SUBTITLE_MARK):].lstrip()
                 try:
                     await page.keyboard.press("Control+b")
                 except Exception:
