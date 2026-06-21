@@ -135,28 +135,39 @@ class BlogService:
             except: pass
 
     async def _reset_text_format(self, frame):
-        """이전 세션에서 켜진 채 기억된 글자 서식 토글(취소선/굵게/기울임/밑줄)을 끔 (best-effort).
-        영구 프로필이 마지막 서식 상태를 기억해 모든 본문에 취소선이 적용되는 문제 방지."""
-        selectors = [
-            "button[class*='strikethrough']", "button[class*='strike']",
-            "button[data-name='strikethrough']", "button[class*='bold']",
-            "button[class*='italic']", "button[class*='underline']",
-        ]
-        for sel in selectors:
-            try:
-                btns = frame.locator(sel)
-                cnt = await btns.count()
-                for i in range(cnt):
-                    b = btns.nth(i)
-                    cls = (await b.get_attribute("class")) or ""
-                    pressed = (await b.get_attribute("aria-pressed")) or ""
-                    # 활성화(선택)된 토글만 클릭해서 해제
-                    if "active" in cls or "selected" in cls or "on" in cls.split() or pressed == "true":
-                        if await b.is_visible():
-                            await b.click()
-                            print(f"[BlogService] 활성 서식 해제: {sel}")
-            except Exception:
-                continue
+        """영구 프로필이 기억한 '취소선 ON' 상태를 해제.
+        활성화(선택)된 취소선 버튼만 JS로 정확히 클릭해서 끈다(꺼져 있으면 건드리지 않음).
+        진단을 위해 후보 버튼 정보를 로그(mbam_sys.log)에 남긴다."""
+        try:
+            from ..core.logger import logger
+        except Exception:
+            logger = None
+        try:
+            res = await frame.evaluate(r"""() => {
+                const dump = [], clicked = [];
+                const nodes = document.querySelectorAll('button, a, span[role="button"]');
+                nodes.forEach(el => {
+                    const cls = (el.className || '').toString();
+                    const title = el.getAttribute('title') || '';
+                    const aria = el.getAttribute('aria-pressed') || '';
+                    const dname = el.getAttribute('data-name') || '';
+                    const dlog = el.getAttribute('data-log') || '';
+                    const txt = (el.textContent || '').trim().slice(0, 10);
+                    const hay = (cls + ' ' + title + ' ' + dname + ' ' + dlog + ' ' + txt).toLowerCase();
+                    const isStrike = /(strike|취소선|throughline|단어삭제|취소)/.test(hay);
+                    const active = aria === 'true' || /(^|[ _-])(on|active|selected|is-on|checked)([ _-]|$)/.test(cls);
+                    if (isStrike) dump.push({cls, title, dname, dlog, aria, active});
+                    if (isStrike && active) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
+                });
+                return {dump, clicked};
+            }""")
+            if logger:
+                logger.error(f"[BlogService] 취소선 진단 dump={res.get('dump')} clicked={res.get('clicked')}")
+            if res.get("clicked"):
+                print(f"[BlogService] ✅ 활성 취소선 해제: {res['clicked']}")
+        except Exception as e:
+            if logger:
+                logger.error(f"[BlogService] _reset_text_format 오류: {e}")
 
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
