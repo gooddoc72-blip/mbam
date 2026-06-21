@@ -47,11 +47,28 @@ class BlogService:
                 print("[BlogService] ✅ 다이렉트 URL로 에디터 진입 성공")
                 return
 
-            # 폴백: 다이렉트 URL이 블로그 홈으로 튕긴 상태 → 현재 페이지(홈)의 '글쓰기' 버튼 클릭
-            # (로그인 ID ≠ 블로그 URL 주소인 계정 대응. 새 탭으로 에디터가 열릴 수 있음)
-            print("[BlogService] ⚠️ 다이렉트 URL이 에디터를 못 열어 '글쓰기' 버튼 클릭으로 폴백합니다.")
+            # 폴백: 다이렉트 URL이 블로그 홈으로 튕긴 상태 (로그인 ID ≠ 블로그 URL 주소)
+            # → '글쓰기' 링크의 실제 href(올바른 블로그 주소 포함)를 추출해 직접 이동
+            print("[BlogService] ⚠️ 다이렉트 URL이 에디터를 못 열어 '글쓰기' 링크로 폴백합니다.")
             await asyncio.sleep(2)
-            for sel in ["a.btn_write", "a:has-text('글쓰기')", "button:has-text('글쓰기')",
+            href = None
+            try:
+                href = await page.evaluate(r"""() => {
+                    const links = [...document.querySelectorAll('a')];
+                    const w = links.find(a => ((a.textContent||'').trim() === '글쓰기')
+                        || /postwrite|Redirect=Write|GoBlogWrite|PostWriteForm/i.test(a.getAttribute('href') || a.href || ''));
+                    return w ? (w.href || w.getAttribute('href')) : null;
+                }""")
+            except Exception:
+                href = None
+            if href:
+                print(f"[BlogService] ✅ '글쓰기' 링크 추출 → 이동: {href}")
+                await page.goto(href, wait_until="domcontentloaded")
+                await asyncio.sleep(5)
+                if await self._editor_present(page):
+                    return
+            # href 추출 실패 시 클릭 시도 (새 탭으로 열릴 수 있음 → wait_for_editor가 잡음)
+            for sel in ["a.btn_write", "a.button_write", "a:has-text('글쓰기')", "button:has-text('글쓰기')",
                         "a[href*='postwrite']", "a[href*='Redirect=Write']", "a[href*='GoBlogWrite']"]:
                 try:
                     loc = page.locator(sel)
@@ -64,7 +81,7 @@ class BlogService:
                             return
                 except Exception:
                     continue
-            print("[BlogService] ⚠️ '글쓰기' 버튼을 찾지 못했습니다.")
+            print("[BlogService] ⚠️ '글쓰기' 링크/버튼을 찾지 못했습니다.")
         except Exception as e:
             print(f"[BlogService] ⚠️ 글쓰기 진입 로직 오류: {e}")
 
@@ -156,16 +173,22 @@ class BlogService:
             const dump = [], clicked = [];
             document.querySelectorAll('button').forEach(el => {
                 const cls = (el.className || '').toString();
-                const title = el.getAttribute('title') || '';
+                const title = (el.getAttribute('title') || '').trim();
                 const aria = el.getAttribute('aria-pressed') || '';
-                const dname = el.getAttribute('data-name') || '';
-                const dlog = el.getAttribute('data-log') || '';
-                const hay = (cls + ' ' + title + ' ' + dname + ' ' + dlog).toLowerCase();
-                const isStrike = /(strike|through|취소선|취소)/.test(hay);
+                const dname = (el.getAttribute('data-name') || '');
+                const dlog = (el.getAttribute('data-log') || '');
+                const txt = (el.textContent || '').trim();
+                const en = (cls + ' ' + dname + ' ' + dlog).toLowerCase();
+                // 취소선 버튼만 정밀 판별 (영문 strike/through, data-name, 또는 정확히 '취소선')
+                const isStrike = /strike|throughline|through-line/.test(en) || dname.toLowerCase() === 'strikethrough'
+                                 || title === '취소선' || txt === '취소선';
+                // 절대 누르면 안 되는 위험 버튼 (취소/닫기/발행/저장 등) 가드
+                const danger = /(취소|닫기|cancel|close|발행|저장|publish|save|삭제|delete|뒤로)/.test((title + ' ' + txt).toLowerCase())
+                               && title !== '취소선' && txt !== '취소선';
                 let active = aria === 'true' || /(^|[ _-])(on|active|selected|is-on|is-toggled|checked)([ _-]|$)/.test(cls.toLowerCase());
                 if (!active) active = isGreen(el);
-                if (active) dump.push({cls, title, dname, dlog, aria, isStrike});  // 활성 버튼 전부 덤프(진단)
-                if (isStrike && active) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
+                if (active) dump.push({cls, title, dname, dlog, txt: txt.slice(0,8), aria, isStrike});
+                if (isStrike && active && !danger) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
             });
             return {dump, clicked};
         }"""
