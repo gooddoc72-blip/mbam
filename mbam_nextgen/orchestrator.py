@@ -140,7 +140,8 @@ class WorkflowOrchestrator:
 
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
-        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None
+        post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None,
+        prompt_category: str = None
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -166,7 +167,8 @@ class WorkflowOrchestrator:
             try:
                 content = await asyncio.wait_for(
                     self.soul.rewrite_for_blog("", enhanced_keyword, provider=ai_provider,
-                                               post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode, api_key=api_key),
+                                               post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode, api_key=api_key,
+                                               prompt_category=prompt_category),
                     timeout=timeout,
                 )
                 logger.info(f"✅ [Orchestrator] 원고 생성 완료 ({attempt}회차)")

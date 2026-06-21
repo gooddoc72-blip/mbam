@@ -56,6 +56,7 @@ class AutoPostRequest(BaseModel):
     # Automation / Content Collect Data
     source_data: Optional[str] = None
     generate_card_news: Optional[bool] = False
+    prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
     
     # Proxy / Tethering
     use_tethering: Optional[bool] = False
@@ -353,7 +354,8 @@ async def generate_multiple_contents(req: AutoPostRequest):
                 promo_type=req.promo_type,
                 distribution_mode=req.distribution_mode,
                 source_data=final_source_data,
-                api_key=req.api_key
+                api_key=req.api_key,
+                prompt_category=req.prompt_category
             )
             
             if content_text:

@@ -56,10 +56,11 @@ class SoulRewriter:
         else:
             self.openai_client = None
 
-    async def rewrite_for_blog(self, raw_data: str, keyword: str, provider: str = None, 
-                               post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, api_key: str = None) -> str:
+    async def rewrite_for_blog(self, raw_data: str, keyword: str, provider: str = None,
+                               post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, api_key: str = None,
+                               prompt_category: str = None) -> str:
         target_provider = (provider or self.provider).lower()
-        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode)
+        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode, prompt_category)
 
         if target_provider == "gemini":
             if api_key and genai:
@@ -91,7 +92,7 @@ class SoulRewriter:
         # 설정 오류는 raise — 호출자(orchestrator)가 폴백 처리. string 반환 시 본문에 그대로 게시됨
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 없음 또는 라이브러리 미설치)")
 
-    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None):
+    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None, prompt_category=None):
         # 1. 포스팅 목적 (Tone & Manner)
         if post_purpose == "intro":
             tone_guide = "객관적이고 전문적인 어조로 매장이나 상품의 장점을 소개하는 '홍보/소개' 글로 작성해주세요. (3인칭 관찰자 혹은 브랜드 에디터 시점)"
@@ -123,14 +124,18 @@ class SoulRewriter:
         # 4. Check Custom Prompts
         custom_prompt = ""
         ref_injection = ""
-        prompts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts.json")
+        # prompts.json 은 mbam_nextgen/ 아래에 있음 (settings.py 저장 경로와 일치시켜야 커스텀 프롬프트가 적용됨)
+        prompts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts.json")
         if os.path.exists(prompts_path):
             import json
             try:
                 with open(prompts_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # Legacy check
-                    if "claude_prompt" in data and not any(k in data for k in ["product", "hospital", "app", "place", "service"]):
+                    # 카테고리 선택: 명시적 prompt_category(예: 글감수집 content_collect) 우선,
+                    # 없으면 홍보 카테고리(promo_type), 그것도 없으면 레거시 단일 프롬프트
+                    if prompt_category and isinstance(data.get(prompt_category), dict):
+                        cat_data = data.get(prompt_category, {})
+                    elif "claude_prompt" in data and not any(k in data for k in ["product", "hospital", "app", "place", "service", "content_collect"]):
                         cat_data = data
                     else:
                         cat_data = data.get(promo_type, {}) if promo_type else {}

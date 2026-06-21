@@ -293,14 +293,16 @@ export default function ContentCollectPage() {
                       <div style={{ display: "flex", gap: "1rem", marginTop: "1.5rem" }}>
                         <button className="btn-primary" style={{ flex: 1, background: "#10b981" }} onClick={() => {
                             const params = new URLSearchParams({
-                              keyword: item.keywords?.[0] || item.title.split(' ')[0],
+                              keyword: item.keywords?.[0] || (item.title || "").split(' ')[0],
+                              prompt_category: "content_collect",
                               source_data: `[제목] ${item.title}\n[요약] ${item.summary}\n[대상] ${item.target}\n[기간] ${item.deadline}\n[출처] ${item.source}\n[링크] ${item.url}`
                             });
                             window.location.href = `/blog-posting?${params.toString()}`;
                           }}>📝 블로그 작성 준비</button>
                         <button className="btn-primary" style={{ flex: 1, background: "#f59e0b" }} onClick={() => {
                             const params = new URLSearchParams({
-                              keyword: item.keywords?.[0] || item.title.split(' ')[0],
+                              keyword: item.keywords?.[0] || (item.title || "").split(' ')[0],
+                              prompt_category: "content_collect",
                               source_data: `[제목] ${item.title}\n[요약] ${item.summary}\n[대상] ${item.target}\n[기간] ${item.deadline}\n[출처] ${item.source}\n[링크] ${item.url}`
                             });
                             window.location.href = `/cafe-auto?${params.toString()}`;

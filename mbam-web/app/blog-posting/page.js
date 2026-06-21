@@ -9,6 +9,7 @@ function BlogPostingContent() {
   const searchParams = useSearchParams();
   const [generateCardNews, setGenerateCardNews] = useState(true);
   const [sourceData, setSourceData] = useState("");
+  const [promptCategory, setPromptCategory] = useState(null);
 
   const [accounts, setAccounts] = useState([{ id: "", pw: "" }]);
   const [intervalMins, setIntervalMins] = useState(5);
@@ -103,6 +104,11 @@ function BlogPostingContent() {
       if (paramSource) {
         setSourceData(paramSource);
       }
+    }
+    // 글감수집에서 넘어온 경우 전용 프롬프트 카테고리 적용
+    if (searchParams) {
+      const pc = searchParams.get("prompt_category");
+      if (pc) setPromptCategory(pc);
     }
 
     const saved = localStorage.getItem('autoWriteRefData');
@@ -297,6 +303,7 @@ function BlogPostingContent() {
         reference_data: referenceData,
         generate_card_news: generateCardNews,
         source_data: sourceData,
+        prompt_category: promptCategory,
         post_mode: "ai_generate",
 
         login_mode: "manual",
@@ -304,7 +311,7 @@ function BlogPostingContent() {
         target_type: "blog",
         cafe_action_type: "post"
       };
-      const res = await fetchWithAuth("/next_api/auto_post/generate-content", {
+      const res = await fetchWithAuth("/api/auto_post/generate-content", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
