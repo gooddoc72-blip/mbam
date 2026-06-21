@@ -274,7 +274,10 @@ export default function Sidebar() {
                             <div 
                                 key={task.task_id}
                                 onClick={() => {
-                                    if (task.title.includes('카페') || task.title.includes('다중')) {
+                                    // 진행 중인 자동화 브라우저 창을 앞으로 가져오기
+                                    fetchWithAuth("/api/auto_post/focus-running", { method: "POST" }).catch(() => {});
+                                    const title = task.title || "";
+                                    if (title.includes('카페') || title.includes('다중')) {
                                         localStorage.setItem("mbam_cafe_task_id", task.task_id);
                                         router.push("/cafe-auto");
                                     } else {

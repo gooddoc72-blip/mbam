@@ -19,6 +19,10 @@ from .infrastructure.database import DatabaseManager
 from .core.logger import logger
 from .core.stealth import StealthExecutor
 
+# 현재 실행 중인 자동화 브라우저 페이지 레지스트리 (account_id -> playwright Page)
+# 사이드바 '진행 중 작업' 클릭 시 해당 브라우저 창을 앞으로 가져오기 위해 사용.
+RUNNING_PAGES = {}
+
 class WorkflowOrchestrator:
     """
     [Application Layer] 
@@ -338,6 +342,7 @@ class WorkflowOrchestrator:
             # 하위호환: 예전 쿠키 파일이 있으면 함께 주입
             await self.session_manager.load_session(context, account_id)
             page = context.pages[0] if context.pages else await context.new_page()
+            RUNNING_PAGES[account_id] = page  # 진행 중 브라우저 추적(사이드바에서 앞으로 가져오기)
             page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
             
             if not has_session:
@@ -514,6 +519,7 @@ class WorkflowOrchestrator:
                     timezone_id="Asia/Seoul",
                 )
                 page = context.pages[0] if context.pages else await context.new_page()
+                RUNNING_PAGES[account_id] = page  # 진행 중 브라우저 추적(사이드바에서 앞으로 가져오기)
                 page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
 
                 pw = account_pw or os.getenv("NAVER_PW", "")
@@ -684,6 +690,7 @@ class WorkflowOrchestrator:
                 has_session = self.session_manager.is_registered(account_id)
                 await self.session_manager.load_session(context, account_id)
                 page = context.pages[0] if context.pages else await context.new_page()
+                RUNNING_PAGES[account_id] = page  # 진행 중 브라우저 추적(사이드바에서 앞으로 가져오기)
 
                 if not has_session:
                     pw = naver_pw or os.getenv("NAVER_PW", "")

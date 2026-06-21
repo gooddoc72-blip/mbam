@@ -294,6 +294,21 @@ async def register_account(req: RegisterAccountRequest):
     }
 
 
+@router.post("/focus-running", summary="진행 중인 자동화 브라우저 창을 앞으로 가져오기")
+async def focus_running():
+    from mbam_nextgen.orchestrator import RUNNING_PAGES
+    focused, stale = [], []
+    for acc, pg in list(RUNNING_PAGES.items()):
+        try:
+            await pg.bring_to_front()
+            focused.append(acc)
+        except Exception:
+            stale.append(acc)
+    for acc in stale:
+        RUNNING_PAGES.pop(acc, None)
+    return {"success": True, "focused": focused}
+
+
 @router.get("/registered-accounts", summary="기기 인증(영구 프로필) 완료된 계정 ID 목록")
 async def registered_accounts():
     import os
