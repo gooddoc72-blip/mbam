@@ -202,6 +202,33 @@ class BlogService:
         if logger:
             logger.error(f"[BlogService] 취소선 토글 결과: {last}")
 
+    async def _dump_toolbar(self, frame):
+        """에디터 툴바 버튼 정보를 로그에 1회 덤프 — 소제목 스타일/글자크기 버튼 셀렉터 확인용(진단)."""
+        try:
+            from ..core.logger import logger
+        except Exception:
+            logger = None
+        try:
+            info = await frame.evaluate(r"""() => {
+                const out = [];
+                document.querySelectorAll('button').forEach(el => {
+                    const cls = (el.className || '').toString();
+                    if (!/toolbar/i.test(cls)) return;  // 툴바 버튼만
+                    out.push({
+                        cls: cls.slice(0, 70),
+                        dname: el.getAttribute('data-name') || '',
+                        dlog: el.getAttribute('data-log') || '',
+                        title: (el.getAttribute('title') || '').slice(0, 16),
+                        txt: (el.textContent || '').trim().slice(0, 10)
+                    });
+                });
+                return out;
+            }""")
+            if logger:
+                logger.error(f"[BlogService] 툴바 버튼 덤프({len(info)}개): {info}")
+        except Exception:
+            pass
+
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
@@ -228,6 +255,7 @@ class BlogService:
         await frame.click(self.selectors["body"])
         # 이전 세션에서 켜진 채 기억된 서식(취소선/굵게 등) 해제 — best effort
         await self._reset_text_format(frame)
+        await self._dump_toolbar(frame)  # 소제목 스타일/크기 버튼 셀렉터 확인용(진단) — C 구현 후 제거 예정
 
         chunks = re.split(r'\[이미지\]', content)
         images = images or []
