@@ -56,18 +56,31 @@ class BlogService:
                     except: continue
             await asyncio.sleep(1)
 
-        # 실패 시: 현재 페이지 상태(URL/제목)를 남겨 원인(미개설/보안/추가인증 등) 파악
+        # 실패 시: 현재 페이지 URL/제목을 로그(mbam_sys.log)에 남기고 스크린샷 저장 → 원인(미개설/보안/추가인증 등) 진단
+        try:
+            from ..core.logger import logger
+        except Exception:
+            logger = None
         try:
             info = []
-            for p in context.pages:
+            for idx, p in enumerate(context.pages):
                 try:
-                    info.append(f"{p.url} | {await p.title()}")
+                    url = p.url
+                    title = await p.title()
+                    info.append(f"{url} | {title}")
+                    try:
+                        await p.screenshot(path=f"editor_fail_{idx}.png", full_page=False)
+                    except Exception:
+                        pass
                 except Exception:
                     info.append(getattr(p, 'url', '?'))
-            print("⚠️ [BlogService] 에디터 미포착. 현재 페이지: " + " || ".join(info))
+            msg = "⚠️ [BlogService] 에디터 미포착. 현재 페이지: " + " || ".join(info) + " (스크린샷: editor_fail_*.png)"
+            print(msg)
+            if logger:
+                logger.error(msg)
         except Exception:
             pass
-        raise Exception("블로그 에디터를 찾을 수 없습니다. (블로그 미개설/휴면/보안·추가인증 페이지 가능 — 로그의 '현재 페이지' URL을 확인하세요)")
+        raise Exception("블로그 에디터를 찾을 수 없습니다. (블로그 미개설/휴면/보안·추가인증 페이지 가능 — editor_fail_*.png 와 로그 URL 확인)")
 
     async def dismiss_popups(self, frame):
         """방해 팝업(임시저장, 도움말 등) 제거"""
