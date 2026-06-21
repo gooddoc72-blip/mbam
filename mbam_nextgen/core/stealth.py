@@ -75,13 +75,23 @@ class StealthExecutor:
         await obj.locator(selector).first.click()
         await asyncio.sleep(random.uniform(0.5, 1.5))
         
+        SUBTITLE_MARK = "[소제목]"
         paragraphs = text.split('\n')
         for p_idx, paragraph in enumerate(paragraphs):
+            # 소제목 줄([소제목] 토큰) → 굵게(Ctrl+B) 적용 후 타이핑, 끝나면 해제
+            is_sub = paragraph.lstrip().startswith(SUBTITLE_MARK)
+            if is_sub:
+                paragraph = paragraph.lstrip()[len(SUBTITLE_MARK):].lstrip()
+                try:
+                    await page.keyboard.press("Control+b")
+                except Exception:
+                    is_sub = False
+
             if not paragraph:
                 # 에디터가 빈 줄을 무시하지 않도록 공백 입력 후 지우거나 보이지 않는 문자 입력
                 await page.keyboard.type(" ")
                 await asyncio.sleep(0.1)
-                
+
             for char in paragraph:
                 await page.keyboard.type(char)
                 delay = abs(np.random.normal(mean_delay, std_dev))
@@ -91,7 +101,14 @@ class StealthExecutor:
                     await page.keyboard.press("Backspace")
                 if char in [',', '.', '!', '?']: delay += random.uniform(0.4, 1.2) * speed_multiplier
                 await asyncio.sleep(max(0.01, delay))
-            
+
+            if is_sub:
+                # 굵게 해제 (다음 줄부터 일반 본문)
+                try:
+                    await page.keyboard.press("Control+b")
+                except Exception:
+                    pass
+
             if p_idx < len(paragraphs) - 1:
                 await page.keyboard.press("Enter", delay=100)
                 await asyncio.sleep(random.uniform(1.5, 3.5) * speed_multiplier)
