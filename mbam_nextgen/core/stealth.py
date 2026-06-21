@@ -74,7 +74,23 @@ class StealthExecutor:
         await StealthExecutor.human_mouse_move(obj, selector)
         await obj.locator(selector).first.click()
         await asyncio.sleep(random.uniform(0.5, 1.5))
-        
+
+        # 중앙 클릭이 (앞서 삽입된) 이미지를 선택했을 수 있음 → 커서를 본문 맨 끝으로 이동시켜
+        # 선택 해제. 안 하면 다음 글자 입력 시 선택된 이미지가 글자로 대체(삭제)됨.
+        try:
+            await obj.locator(selector).first.evaluate("""el => {
+                if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+                    const r = document.createRange();
+                    r.selectNodeContents(el);
+                    r.collapse(false);
+                    const s = window.getSelection();
+                    s.removeAllRanges();
+                    s.addRange(r);
+                }
+            }""")
+        except Exception:
+            pass
+
         SUBTITLE_MARK = "[소제목]"
         paragraphs = text.split('\n')
         for p_idx, paragraph in enumerate(paragraphs):
