@@ -1,5 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import datetime
 from .database import get_db, Advertiser, Agency, Distributor
 from .auth import get_current_user
@@ -53,15 +54,21 @@ def check_quota(current_user: dict = Depends(get_current_user), db: Session = De
 def increment_quota(user_email: str, role: str, db: Session):
     """
     작업 성공 시 사용 횟수를 1 증가시킵니다.
+    원자적 UPDATE로 동시 요청 시 카운트 유실(쿼터 우회)을 방지하고,
+    usage_count가 None이어도 coalesce로 0 기준 증가합니다.
     """
-    user = None
     if role == "advertiser":
-        user = db.query(Advertiser).filter(Advertiser.email == user_email).first()
+        model, field = Advertiser, Advertiser.email
     elif role == "agency":
-        user = db.query(Agency).filter(Agency.login_id == user_email).first()
+        model, field = Agency, Agency.login_id
     elif role == "distributor":
-        user = db.query(Distributor).filter(Distributor.login_id == user_email).first()
-        
-    if user:
-        user.usage_count += 1
+        model, field = Distributor, Distributor.login_id
+    else:
+        return
+
+    updated = db.query(model).filter(field == user_email).update(
+        {model.usage_count: func.coalesce(model.usage_count, 0) + 1},
+        synchronize_session=False,
+    )
+    if updated:
         db.commit()

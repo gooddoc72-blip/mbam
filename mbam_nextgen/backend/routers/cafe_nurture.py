@@ -120,7 +120,11 @@ async def add_joined_cafe(req: CafeCreate, db: Session = Depends(get_db), curren
 
 @router.delete("/cafes/{cafe_id}")
 async def delete_joined_cafe(cafe_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    cafe = db.query(JoinedCafe).filter(JoinedCafe.id == cafe_id).first()
+    user_id = get_user_id(current_user)
+    # 소유권 검증: 본인 계정에 속한 카페만 삭제 가능 (IDOR 방지)
+    cafe = db.query(JoinedCafe).join(NaverAccount, JoinedCafe.account_id == NaverAccount.id).filter(
+        JoinedCafe.id == cafe_id, NaverAccount.user_id == user_id
+    ).first()
     if not cafe:
         raise HTTPException(status_code=404, detail="카페 정보를 찾을 수 없습니다.")
     db.delete(cafe)
@@ -131,6 +135,15 @@ async def delete_joined_cafe(cafe_id: str, db: Session = Depends(get_db), curren
 @router.post("/schedules", summary="육성 스케줄 추가")
 async def add_schedule(req: ScheduleCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     user_id = get_user_id(current_user)
+    # 소유권 검증: 본인 계정/카페로만 스케줄 등록 가능 (IDOR 방지)
+    acc = db.query(NaverAccount).filter(NaverAccount.id == req.account_id, NaverAccount.user_id == user_id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    cafe = db.query(JoinedCafe).join(NaverAccount, JoinedCafe.account_id == NaverAccount.id).filter(
+        JoinedCafe.id == req.cafe_id, NaverAccount.user_id == user_id
+    ).first()
+    if not cafe:
+        raise HTTPException(status_code=404, detail="카페 정보를 찾을 수 없습니다.")
     new_sch = CafeSchedule(
         user_id=user_id,
         account_id=req.account_id,
@@ -176,7 +189,9 @@ async def get_schedules(db: Session = Depends(get_db), current_user: dict = Depe
 
 @router.delete("/schedules/{schedule_id}")
 async def delete_schedule(schedule_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    sch = db.query(CafeSchedule).filter(CafeSchedule.id == schedule_id).first()
+    user_id = get_user_id(current_user)
+    # 소유권 검증: 본인 스케줄만 삭제 가능 (IDOR 방지)
+    sch = db.query(CafeSchedule).filter(CafeSchedule.id == schedule_id, CafeSchedule.user_id == user_id).first()
     if sch:
         db.delete(sch)
         db.commit()
