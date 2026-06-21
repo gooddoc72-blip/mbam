@@ -153,62 +153,54 @@ class BlogService:
 
     async def _reset_text_format(self, frame):
         """영구 프로필이 기억한 '취소선 ON'을 해제.
-        네이버는 활성 서식을 초록(#03c75a=rgb(3,199,90))으로 표시 → 취소선 버튼의
-        아이콘 색이 초록이면(=활성) 클릭해 끈다. 모든 프레임을 탐색하고 진단을 로그에 남긴다."""
+        네이버 SE 취소선 버튼: button.se-strikethrough-toolbar-button / [data-name=strikethrough],
+        활성 시 class에 'se-is-selected'. 상태 반영이 늦을 수 있어 재시도하며,
+        선택돼 있으면 클릭해 끈다(꺼져 있으면 건드리지 않음)."""
         try:
             from ..core.logger import logger
         except Exception:
             logger = None
         JS = r"""() => {
-            const GREEN = ['rgb(3, 199, 90)', '3, 199, 90', '#03c75a'];
-            const isGreen = (el) => {
-                const nodes = [el, ...el.querySelectorAll('svg,span,i,use,path,em')];
-                for (const e of nodes) {
-                    const s = getComputedStyle(e);
-                    const c = (s.color || '') + ' ' + (s.fill || '') + ' ' + (s.stroke || '');
-                    if (GREEN.some(g => c.includes(g))) return true;
-                }
-                return false;
-            };
-            const dump = [], clicked = [];
-            document.querySelectorAll('button').forEach(el => {
-                const cls = (el.className || '').toString();
-                const title = (el.getAttribute('title') || '').trim();
-                const aria = el.getAttribute('aria-pressed') || '';
-                const dname = (el.getAttribute('data-name') || '');
-                const dlog = (el.getAttribute('data-log') || '');
-                const txt = (el.textContent || '').trim();
-                const en = (cls + ' ' + dname + ' ' + dlog).toLowerCase();
-                // 취소선 버튼만 정밀 판별 (영문 strike/through, data-name, 또는 정확히 '취소선')
-                const isStrike = /strike|throughline|through-line/.test(en) || dname.toLowerCase() === 'strikethrough'
-                                 || title === '취소선' || txt === '취소선';
-                // 절대 누르면 안 되는 위험 버튼 (취소/닫기/발행/저장 등) 가드
-                const danger = /(취소|닫기|cancel|close|발행|저장|publish|save|삭제|delete|뒤로)/.test((title + ' ' + txt).toLowerCase())
-                               && title !== '취소선' && txt !== '취소선';
-                let active = aria === 'true' || /(^|[ _-])(on|active|selected|is-on|is-toggled|checked)([ _-]|$)/.test(cls.toLowerCase());
-                if (!active) active = isGreen(el);
-                if (active) dump.push({cls, title, dname, dlog, txt: txt.slice(0,8), aria, isStrike});
-                if (isStrike && active && !danger) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
-            });
-            return {dump, clicked};
+            const sels = ['button.se-strikethrough-toolbar-button',
+                          'button[data-name="strikethrough"]',
+                          'button[data-log="prt.strike"]'];
+            let btn = null;
+            for (const s of sels) { const b = document.querySelector(s); if (b) { btn = b; break; } }
+            if (!btn) return {found:false};
+            const cls = (btn.className || '').toString();
+            const selected = /se-is-selected|se-is-on|is-selected|se-is-toggled/.test(cls) || btn.getAttribute('aria-pressed') === 'true';
+            let clicked = false;
+            if (selected) { try { btn.click(); clicked = true; } catch(e){} }
+            return {found:true, selected, clicked, cls};
         }"""
         page = StealthExecutor._get_page_obj(frame)
         try:
             targets = [frame] + [f for f in page.frames if f is not frame]
         except Exception:
             targets = [frame]
-        allres = []
-        for t in targets:
-            try:
-                r = await t.evaluate(JS)
-                if r and (r.get("dump") or r.get("clicked")):
-                    allres.append(r)
+        last = None
+        # 툴바/선택상태가 늦게 반영될 수 있어 최대 6회(약 3초) 재시도
+        for _ in range(6):
+            done = False
+            for t in targets:
+                try:
+                    r = await t.evaluate(JS)
+                except Exception:
+                    continue
+                if r and r.get("found"):
+                    last = r
                     if r.get("clicked"):
-                        print(f"[BlogService] ✅ 활성 취소선 해제: {r['clicked']}")
-            except Exception:
-                continue
+                        print(f"[BlogService] ✅ 취소선 해제 클릭: {r.get('cls')}")
+                        done = True
+                        break
+                    if r.get("found") and not r.get("selected"):
+                        done = True  # 이미 꺼져 있음
+                        break
+            if done:
+                break
+            await asyncio.sleep(0.5)
         if logger:
-            logger.error(f"[BlogService] 취소선 진단: {allres}")
+            logger.error(f"[BlogService] 취소선 토글 결과: {last}")
 
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
