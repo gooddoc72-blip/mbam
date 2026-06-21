@@ -448,9 +448,11 @@ class WorkflowOrchestrator:
                         washed_images.append(washed_img)
 
             # 4. 글쓰기 자동 진입 및 에디터 감지
+            logger.info(f"🖼️ [Orchestrator] ({account_id}) 이미지 준비 완료: {len(washed_images)}장")
             logger.info("📝 [Orchestrator] 네이버 에디터 진입 시도...")
             await self.blog.auto_enter_editor(page, account_id)
             editor_frame = await self.blog.wait_for_editor(context, page)
+            logger.info(f"✅ [Orchestrator] ({account_id}) 에디터 프레임 확보: {getattr(editor_frame, 'name', '?')}")
             
             # 5. 세션 업데이트
             await self.session_manager.save_session(context, account_id)

@@ -1,6 +1,7 @@
 import asyncio
 import os
 from ..core.stealth import StealthExecutor
+from ..core.logger import logger
 
 class BlogService:
     """
@@ -35,21 +36,20 @@ class BlogService:
         블로그 홈으로 튕기므로, 홈의 '글쓰기' 버튼을 눌러 ID 무관하게 에디터를 연다."""
         try:
             if not account_id:
-                print("[BlogService] ⚠️ account_id 없음 — 글쓰기 진입 생략")
+                logger.info("[BlogService] ⚠️ account_id 없음 — 글쓰기 진입 생략")
                 return
 
             write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={account_id}"
-            print(f"[BlogService] 🚀 다이렉트 글쓰기 URL 이동: {write_url}")
+            logger.info(f"[BlogService] 🚀 다이렉트 글쓰기 URL 이동: {write_url}")
             await page.goto(write_url, wait_until="domcontentloaded")
             await asyncio.sleep(4)
 
             if await self._editor_present(page):
-                print("[BlogService] ✅ 다이렉트 URL로 에디터 진입 성공")
+                logger.info(f"[BlogService] ✅ ({account_id}) 다이렉트 URL로 에디터 진입 성공")
                 return
 
             # 폴백: 다이렉트 URL이 블로그 홈으로 튕긴 상태 (로그인 ID ≠ 블로그 URL 주소)
-            # → '글쓰기' 링크의 실제 href(올바른 블로그 주소 포함)를 추출해 직접 이동
-            print("[BlogService] ⚠️ 다이렉트 URL이 에디터를 못 열어 '글쓰기' 링크로 폴백합니다.")
+            logger.info(f"[BlogService] ⚠️ ({account_id}) 다이렉트 URL이 에디터 미오픈 → 현재 {page.url} | '글쓰기' 링크 폴백")
             await asyncio.sleep(2)
             href = None
             try:
@@ -62,10 +62,11 @@ class BlogService:
             except Exception:
                 href = None
             if href:
-                print(f"[BlogService] ✅ '글쓰기' 링크 추출 → 이동: {href}")
+                logger.info(f"[BlogService] ✅ ({account_id}) '글쓰기' 링크 추출 → 이동: {href}")
                 await page.goto(href, wait_until="domcontentloaded")
                 await asyncio.sleep(5)
                 if await self._editor_present(page):
+                    logger.info(f"[BlogService] ✅ ({account_id}) 글쓰기 링크로 에디터 진입 성공")
                     return
             # href 추출 실패 시 클릭 시도 (새 탭으로 열릴 수 있음 → wait_for_editor가 잡음)
             for sel in ["a.btn_write", "a.button_write", "a:has-text('글쓰기')", "button:has-text('글쓰기')",
@@ -76,12 +77,12 @@ class BlogService:
                     for i in range(n):
                         if await loc.nth(i).is_visible():
                             await loc.nth(i).click()
-                            print(f"[BlogService] ✅ '글쓰기' 버튼 클릭 ({sel})")
+                            logger.info(f"[BlogService] ✅ ({account_id}) '글쓰기' 버튼 클릭 ({sel})")
                             await asyncio.sleep(5)
                             return
                 except Exception:
                     continue
-            print("[BlogService] ⚠️ '글쓰기' 링크/버튼을 찾지 못했습니다.")
+            logger.error(f"[BlogService] ⚠️ ({account_id}) '글쓰기' 링크/버튼을 못 찾음 — 현재 페이지: {page.url}")
         except Exception as e:
             print(f"[BlogService] ⚠️ 글쓰기 진입 로직 오류: {e}")
 
