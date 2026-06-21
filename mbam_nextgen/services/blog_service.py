@@ -191,9 +191,9 @@ class BlogService:
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
         
-        # 한 문장이 끝나면(. ! ? 뒤) 줄바꿈. 목록 번호("1."), 소수점("3.5")은 제외.
-        # 닫는 따옴표/괄호는 문장에 붙여둠.
-        content = re.sub(r'(?<![0-9])([.!?]+["\'”’)\]]*)(?!\d)[ \t]*', r'\1\n', content)
+        # 문장이 끝나면(. ! ? + 공백) 줄바꿈. '공백이 뒤따를 때만' 끊어 도메인(bokjiro.go.kr),
+        # 소수점(3.5), 목록번호(1.) 처럼 점 뒤에 공백이 없는 경우는 끊지 않음.
+        content = re.sub(r'(?<![0-9])([.!?]+["\'”’)\]]*)[ \t]+', r'\1\n', content)
         content = re.sub(r'\n{3,}', '\n\n', content)
 
         print(f"[BlogService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
