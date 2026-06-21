@@ -410,12 +410,17 @@ class WorkflowOrchestrator:
                 washed_img = self.armor.wash_image(test_image, f"washed_{account_id}.jpg") if wash_images else test_image
                 if washed_img: washed_images.append(washed_img)
             elif not washed_images and generate_card_news:
-                logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지를 자동 생성합니다.")
-                generated_img_path = self.card_news.generate_image(keyword)
-                # 생성된 썸네일도 안전을 위해 세척
-                if generated_img_path:
-                    washed_img = self.armor.wash_image(generated_img_path, f"washed_gen_{account_id}.jpg")
-                    if washed_img: washed_images.append(washed_img)
+                logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
+                # 카드 제목: '테스트'/빈 키워드면 실제 글 제목을 사용
+                card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (blog_title or "정보")
+                card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
+                card_paths = self.card_news.generate_card_set(card_title, content=blog_content, count=5)
+                for idx_c, gp in enumerate(card_paths):
+                    if not gp:
+                        continue
+                    washed_img = self.armor.wash_image(gp, f"washed_gen_{account_id}_{idx_c}.jpg")
+                    if washed_img:
+                        washed_images.append(washed_img)
 
             # 4. 글쓰기 자동 진입 및 에디터 감지
             logger.info("📝 [Orchestrator] 네이버 에디터 진입 시도...")
@@ -721,9 +726,15 @@ class WorkflowOrchestrator:
                     if test_image:
                         washed_images.append(self.armor.wash_image(test_image, f"washed_cafe_{account_id}.jpg"))
                     else:
-                        logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지를 자동 생성합니다.")
-                        generated_img_path = self.card_news.generate_image(keyword)
-                        washed_images.append(self.armor.wash_image(generated_img_path, f"washed_gen_cafe_{account_id}.jpg"))
+                        logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
+                        card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (title or "정보")
+                        card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
+                        for idx_c, gp in enumerate(self.card_news.generate_card_set(card_title, content=cafe_content, count=5)):
+                            if not gp:
+                                continue
+                            wimg = self.armor.wash_image(gp, f"washed_gen_cafe_{account_id}_{idx_c}.jpg")
+                            if wimg:
+                                washed_images.append(wimg)
                     
                     # 5. 글쓰기 진입
                     await self.cafe.auto_enter_editor(page)

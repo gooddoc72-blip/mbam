@@ -56,3 +56,7 @@ Thumbs.db
 # Persistent browser profiles
 profiles/
 mbam_nextgen/profiles/
+
+# Generated/temp images
+mbam_nextgen/generated_images/
+mbam_nextgen/temp_images/
