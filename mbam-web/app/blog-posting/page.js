@@ -321,17 +321,42 @@ function BlogPostingContent() {
         alert(`서버 응답 오류: ${res.status} - ${errText}`);
         return;
       }
-      const data = await res.json();
-      if (data.success) {
-        setGeneratedContents(data.generated_contents);
-        if (data.scraped_image_folder) {
-          setImageUploadMode("folder");
-          setImageFolderPath(data.scraped_image_folder);
-          alert("✅ 원고 생성 완료! 타겟 URL에서 이미지 수집도 성공하여 이미지 폴더가 자동 지정되었습니다.");
-        }
-      } else {
-        alert("원고 생성에 실패했습니다: " + JSON.stringify(data));
+      const start = await res.json();
+      if (!start.success || !start.task_id) {
+        alert("원고 생성 시작에 실패했습니다: " + JSON.stringify(start));
+        return;
       }
+      // 원고 생성은 30초 이상 걸릴 수 있어 백그라운드로 처리됨 → 상태 폴링(최대 5분)
+      const taskId = start.task_id;
+      let done = false;
+      for (let i = 0; i < 150; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        let st;
+        try {
+          const sres = await fetchWithAuth(`/api/auto_post/status/${taskId}`);
+          st = await sres.json();
+        } catch (e) { continue; }
+        if (st.status === "completed") {
+          const data = st.result || {};
+          if (data.success) {
+            setGeneratedContents(data.generated_contents || []);
+            if (data.scraped_image_folder) {
+              setImageUploadMode("folder");
+              setImageFolderPath(data.scraped_image_folder);
+              alert("✅ 원고 생성 완료! 타겟 URL에서 이미지 수집도 성공하여 이미지 폴더가 자동 지정되었습니다.");
+            }
+          } else {
+            alert("원고 생성에 실패했습니다: " + JSON.stringify(data));
+          }
+          done = true;
+          break;
+        } else if (st.status === "failed") {
+          alert("원고 생성 실패: " + (st.error || "알 수 없는 오류"));
+          done = true;
+          break;
+        }
+      }
+      if (!done) alert("원고 생성이 시간 내(5분)에 완료되지 않았습니다. 계정 수를 줄이거나 잠시 후 다시 시도해주세요.");
     } catch (e) {
       alert("서버 연결 실패 또는 예외 발생: " + e.message);
     } finally {

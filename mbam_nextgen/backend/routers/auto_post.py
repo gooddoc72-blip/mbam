@@ -320,8 +320,7 @@ async def cancel_task(task_id: str):
         return {"success": True, "message": "작업이 중단되었습니다."}
     return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 
-@router.post("/generate-content")
-async def generate_multiple_contents(req: AutoPostRequest):
+async def _generate_impl(req: AutoPostRequest):
     print(f"[DEBUG] generate_multiple_contents called. product_url: {req.product_url}")
     results = []
     num_accounts = len(req.accounts) if req.accounts and len(req.accounts) > 0 else 1
@@ -394,10 +393,36 @@ async def generate_multiple_contents(req: AutoPostRequest):
     results = await asyncio.gather(*(generate_single(i) for i in range(num_accounts)))
     
     return {
-        "success": True, 
+        "success": True,
         "generated_contents": results,
         "scraped_image_folder": scraped_image_folder if scraped_image_folder else None
     }
+
+
+@router.post("/generate-content")
+async def generate_multiple_contents(req: AutoPostRequest):
+    """원고 생성은 30초 이상 걸릴 수 있어 백그라운드 작업으로 처리(프록시 30초 타임아웃 회피).
+    프론트는 반환된 task_id 로 /status/{task_id} 폴링 후 result.generated_contents 를 사용한다."""
+    import uuid
+    task_id = str(uuid.uuid4())
+    task_status_store[task_id] = {"status": "running", "logs": ["원고 생성 중..."]}
+
+    async def _run():
+        try:
+            result = await _generate_impl(req)
+            task_status_store[task_id]["result"] = result
+            task_status_store[task_id]["status"] = "completed"
+        except Exception as e:
+            import traceback
+            task_status_store[task_id]["status"] = "failed"
+            task_status_store[task_id]["error"] = str(e)
+            task_status_store[task_id]["logs"].append(traceback.format_exc())
+        finally:
+            active_tasks.pop(task_id, None)
+
+    active_tasks[task_id] = asyncio.create_task(_run())
+    return {"success": True, "task_id": task_id}
+
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
