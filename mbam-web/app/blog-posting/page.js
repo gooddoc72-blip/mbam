@@ -737,19 +737,19 @@ function BlogPostingContent() {
         
         {/* Right Generated Contents Review Section */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155" }}>✅ 생성된 계정별 원고 검토 및 수정</h3>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button onClick={handleAddBlankManuscript} style={{ padding: '0.4rem 0.8rem', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>✅ 생성된 계정별 원고 검토 및 수정</h3>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button onClick={handleAddBlankManuscript} style={{ padding: '0.4rem 0.8rem', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                 ➕ 직접 추가
               </button>
-              <button onClick={() => document.getElementById("localFileInput").click()} style={{ padding: '0.4rem 0.8rem', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+              <button onClick={() => document.getElementById("localFileInput").click()} style={{ padding: '0.4rem 0.8rem', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                 📁 PC에서 불러오기
               </button>
-              <button onClick={openManuscriptModal} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+              <button onClick={openManuscriptModal} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                 ☁️ 웹에서 불러오기
               </button>
-              <button onClick={handleDownloadAll} style={{ padding: '0.4rem 0.8rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+              <button onClick={handleDownloadAll} style={{ padding: '0.4rem 0.8rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                 ⬇️ 전체 다운로드
               </button>
             </div>
