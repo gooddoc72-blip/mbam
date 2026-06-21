@@ -52,3 +52,7 @@ Thumbs.db
 !package-lock.json
 *.log
 !requirements.txt
+
+# Persistent browser profiles
+profiles/
+mbam_nextgen/profiles/

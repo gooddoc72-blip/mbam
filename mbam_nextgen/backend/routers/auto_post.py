@@ -248,12 +248,59 @@ async def trigger_auto_post(req: AutoPostRequest):
         "task_id": task_id
     }
 
+class RegisterAccountRequest(BaseModel):
+    naver_id: str
+    naver_pw: Optional[str] = None
+
+
+async def run_register_task(task_id: str, naver_id: str, naver_pw: Optional[str]):
+    task_status_store[task_id] = {"status": "running", "logs": [f"[계정 등록] '{naver_id}' 기기 인증을 시작합니다..."]}
+
+    def log(msg: str):
+        try:
+            print(f"[{task_id}] {msg}")
+        except Exception:
+            pass
+        task_status_store[task_id]["logs"].append(msg)
+
+    try:
+        orchestrator = WorkflowOrchestrator()
+        result = await orchestrator.register_account_session(naver_id, naver_pw, log_callback=log)
+        if result.get("success"):
+            task_status_store[task_id]["status"] = "completed"
+            log("✅ 계정 등록(기기 인증)이 완료되었습니다! 이제 자동 로그인됩니다.")
+        else:
+            task_status_store[task_id]["status"] = "failed"
+            log(f"⚠️ 등록 실패: {result.get('error')}")
+    except Exception as e:
+        import traceback
+        task_status_store[task_id]["status"] = "failed"
+        log(f"오류 발생: {str(e)}\n{traceback.format_exc()}")
+    finally:
+        active_tasks.pop(task_id, None)
+
+
+@router.post("/register-account", summary="네이버 계정 등록(기기 인증) — 1회 수동 로그인")
+async def register_account(req: RegisterAccountRequest):
+    import uuid
+    task_id = str(uuid.uuid4())
+    task = asyncio.create_task(run_register_task(task_id, req.naver_id, req.naver_pw))
+    active_tasks[task_id] = task
+    return {
+        "success": True,
+        "task_id": task_id,
+        "message": "계정 등록(기기 인증) 작업이 시작되었습니다. 열리는 브라우저 창에서 로그인 + 2단계 인증을 완료해 주세요.",
+    }
+
+
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
     if task_id in active_tasks:
         active_tasks[task_id].cancel()
-        task_status_store[task_id]["status"] = "failed"
-        task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
+        # 작업 task가 store를 초기화하기 전 취소돼도 KeyError 안 나도록 가드
+        entry = task_status_store.setdefault(task_id, {"status": "running", "logs": []})
+        entry["status"] = "failed"
+        entry["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
         return {"success": True, "message": "작업이 중단되었습니다."}
     return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 

@@ -240,6 +240,21 @@ export default function CafeAutoPage() {
   };
 
   // --- Handlers Tab 3 ---
+  const handleRegisterAccount = async (acc) => {
+    if (!window.confirm(`'${acc.naver_id}' 계정의 기기 인증을 시작합니다.\n잠시 후 열리는 브라우저 창에서 로그인 + 2단계 인증을 완료해주세요.\n(최초 1회만 하면 이후 자동 로그인됩니다)`)) return;
+    try {
+      setLoading(true); setStatusLogs([]); setTaskStatus("running"); setTaskId(null);
+      const res = await fetchWithAuth("/api/auto_post/register-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ naver_id: acc.naver_id, naver_pw: null })
+      });
+      const data = await res.json();
+      if (data.success && data.task_id) { setTaskId(data.task_id); }
+      else { alert("기기 인증 시작에 실패했습니다."); setLoading(false); }
+    } catch (e) { alert("서버 오류 (백엔드 서버가 켜져 있는지 확인해주세요)"); setLoading(false); }
+  };
+
   const handleAddAccount = async () => {
     if (!newAccId || !newAccPw) return;
     try {
@@ -434,6 +449,7 @@ export default function CafeAutoPage() {
                     <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>ID</th>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>상태</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left" }}>기기 인증</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -442,6 +458,9 @@ export default function CafeAutoPage() {
                         <td style={{ padding: "0.5rem" }}>{acc.naver_id}</td>
                         <td style={{ padding: "0.5rem" }}>
                           <span style={{ background: "#dcfce7", color: "#166534", padding: "0.2rem 0.5rem", borderRadius: "4px" }}>{acc.status}</span>
+                        </td>
+                        <td style={{ padding: "0.5rem" }}>
+                          <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.3rem 0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", borderRadius: "4px", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
                         </td>
                       </tr>
                     ))}

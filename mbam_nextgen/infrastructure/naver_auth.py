@@ -21,10 +21,11 @@ class NaverAuthenticator:
             "captcha_input": "#chptcha, #captcha"
         }
 
-    async def login_with_bypass(self, page: Page, account_id: str, account_pw: str) -> bool:
+    async def login_with_bypass(self, page: Page, account_id: str, account_pw: str, manual_wait_secs: int = 60) -> bool:
         """
         네이버 로그인 페이지로 이동하여 로그인 시도.
         캡챠 발생 시 2Captcha를 통해 우회.
+        2단계 인증/추가 인증이 뜨면 manual_wait_secs 동안 사용자의 수동 완료를 대기.
         """
         pw_len = len(account_pw) if account_pw else 0
         print(f"[Auth] '{account_id}' 자동 로그인 시도 중... (입력된 PW 길이: {pw_len})")
@@ -53,7 +54,16 @@ class NaverAuthenticator:
             await page.keyboard.press('v')
             await page.keyboard.up('Control')
             await asyncio.sleep(1)
-            
+
+            # "로그인 상태 유지" 체크 → 세션 수명 연장 (영구 프로필과 결합 시 2단계 인증 재요구 최소화)
+            try:
+                keep = page.locator("#keep, .keep_check, label[for='keep'], #nvlong")
+                if await keep.count() > 0:
+                    await keep.first.click()
+                    await asyncio.sleep(0.3)
+            except Exception:
+                pass
+
             await page.click(self.selectors['login_btn'])
             await asyncio.sleep(3)
             
@@ -70,20 +80,20 @@ class NaverAuthenticator:
                 print(f"✅ [Auth] '{account_id}' 자동 로그인 성공!")
                 return True
                 
-            # 실패했다면 (비번오류, 캡챠, 2단계 인증 등), 사용자에게 수동 해결 기회 60초 제공
-            print("⚠️ [Auth] 자동 로그인 실패(또는 캡챠/추가인증 발생). 브라우저 창에서 수동으로 로그인을 완료해 주세요. (60초 대기)")
+            # 실패했다면 (비번오류, 캡챠, 2단계 인증 등), 사용자에게 수동 해결 기회 제공
+            print(f"⚠️ [Auth] 자동 로그인 실패(또는 캡챠/추가인증 발생). 브라우저 창에서 수동으로 로그인을 완료해 주세요. ({manual_wait_secs}초 대기)")
             try:
                 await page.bring_to_front()
             except: pass
-            
+
             try:
-                for _ in range(30):
+                for _ in range(max(1, manual_wait_secs // 2)):
                     await asyncio.sleep(2)
                     # 수동으로 로그인하여 로그인 페이지를 벗어났는지 확인
                     if await page.locator(self.selectors['login_btn']).count() == 0 and "nidlogin.login" not in page.url:
                         print("✅ [Auth] 수동 로그인 완료 감지!")
                         return True
-                print("❌ [Auth] 60초 내에 수동 로그인이 완료되지 않았습니다.")
+                print(f"❌ [Auth] {manual_wait_secs}초 내에 수동 로그인이 완료되지 않았습니다.")
                 return False
             except Exception as e:
                 print(f"❌ [Auth] 수동 로그인 대기 중 오류: {e}")

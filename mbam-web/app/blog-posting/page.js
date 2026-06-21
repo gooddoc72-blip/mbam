@@ -419,6 +419,30 @@ function BlogPostingContent() {
     }
   };
 
+  const handleRegisterAccount = async (acc) => {
+    if (!acc.id || !acc.id.trim()) { alert("네이버 아이디를 먼저 입력해주세요."); return; }
+    if (!window.confirm(`'${acc.id}' 계정의 기기 인증을 시작합니다.\n잠시 후 열리는 브라우저 창에서 로그인 + 2단계 인증을 완료해주세요.\n(최초 1회만 하면 이후에는 자동 로그인됩니다)`)) return;
+    try {
+      setLoading(true); setStatusLogs([]); setTaskStatus("running"); setTaskId(null);
+      const res = await fetchWithAuth("/api/auto_post/register-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ naver_id: acc.id, naver_pw: acc.pw || null })
+      });
+      const data = await res.json();
+      if (data.success && data.task_id) {
+        setTaskId(data.task_id);
+      } else {
+        alert("기기 인증 시작에 실패했습니다.");
+        setLoading(false);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("서버 연결에 실패했습니다. (백엔드 서버가 켜져 있는지 확인해주세요)");
+      setLoading(false);
+    }
+  };
+
   const handleCancelTask = async () => {
     if (!taskId) return;
     if (!window.confirm("정말 진행 중인 작업을 중단하시겠습니까?")) return;
@@ -468,6 +492,7 @@ function BlogPostingContent() {
                 <span style={{ width: "20px", fontWeight: "bold", color: "#64748b" }}>{idx+1}.</span>
                 <input type="text" placeholder="네이버 아이디" value={acc.id} onChange={(e) => updateAccount(idx, "id", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 <input type="password" placeholder="비밀번호" value={acc.pw} onChange={(e) => updateAccount(idx, "pw", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
+                <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
                 {accounts.length > 1 && (
                   <button onClick={() => removeAccount(idx)} style={{ padding: "0.6rem", background: "#fee2e2", color: "#ef4444", border: "none", cursor: "pointer" }}>삭제</button>
                 )}

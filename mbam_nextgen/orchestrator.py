@@ -219,25 +219,29 @@ class WorkflowOrchestrator:
                         post_mode = "manual_text"
                         break
                         
-            # 실행
-            result = await self.execute_blog_workflow(
-                account_id=account_id,
-                account_pw=account_pw,
-                keyword=current_keyword,
-                post_mode=post_mode,
-                manual_title=manual_title,
-                manual_content=manual_content,
-                wash_images=wash_images,
-                image_folder_path=image_folder_path,
-                **kwargs
-            )
+            # 실행 (계정별 예외 격리 — 한 계정 실패가 전체 배치를 중단시키지 않도록)
+            try:
+                result = await self.execute_blog_workflow(
+                    account_id=account_id,
+                    account_pw=account_pw,
+                    keyword=current_keyword,
+                    post_mode=post_mode,
+                    manual_title=manual_title,
+                    manual_content=manual_content,
+                    wash_images=wash_images,
+                    image_folder_path=image_folder_path,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.error(f"❌ [Orchestrator] '{account_id}' 워크플로우 예외: {e}")
+                result = {"success": False, "account_id": account_id, "error": str(e)}
             results.append(result)
-            
+
             if log_callback:
                 if result and result.get("success"):
                     log_callback(f"✅ [{account_id}] 포스팅 완료")
                 else:
-                    err = result.get('error') if result else 'Unknown error'
+                    err = (result.get('error') if result else None) or '실패(발행 미완료 또는 상세 메시지 없음)'
                     log_callback(f"⚠️ [{account_id}] 작업 실패: {err}")
             
             # 대기 (마지막 계정이 아니면)
@@ -296,33 +300,35 @@ class WorkflowOrchestrator:
             # 1. 환경 설정 (샌드박스 비활성화 및 안정화 옵션 추가)
             logger.info("🌐 [Orchestrator] 브라우저 엔진 시작 중...")
             try:
-                browser = await p.chromium.launch(
+                # 계정별 영구 프로필 → 네이버가 '신뢰 기기'로 기억하여 2단계 인증 재요구를 줄임
+                profile_dir = self.session_manager.get_profile_dir(account_id)
+                persistent_opts = dict(
                     headless=False,
-                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR",
+                    timezone_id="Asia/Seoul",
                 )
+                if proxy_config:
+                    persistent_opts["proxy"] = proxy_config
+                context = await p.chromium.launch_persistent_context(profile_dir, **persistent_opts)
             except Exception as e:
                 logger.info(f"❌ [Orchestrator] 브라우저 실행 실패: {e}")
-                return {"success": False, "error": str(e)}
+                return {"success": False, "error": f"브라우저 실행 실패: {e}"}
 
-            context_options = {
-                "viewport": {'width': 1920, 'height': 1080},
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "locale": "ko-KR",
-                "timezone_id": "Asia/Seoul"
-            }
-            if proxy_config:
-                context_options["proxy"] = proxy_config
-            
-            context = await browser.new_context(**context_options)
-            
-            # 2. 세션 준비 및 로그인
-            has_session = await self.session_manager.load_session(context, account_id)
-            page = await context.new_page()
+            # 영구 프로필이 세션을 보유 → 등록(기기 인증) 완료 여부로 로그인 필요성 판단
+            has_session = self.session_manager.is_registered(account_id)
+            # 하위호환: 예전 쿠키 파일이 있으면 함께 주입
+            await self.session_manager.load_session(context, account_id)
+            page = context.pages[0] if context.pages else await context.new_page()
             page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
             
             if not has_session:
                 pw = account_pw or os.getenv("NAVER_PW", "")
-                await self.authenticator.login_with_bypass(page, account_id, pw)
+                ok = await self.authenticator.login_with_bypass(page, account_id, pw)
+                if ok:
+                    self.session_manager.mark_registered(account_id)
                 await self.session_manager.save_session(context, account_id)
             
             
@@ -347,9 +353,10 @@ class WorkflowOrchestrator:
                 pw = account_pw or os.getenv("NAVER_PW", "")
                 success = await self.authenticator.login_with_bypass(page, account_id, pw)
                 if not success:
-                    error_msg = f"로그인 실패: 비밀번호 오류이거나 2단계 인증/새로운 기기 로그인 차단이 발생했습니다. 수동으로 로그인하여 인증 기기로 등록하거나 비밀번호를 확인해주세요."
+                    error_msg = "로그인 실패: 비밀번호 오류이거나 2단계 인증/새로운 기기 차단입니다. 계정 관리에서 '계정 등록(기기 인증)'을 1회 실행해 수동 로그인+2단계 인증을 통과시켜 주세요. 이후에는 자동 로그인됩니다."
                     logger.error(f"❌ [Orchestrator] {error_msg}")
                     return {"success": False, "error": error_msg}
+                self.session_manager.mark_registered(account_id)
                 await self.session_manager.save_session(context, account_id)
                 # 로그인 완료 후 다시 글쓰기 폼으로 이동
                 await page.goto(write_url, wait_until="domcontentloaded")
@@ -453,9 +460,62 @@ class WorkflowOrchestrator:
             }
 
     # ═══════════════════════════════════════════════
+    # 계정 등록 (기기 인증) — 1회 수동 로그인으로 영구 프로필을 신뢰 기기로 등록
+    # ═══════════════════════════════════════════════
+
+    async def register_account_session(self, account_id: str, account_pw: str = None, log_callback=None):
+        """
+        계정 전용 영구 프로필로 브라우저를 열어 사용자가 1회 수동 로그인(+2단계 인증)을
+        완료하게 한 뒤 '신뢰 기기'로 등록한다. 이후 자동 포스팅은 2단계 인증 없이 로그인된다.
+        """
+        def _log(msg):
+            logger.info(msg)
+            if log_callback:
+                try:
+                    log_callback(msg)
+                except Exception:
+                    pass
+
+        _log(f"🔐 [등록] '{account_id}' 기기 인증 시작. 열리는 브라우저 창에서 로그인을 완료해 주세요. (최대 4분)")
+        async with async_playwright() as p:
+            context = None
+            try:
+                profile_dir = self.session_manager.get_profile_dir(account_id)
+                context = await p.chromium.launch_persistent_context(
+                    profile_dir,
+                    headless=False,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR",
+                    timezone_id="Asia/Seoul",
+                )
+                page = context.pages[0] if context.pages else await context.new_page()
+                page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
+
+                pw = account_pw or os.getenv("NAVER_PW", "")
+                success = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=240)
+                if success:
+                    self.session_manager.mark_registered(account_id)
+                    await self.session_manager.save_session(context, account_id)
+                    _log(f"✅ [등록] '{account_id}' 기기 인증 완료! 이후 자동 로그인됩니다.")
+                    return {"success": True, "account_id": account_id}
+                _log(f"❌ [등록] '{account_id}' 기기 인증 실패(시간 초과 또는 미완료).")
+                return {"success": False, "account_id": account_id, "error": "기기 인증 미완료(시간 초과). 다시 시도해 주세요."}
+            except Exception as e:
+                _log(f"⚠️ [등록] 오류: {e}")
+                return {"success": False, "account_id": account_id, "error": str(e)}
+            finally:
+                if context:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+
+    # ═══════════════════════════════════════════════
     # 멀티 계정 순차 워크플로우
     # ═══════════════════════════════════════════════
-    
+
     async def execute_multi_workflow(self, accounts: list, global_config: dict = None):
         """
         여러 계정을 순차적으로 실행합니다.
@@ -580,27 +640,32 @@ class WorkflowOrchestrator:
         logger.info(f"   키워드: {keyword} | 자동등록: {'ON' if auto_submit else 'OFF'}")
         
         async with async_playwright() as p:
-            browser = None
+            context = None
             try:
-                browser = await p.chromium.launch(headless=False)
-                context_options = {
-                    "viewport": {'width': 1920, 'height': 1080},
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "locale": "ko-KR",
-                    "timezone_id": "Asia/Seoul"
-                }
+                # 계정별 영구 프로필 (네이버 신뢰 기기 유지 → 2단계 인증 재요구 감소)
+                profile_dir = self.session_manager.get_profile_dir(account_id)
+                persistent_opts = dict(
+                    headless=False,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR",
+                    timezone_id="Asia/Seoul",
+                )
                 if proxy_config:
-                    context_options["proxy"] = proxy_config
-                
-                context = await browser.new_context(**context_options)
-                
-                # 1. 세션 준비 및 로그인
-                has_session = await self.session_manager.load_session(context, account_id)
-                page = await context.new_page()
-                
+                    persistent_opts["proxy"] = proxy_config
+                context = await p.chromium.launch_persistent_context(profile_dir, **persistent_opts)
+
+                # 1. 세션 준비 및 로그인 (영구 프로필 등록 여부로 판단)
+                has_session = self.session_manager.is_registered(account_id)
+                await self.session_manager.load_session(context, account_id)
+                page = context.pages[0] if context.pages else await context.new_page()
+
                 if not has_session:
-                    pw = os.getenv("NAVER_PW", "")
-                    await self.authenticator.login_with_bypass(page, account_id, pw)
+                    pw = naver_pw or os.getenv("NAVER_PW", "")
+                    ok = await self.authenticator.login_with_bypass(page, account_id, pw)
+                    if ok:
+                        self.session_manager.mark_registered(account_id)
                     await self.session_manager.save_session(context, account_id)
                 
                 
@@ -713,9 +778,9 @@ class WorkflowOrchestrator:
                 self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status=f"실패: {str(e)[:50]}")
                 return {"account_id": account_id, "success": False, "error": str(e)}
             finally:
-                if browser:
+                if context:
                     try:
-                        await browser.close()
+                        await context.close()
                     except: pass
 
     # ═══════════════════════════════════════════════
