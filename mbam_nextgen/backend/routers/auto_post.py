@@ -190,6 +190,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 log(f"[{req.target_type}] 단일 계정 워크플로우를 시작합니다...")
                 result = await orchestrator.execute_blog_workflow(
                     account_id=account_id,
+                    account_pw=req.naver_pw,
                     keyword=req.target_keyword or "테스트",
                     publish_mode=req.publish_mode,
                     schedule_date=req.schedule_date,
@@ -217,7 +218,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 ai_provider=req.ai_provider,
                 action_type=req.cafe_action_type,
                 content=req.content,
-                reference_data=req.reference_data
+                reference_data=req.reference_data,
+                naver_pw=req.naver_pw
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
