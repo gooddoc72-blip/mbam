@@ -176,6 +176,7 @@ class WorkflowOrchestrator:
     async def execute_multi_blog_workflow(
         self,
         accounts: list,
+        keyword: str = None,
         interval_mins: int = 5,
         wash_images: bool = False,
         image_folder_path: str = None,
@@ -205,6 +206,7 @@ class WorkflowOrchestrator:
             # 사전 생성된 원고(generated_contents)에서 매칭되는 계정 찾기
             manual_title = None
             manual_content = None
+            current_keyword = keyword
             post_mode = kwargs.get("post_mode", "ai_generate")
             
             if generated_contents:
@@ -212,6 +214,8 @@ class WorkflowOrchestrator:
                     if gc.get("account_id") == account_id:
                         manual_title = gc.get("title")
                         manual_content = gc.get("content")
+                        if gc.get("keyword"):
+                            current_keyword = gc.get("keyword")
                         post_mode = "manual_text"
                         break
                         
@@ -219,6 +223,7 @@ class WorkflowOrchestrator:
             result = await self.execute_blog_workflow(
                 account_id=account_id,
                 account_pw=account_pw,
+                keyword=current_keyword,
                 post_mode=post_mode,
                 manual_title=manual_title,
                 manual_content=manual_content,
@@ -313,6 +318,7 @@ class WorkflowOrchestrator:
             # 2. 세션 준비 및 로그인
             has_session = await self.session_manager.load_session(context, account_id)
             page = await context.new_page()
+            page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
             
             if not has_session:
                 pw = account_pw or os.getenv("NAVER_PW", "")
@@ -364,6 +370,14 @@ class WorkflowOrchestrator:
                 if blog_content:
                     import re
                     blog_content = re.sub(r'(\*\*|~~|__)', '', blog_content)
+            
+            # 본문에 [제목]이 포함되어 있다면 추출해서 실제 제목으로 사용
+            if blog_content:
+                import re
+                title_match = re.search(r'^\s*\[제목\](.*?)(?:\n|$)', blog_content)
+                if title_match:
+                    blog_title = title_match.group(1).strip()
+                    blog_content = re.sub(r'^\s*\[제목\].*?\n+', '', blog_content, count=1).strip()
             
             # 4. 이미지 세척 및 준비
             washed_images = []
@@ -546,6 +560,7 @@ class WorkflowOrchestrator:
         cafe_id: str,
         board_name: str,
         keyword: str,
+        title: str = None,
         test_image: str = None,
         speed_mode: str = "normal",
         speed_multiplier: float = 1.0,
@@ -653,9 +668,20 @@ class WorkflowOrchestrator:
                     await self.cafe.dismiss_popups(editor_frame)
                     await self.cafe.select_board(editor_frame, board_name)
                     
+                    # 본문에 [제목]이 포함되어 있다면 추출해서 실제 제목으로 사용
+                    if cafe_content:
+                        import re
+                        title_match = re.search(r'^\s*\[제목\](.*?)(?:\n|$)', cafe_content)
+                        if title_match:
+                            extracted_title = title_match.group(1).strip()
+                            if not title:
+                                title = extracted_title
+                            cafe_content = re.sub(r'^\s*\[제목\].*?\n+', '', cafe_content, count=1).strip()
+                            
                     # 8. 원고 타이핑
+                    post_title = title if title else f"{keyword} 관련 테스트"
                     await self.cafe.write_post(
-                        editor_frame, f"{keyword} 관련 포스팅", cafe_content,
+                        editor_frame, post_title, cafe_content,
                         speed_mode=speed_mode, speed_multiplier=speed_multiplier
                     )
                     

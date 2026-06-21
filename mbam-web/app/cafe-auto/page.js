@@ -41,9 +41,12 @@ export default function CafeAutoPage() {
   const [newSchCafeId, setNewSchCafeId] = useState("");
   const [newSchTime, setNewSchTime] = useState("");
   const [newSchCategory, setNewSchCategory] = useState("");
+  const [newSchContentItem, setNewSchContentItem] = useState("");
+  const [newSchContentItemTitle, setNewSchContentItemTitle] = useState("");
   const [newSchCount, setNewSchCount] = useState(1);
   const [newSchQty, setNewSchQty] = useState(1);
   const [categories, setCategories] = useState([]);
+  const [categoryItems, setCategoryItems] = useState([]);
 
   // --- Common ---
   const [loading, setLoading] = useState(false);
@@ -71,6 +74,39 @@ export default function CafeAutoPage() {
       } catch (err) {}
     };
     fetchCategories();
+  }, []);
+
+  useEffect(() => {
+    if (newSchCategory) {
+      const fetchItems = async () => {
+        try {
+          const res = await fetchWithAuth(`/api/content/list?category=${encodeURIComponent(newSchCategory)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setCategoryItems(data.items || []);
+          }
+        } catch (e) {}
+      };
+      fetchItems();
+    } else {
+      setCategoryItems([]);
+      setNewSchContentItem("");
+      setNewSchContentItemTitle("");
+    }
+  }, [newSchCategory]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const source = params.get("source_data");
+      const kw = params.get("keyword");
+      if (source) {
+        setContent(source);
+      }
+      if (kw) {
+        setTargetKeyword(kw);
+      }
+    }
   }, []);
 
   const fetchAccounts = async () => {
@@ -114,6 +150,9 @@ export default function CafeAutoPage() {
             if (data.status === "completed" || data.status === "failed") {
               setLoading(false);
             }
+          } else if (res.status === 404) {
+            setLoading(false);
+            setTaskStatus("failed");
           }
         } catch (e) {
           console.error("Status check failed", e);
@@ -231,6 +270,8 @@ export default function CafeAutoPage() {
             cafe_id: newSchCafeId, 
             schedule_time: newSchTime,
             content_category: newSchCategory || null,
+            content_item_id: newSchContentItem || null,
+            content_item_title: newSchContentItemTitle || null,
             post_count_per_day: Number(newSchCount),
             post_qty_per_time: Number(newSchQty)
         })
@@ -456,6 +497,26 @@ export default function CafeAutoPage() {
                     <option value="">글감 선택 안함 (일반 육성)</option>
                     {categories.map((c, i) => <option key={i} value={c}>{c}</option>)}
                   </select>
+                  {newSchCategory && (
+                    <select 
+                      value={newSchContentItem} 
+                      onChange={e => {
+                        setNewSchContentItem(e.target.value);
+                        const selectedItem = categoryItems.find(item => item.id === e.target.value);
+                        if (selectedItem) {
+                          setNewSchContentItemTitle(selectedItem.title);
+                        } else {
+                          setNewSchContentItemTitle("");
+                        }
+                      }} 
+                      style={{ padding: "0.5rem", flex: 1 }}
+                    >
+                      <option value="">카테고리 전체 랜덤</option>
+                      {categoryItems.map(item => (
+                        <option key={item.id} value={item.id}>{item.title}</option>
+                      ))}
+                    </select>
+                  )}
                   <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
                     <span style={{fontSize: '0.9rem'}}>일일횟수</span>
                     <input type="number" min="1" value={newSchCount} onChange={e => setNewSchCount(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
@@ -484,7 +545,7 @@ export default function CafeAutoPage() {
                         <td style={{ padding: "0.5rem" }}>{sch.naver_id}</td>
                         <td style={{ padding: "0.5rem" }}>{sch.cafe_url} ({sch.board_name})</td>
                         <td style={{ padding: "0.5rem", fontSize: "0.85rem", color: "#475569" }}>
-                          {sch.content_category ? `${sch.content_category} (${sch.post_count_per_day}회/${sch.post_qty_per_time}개)` : "-"}
+                          {sch.content_category ? `${sch.content_category}${sch.content_item_title ? ` - ${sch.content_item_title}` : ''} (${sch.post_count_per_day}회/${sch.post_qty_per_time}개)` : "-"}
                         </td>
                         <td style={{ padding: "0.5rem" }}>
                           <span style={{ background: sch.is_active ? "#dcfce7" : "#f1f5f9", color: sch.is_active ? "#166534" : "#64748b", padding: "0.2rem 0.5rem", borderRadius: "4px" }}>

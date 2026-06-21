@@ -10,12 +10,12 @@ class CafeService:
     def __init__(self, stealth: StealthExecutor):
         self.stealth = stealth
         self.selectors = {
-            "write_btn": "a:has-text('글쓰기'), button:has-text('글쓰기')",
+            "write_btn": "#cafe-write-btn, .cafe-write-btn, a:has-text('카페 글쓰기'), a:has-text('글쓰기')",
             "title": "#subject, input[name='subject'], .textarea_input",
             "body": "#content, .se-content, .se-placeholder",
-            "board_select": "#menuId, select[name='menuId'], .select_component",
+            "board_select": "#menuId, select[name='menuId'], .select_component, button:has-text('게시판 선택')",
             "popup_close": "button.se-popup-button-cancel, button:has-text('취소'), button:has-text('닫기')",
-            "submit": "a:has-text('등록'), button:has-text('등록'), button:has-text('작성완료')"
+            "submit": "a:has-text('등록'), button:has-text('등록'), button:has-text('작성완료'), .BaseButton:has-text('등록')"
         }
 
     async def navigate_to_cafe(self, page, cafe_id: str):
@@ -28,13 +28,31 @@ class CafeService:
         """카페 홈에서 [글쓰기] 버튼을 자동 클릭"""
         try:
             write_btn = page.locator(self.selectors["write_btn"])
-            await write_btn.first.wait_for(timeout=10000)
+            await write_btn.first.wait_for(timeout=5000)
             await write_btn.first.click()
             print("[CafeService] ✅ [글쓰기] 버튼 자동 클릭 완료")
             await asyncio.sleep(3)
         except Exception as e:
             print(f"[CafeService] ⚠️ 글쓰기 버튼 클릭 실패: {e}")
-            print("[CafeService] 📌 브라우저에서 직접 [글쓰기]를 눌러주세요.")
+            print("[CafeService] 📌 다이렉트 URL로 진입을 시도합니다.")
+            try:
+                clubid = await page.evaluate("window.g_sClubId")
+                if clubid:
+                    direct_url = f"https://cafe.naver.com/ca-fe/cafes/{clubid}/articles/write"
+                    print(f"[CafeService] Club ID 발견: {clubid}, Direct URL 진입: {direct_url}")
+                    await page.goto(direct_url)
+                    await asyncio.sleep(3)
+                else:
+                    # Fallback
+                    cafe_url = page.url
+                    if "?" in cafe_url: cafe_url = cafe_url.split("?")[0]
+                    if "cafe.naver.com/" in cafe_url:
+                        cafe_id = cafe_url.split("cafe.naver.com/")[1].split("/")[0]
+                        direct_url = f"https://cafe.naver.com/ca-fe/cafes/{cafe_id}/articles/write"
+                        await page.goto(direct_url)
+                        await asyncio.sleep(3)
+            except Exception as ex:
+                print(f"[CafeService] 다이렉트 URL 진입 실패: {ex}")
 
     async def wait_for_editor(self, context, page):
         """카페 에디터 프레임이 나타날 때까지 대기"""
@@ -46,7 +64,7 @@ class CafeService:
                 for f in p.frames:
                     try:
                         # 카페 에디터의 핵심 요소 탐색
-                        if await f.locator(".se-content, #content, .textarea_input").count() > 0:
+                        if await f.locator(".se-main-container, .se-content, #content, .textarea_input").count() > 0:
                             target_frame = f
                             break
                     except Exception:
@@ -66,19 +84,26 @@ class CafeService:
         print(f"[CafeService] 게시판 선택: {board_name}")
         
         try:
-            # 방법 1: select 드롭다운
+            # 방법 1: select 드롭다운 또는 커스텀 드롭다운
             select_el = page.locator(self.selectors["board_select"])
             if await select_el.count() > 0:
-                await select_el.first.click()
-                await asyncio.sleep(1)
+                # 보이는 요소만 클릭
+                count = await select_el.count()
+                for i in range(count):
+                    if await select_el.nth(i).is_visible():
+                        await select_el.nth(i).click()
+                        await asyncio.sleep(1)
+                        break
                 
                 # 게시판 이름으로 옵션 클릭
-                option = page.locator(f"option:has-text('{board_name}'), li:has-text('{board_name}'), a:has-text('{board_name}')")
+                option = page.locator(f"option:has-text('{board_name}'), li:has-text('{board_name}'), a:has-text('{board_name}'), button:has-text('{board_name}')")
                 if await option.count() > 0:
-                    await option.first.click()
-                    print(f"[CafeService] ✅ 게시판 선택 완료: {board_name}")
-                    await asyncio.sleep(1)
-                    return True
+                    for i in range(await option.count()):
+                        if await option.nth(i).is_visible():
+                            await option.nth(i).click()
+                            print(f"[CafeService] ✅ 게시판 선택 완료: {board_name}")
+                            await asyncio.sleep(1)
+                            return True
             
             print(f"[CafeService] ⚠️ '{board_name}' 게시판을 찾을 수 없습니다.")
             return False
@@ -126,21 +151,25 @@ class CafeService:
                 await asyncio.sleep(2)
 
     async def submit_post(self, frame):
-        """글 등록 버튼 클릭"""
-        page = StealthExecutor._get_page_obj(frame)
-        print("[CafeService] 📝 글 등록 시도 중...")
-        
+        """작성된 원고를 최종 등록"""
+        print("[CafeService] 🚀 즉시 발행 시도 중...")
         try:
-            submit_btn = frame.locator(self.selectors["submit"])
-            if await submit_btn.count() == 0:
-                submit_btn = page.locator(self.selectors["submit"])
-            
-            await submit_btn.first.click()
-            await asyncio.sleep(3)
-            print("✅ [CafeService] 카페 글 등록 완료!")
-            return True
+            page = StealthExecutor._get_page_obj(frame)
+            for root in [frame, page]:
+                submit_btn = root.locator(self.selectors["submit"])
+                count = await submit_btn.count()
+                if count > 0:
+                    # 보이는 버튼만 필터링
+                    for i in range(count - 1, -1, -1):
+                        if await submit_btn.nth(i).is_visible():
+                            await submit_btn.nth(i).click(timeout=5000)
+                            print("[CafeService] ✅ 즉시 발행 완료!")
+                            await asyncio.sleep(3)
+                            return True
+            print("⚠️ [CafeService] 등록 버튼을 찾지 못했습니다.")
+            return False
         except Exception as e:
-            print(f"⚠️ [CafeService] 글 등록 중 오류: {e}")
+            print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False
 
     # ═══════════════════════════════════════════════

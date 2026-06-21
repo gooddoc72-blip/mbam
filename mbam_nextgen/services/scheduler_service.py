@@ -221,7 +221,8 @@ class SchedulerService:
                         cafe_id=cafe.cafe_url,
                         board_name=cafe.board_name,
                         keyword=item.get('title', '정보 제공'),
-                        content=f"제목: {item.get('title')}\n\n내용:\n{item.get('content', '')}",
+                        title=item.get('title', '정보 제공'),
+                        content=item.get('content', ''),
                         auto_submit=True,
                         action_type="post"
                     )

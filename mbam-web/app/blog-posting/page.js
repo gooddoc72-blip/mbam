@@ -60,6 +60,7 @@ function BlogPostingContent() {
 
   // 5. Saved Manuscripts Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedManuscriptIds, setSelectedManuscriptIds] = useState([]);
   const [savedManuscripts, setSavedManuscripts] = useState([]);
   const [isLoadingManuscripts, setIsLoadingManuscripts] = useState(false);
 
@@ -116,6 +117,13 @@ function BlogPostingContent() {
         console.error("Failed to parse saved accounts", e);
       }
     }
+
+    const savedTaskId = localStorage.getItem("mbam_auto_post_task_id");
+    if (savedTaskId) {
+      setTaskId(savedTaskId);
+      setTaskStatus("running");
+      setLoading(true);
+    }
   }, []);
 
 
@@ -144,9 +152,19 @@ function BlogPostingContent() {
             const data = await res.json();
             setStatusLogs(data.logs || []);
             setTaskStatus(data.status);
-            if (data.status === "completed" || data.status === "failed") {
+            if (data.status === "completed" || data.status === "failed" || data.status === "not_found") {
               setLoading(false);
+              clearInterval(intervalId);
+              localStorage.removeItem("mbam_auto_post_task_id");
+              if (data.status === "not_found") {
+                setStatusLogs(["서버가 재시작되어 기존 작업을 찾을 수 없습니다."]);
+              }
             }
+          } else if (res.status === 404) {
+            setLoading(false);
+            setTaskStatus("failed");
+            clearInterval(intervalId);
+            localStorage.removeItem("mbam_auto_post_task_id");
           }
         } catch (e) {
           console.error("Status check failed", e);
@@ -174,7 +192,23 @@ function BlogPostingContent() {
 
   const openManuscriptModal = () => {
     setIsModalOpen(true);
+    setSelectedManuscriptIds([]);
     fetchManuscripts();
+  };
+
+  const toggleManuscriptSelection = (id) => {
+    setSelectedManuscriptIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const loadSelectedManuscripts = () => {
+    const selected = savedManuscripts.filter(m => selectedManuscriptIds.includes(m.id));
+    // Convert to the format expected by generatedContents
+    const newContents = selected.map(m => ({ title: m.title, content: m.content, keyword: m.keyword }));
+    setGeneratedContents([...generatedContents, ...newContents]);
+    alert(`${newContents.length}개의 글감이 추가되었습니다.`);
+    setIsModalOpen(false);
   };
 
   const saveManuscriptToWeb = async (idx) => {
@@ -359,11 +393,12 @@ function BlogPostingContent() {
         image_folder_path: imageUploadMode === "folder" ? imageFolderPath : null,
         images: imageUploadMode === "direct" ? directImages.split("\n").filter(p => p.trim()) : [],
         post_mode: "manual_text", // We always send generated contents as manual_text now
-        generated_contents: generatedContents,
+        generated_contents: generatedContents.map((gc, idx) => ({ ...gc, account_id: validAccounts[idx]?.id })),
         publish_mode: publishMode,
         schedule_date: scheduleDate,
         schedule_time: scheduleTime,
-        use_tethering: useTethering
+        use_tethering: useTethering,
+        generate_card_news: generateCardNews
       };      const res = await fetchWithAuth("/api/auto_post/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -372,6 +407,7 @@ function BlogPostingContent() {
       const data = await res.json();
       if (data.success && data.task_id) {
         setTaskId(data.task_id);
+        localStorage.setItem("mbam_auto_post_task_id", data.task_id);
       } else {
         alert("자동화 시작에 실패했습니다.");
         setLoading(false);
@@ -386,18 +422,21 @@ function BlogPostingContent() {
   const handleCancelTask = async () => {
     if (!taskId) return;
     if (!window.confirm("정말 진행 중인 작업을 중단하시겠습니까?")) return;
-    try {
-      const res = await fetchWithAuth(`/api/auto_post/cancel/${taskId}`, { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setTaskStatus("failed");
-        setLoading(false);
-      } else {
-        alert(data.message || "작업 중지에 실패했습니다.");
+      try {
+        const res = await fetchWithAuth(`/api/auto_post/cancel/${taskId}`, { method: "POST" });
+        if (!res.ok) {
+           throw new Error("서버에서 오류를 반환했습니다. (백엔드 서버가 켜져 있는지 확인해주세요)");
+        }
+        const data = await res.json();
+        if (data.success) {
+          setTaskStatus("failed");
+          setLoading(false);
+        } else {
+          alert(data.message || "작업 중지에 실패했습니다.");
+        }
+      } catch (e) {
+        alert("작업 중지 오류: " + e.message);
       }
-    } catch (e) {
-      alert("작업 중지 오류: " + e.message);
-    }
   };
 
   return (
@@ -730,7 +769,14 @@ function BlogPostingContent() {
           <div style={{ background: "white", padding: "2rem", borderRadius: "8px", width: "80%", maxWidth: "800px", maxHeight: "80vh", display: "flex", flexDirection: "column", gap: "1rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h2 style={{ margin: 0, fontSize: "1.2rem", fontWeight: "bold" }}>☁️ 웹에서 원고 불러오기</h2>
-              <button onClick={() => setIsModalOpen(false)} style={{ background: "transparent", border: "none", fontSize: "1.5rem", cursor: "pointer" }}>×</button>
+              <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+                {selectedManuscriptIds.length > 0 && (
+                  <button onClick={loadSelectedManuscripts} style={{ padding: "0.5rem 1rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
+                    선택된 {selectedManuscriptIds.length}개 한 번에 불러오기
+                  </button>
+                )}
+                <button onClick={() => setIsModalOpen(false)} style={{ background: "transparent", border: "none", fontSize: "1.5rem", cursor: "pointer" }}>×</button>
+              </div>
             </div>
             
             <div style={{ overflowY: "auto", flex: 1, border: "1px solid #cbd5e1", padding: "1rem", borderRadius: "4px" }}>
@@ -741,12 +787,19 @@ function BlogPostingContent() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                   {savedManuscripts.map(m => (
-                    <div key={m.id} style={{ padding: "1rem", border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: "4px" }}>
+                    <div key={m.id} style={{ padding: "1rem", border: "1px solid #e2e8f0", background: selectedManuscriptIds.includes(m.id) ? "#eff6ff" : "#f8fafc", borderRadius: "4px", cursor: "pointer" }} onClick={(e) => {
+                      if(e.target.tagName !== 'BUTTON' && e.target.type !== 'checkbox') {
+                        toggleManuscriptSelection(m.id);
+                      }
+                    }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                        <div style={{ fontWeight: "bold", fontSize: "1.05rem" }}>{m.title}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <input type="checkbox" checked={selectedManuscriptIds.includes(m.id)} onChange={() => toggleManuscriptSelection(m.id)} style={{ transform: "scale(1.2)" }} />
+                          <div style={{ fontWeight: "bold", fontSize: "1.05rem", color: selectedManuscriptIds.includes(m.id) ? "#1d4ed8" : "#0f172a" }}>{m.title}</div>
+                        </div>
                         <div style={{ display: "flex", gap: "0.5rem" }}>
-                          <button onClick={() => loadManuscriptToWorkspace(m)} style={{ padding: "0.3rem 0.8rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>불러오기</button>
-                          <button onClick={() => deleteManuscriptFromWeb(m.id)} style={{ padding: "0.3rem 0.8rem", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: "4px", cursor: "pointer" }}>삭제</button>
+                          <button onClick={(e) => { e.stopPropagation(); loadManuscriptToWorkspace(m); }} style={{ padding: "0.3rem 0.8rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>불러오기</button>
+                          <button onClick={(e) => { e.stopPropagation(); deleteManuscriptFromWeb(m.id); }} style={{ padding: "0.3rem 0.8rem", background: "#fee2e2", color: "#ef4444", border: "none", borderRadius: "4px", cursor: "pointer" }}>삭제</button>
                         </div>
                       </div>
                       <div style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "0.5rem", display: "flex", gap: "1rem" }}>

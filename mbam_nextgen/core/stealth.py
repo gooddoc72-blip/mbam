@@ -77,6 +77,11 @@ class StealthExecutor:
         
         paragraphs = text.split('\n')
         for p_idx, paragraph in enumerate(paragraphs):
+            if not paragraph:
+                # 에디터가 빈 줄을 무시하지 않도록 공백 입력 후 지우거나 보이지 않는 문자 입력
+                await page.keyboard.type(" ")
+                await asyncio.sleep(0.1)
+                
             for char in paragraph:
                 await page.keyboard.type(char)
                 delay = abs(np.random.normal(mean_delay, std_dev))
@@ -88,7 +93,7 @@ class StealthExecutor:
                 await asyncio.sleep(max(0.01, delay))
             
             if p_idx < len(paragraphs) - 1:
-                await page.keyboard.press("Enter")
+                await page.keyboard.press("Enter", delay=100)
                 await asyncio.sleep(random.uniform(1.5, 3.5) * speed_multiplier)
 
     @staticmethod

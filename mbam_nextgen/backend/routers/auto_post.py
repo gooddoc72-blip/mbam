@@ -338,3 +338,12 @@ async def get_task_status(task_id: str):
     if task_id not in task_status_store:
         raise HTTPException(status_code=404, detail="Task not found")
     return task_status_store[task_id]
+
+@router.get("/active_tasks")
+async def get_active_tasks():
+    active = []
+    for t_id, data in task_status_store.items():
+        if data.get("status") == "running":
+            title = data.get("logs", ["알 수 없는 작업"])[0] if data.get("logs") else "알 수 없는 작업"
+            active.append({"task_id": t_id, "title": title})
+    return {"tasks": active}

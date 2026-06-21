@@ -5,7 +5,13 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import uuid
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./seo_history.db")
+# Always use project root for db to prevent appearing/disappearing bug
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_DB_PATH = f"sqlite:///{os.path.join(PROJECT_ROOT, 'seo_history.db').replace('\\\\', '/')}"
+
+DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DB_PATH)
+if DATABASE_URL == "sqlite:///./mbam_local.db" or DATABASE_URL == "sqlite:///./seo_history.db":
+    DATABASE_URL = DEFAULT_DB_PATH
 
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -98,6 +104,8 @@ class CafeSchedule(Base):
     cafe_id = Column(String, ForeignKey("joined_cafes.id", ondelete="CASCADE"))
     schedule_time = Column(String) # e.g. "14:00"
     content_category = Column(String, nullable=True) # e.g. "소상공인 24"
+    content_item_id = Column(String, nullable=True)
+    content_item_title = Column(String, nullable=True)
     post_count_per_day = Column(Integer, default=1) # 1일 작성 횟수
     post_qty_per_time = Column(Integer, default=1) # 1회당 작성 수량
     is_active = Column(Integer, default=1)

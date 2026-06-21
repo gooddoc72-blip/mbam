@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { 
     LayoutDashboard, 
     FileText, 
@@ -20,6 +20,7 @@ import {
     MessageSquare,
     CreditCard
 } from 'lucide-react';
+import { fetchWithAuth } from "../utils/api";
 
 const MENU_ITEMS = [
     { name: "홈", path: "/dashboard", icon: LayoutDashboard },
@@ -72,11 +73,27 @@ const MENU_ITEMS = [
 
 export default function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
     const [openMenus, setOpenMenus] = useState({"블로그 분석 및 자동화": true, "카페 분석 및 자동화": true, "쇼핑 분석 및 자동화": true});
     const [mounted, setMounted] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [userRole, setUserRole] = useState(null);
     const [userEmail, setUserEmail] = useState("");
+    const [activeTasks, setActiveTasks] = useState([]);
+
+    const fetchActiveTasks = async () => {
+        try {
+            const res = await fetchWithAuth("/api/auto_post/active_tasks");
+            if (res.ok) {
+                const data = await res.json();
+                if (data.tasks) {
+                    setActiveTasks(data.tasks);
+                }
+            }
+        } catch (e) {
+            // silent fail
+        }
+    };
 
     useEffect(() => {
         setMounted(true);
@@ -90,6 +107,9 @@ export default function Sidebar() {
             } catch (e) {
                 console.error("Token parsing error");
             }
+            fetchActiveTasks();
+            const interval = setInterval(fetchActiveTasks, 5000);
+            return () => clearInterval(interval);
         } else {
             setIsLoggedIn(false);
             setUserRole(null);
@@ -121,7 +141,6 @@ export default function Sidebar() {
                     <p style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.3rem" }}>Marketing lab's</p>
                 </div>
                 
-                {/* 사용자 정보 및 로그인/로그아웃 영역 */}
                 {!mounted ? (
                     <div style={{ height: "45px" }}></div>
                 ) : isLoggedIn ? (
@@ -244,6 +263,46 @@ export default function Sidebar() {
                     );
                 })}
             </nav>
+
+            {mounted && isLoggedIn && activeTasks.length > 0 && (
+                <div style={{ padding: "1rem", borderTop: "1px solid rgba(226, 232, 240, 0.6)" }}>
+                    <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#64748b", marginBottom: "0.5rem" }}>
+                        ⚡ 진행 중인 자동화 작업 ({activeTasks.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                        {activeTasks.map(task => (
+                            <div 
+                                key={task.task_id}
+                                onClick={() => {
+                                    if (task.title.includes('카페') || task.title.includes('다중')) {
+                                        localStorage.setItem("mbam_cafe_task_id", task.task_id);
+                                        router.push("/cafe-auto");
+                                    } else {
+                                        localStorage.setItem("mbam_auto_post_task_id", task.task_id);
+                                        router.push("/blog-posting");
+                                    }
+                                }}
+                                style={{
+                                    padding: "0.6rem", background: "#eff6ff", borderRadius: "6px",
+                                    border: "1px solid #bfdbfe", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem"
+                                }}
+                            >
+                                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6", animation: "pulse 1.5s infinite" }} />
+                                <span style={{ fontSize: "0.8rem", color: "#1e3a8a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {task.title}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                    <style>{`
+                        @keyframes pulse {
+                            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+                            70% { transform: scale(1); box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
+                            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+                        }
+                    `}</style>
+                </div>
+            )}
             
             <div style={{ padding: "1.5rem", borderTop: "1px solid rgba(226, 232, 240, 0.6)", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <div style={{ fontSize: "0.8rem", color: "#94a3b8", textAlign: "center", marginTop: "0.5rem" }}>

@@ -7,6 +7,7 @@ import uuid
 from ..database import get_db, NaverAccount, JoinedCafe, CafeSchedule, Advertiser, Agency, Distributor
 from ..auth import get_current_user
 from mbam_nextgen.orchestrator import WorkflowOrchestrator
+from mbam_nextgen.backend.routers.auto_post import task_status_store, active_tasks as auto_post_active_tasks
 
 router = APIRouter(prefix="/api/cafe-nurture", tags=["cafe_nurture"])
 
@@ -35,6 +36,8 @@ class ScheduleCreate(BaseModel):
     cafe_id: str
     schedule_time: str
     content_category: Optional[str] = None
+    content_item_id: Optional[str] = None
+    content_item_title: Optional[str] = None
     post_count_per_day: Optional[int] = 1
     post_qty_per_time: Optional[int] = 1
 
@@ -134,6 +137,8 @@ async def add_schedule(req: ScheduleCreate, db: Session = Depends(get_db), curre
         cafe_id=req.cafe_id,
         schedule_time=req.schedule_time,
         content_category=req.content_category,
+        content_item_id=req.content_item_id,
+        content_item_title=req.content_item_title,
         post_count_per_day=req.post_count_per_day,
         post_qty_per_time=req.post_qty_per_time
     )
@@ -161,6 +166,8 @@ async def get_schedules(db: Session = Depends(get_db), current_user: dict = Depe
                 "board_name": cafe.board_name,
                 "schedule_time": s.schedule_time,
                 "content_category": s.content_category,
+                "content_item_id": s.content_item_id,
+                "content_item_title": s.content_item_title,
                 "post_count_per_day": s.post_count_per_day,
                 "post_qty_per_time": s.post_qty_per_time,
                 "is_active": s.is_active
@@ -176,16 +183,14 @@ async def delete_schedule(schedule_id: str, db: Session = Depends(get_db), curre
     return {"message": "스케줄이 삭제되었습니다."}
 
 # --- 4. Targeted Auto Comment Trigger ---
-# In-memory status store for monitoring (prototype level)
-multi_task_status_store = {}
-active_nurture_tasks = {}
+# Now uses task_status_store from auto_post.py
 
 async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_data: list):
-    multi_task_status_store[task_id] = {"status": "running", "logs": ["[다중 타겟팅] 작업을 시작합니다..."]}
+    task_status_store[task_id] = {"status": "running", "logs": ["[다중 타겟팅] 작업을 시작합니다..."]}
     
     def log(msg: str):
         print(f"[{task_id}] {msg}")
-        multi_task_status_store[task_id]["logs"].append(msg)
+        task_status_store[task_id]["logs"].append(msg)
         
     try:
         orchestrator = WorkflowOrchestrator()
@@ -203,12 +208,12 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
             logger_func=log
         )
         
-        multi_task_status_store[task_id]["status"] = "completed"
+        task_status_store[task_id]["status"] = "completed"
         log("✅ 모든 타겟 다중 댓글 작업이 완료되었습니다!")
         
     except Exception as e:
         log(f"❌ 오류 발생: {str(e)}")
-        multi_task_status_store[task_id]["status"] = "failed"
+        task_status_store[task_id]["status"] = "failed"
 
 @router.post("/trigger-targeted", summary="다중 아이디로 타겟 게시글 댓글 작업 시작")
 async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -226,21 +231,21 @@ async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db)
         
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data))
-    active_nurture_tasks[task_id] = task
+    auto_post_active_tasks[task_id] = task
     
     return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다."}
 
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
-    if task_id in active_nurture_tasks:
-        active_nurture_tasks[task_id].cancel()
-        multi_task_status_store[task_id]["status"] = "failed"
-        multi_task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
+    if task_id in auto_post_active_tasks:
+        auto_post_active_tasks[task_id].cancel()
+        task_status_store[task_id]["status"] = "failed"
+        task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
         return {"success": True, "message": "작업이 중단되었습니다."}
     return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
-    if task_id not in multi_task_status_store:
+    if task_id not in task_status_store:
         raise HTTPException(status_code=404, detail="Task not found")
-    return multi_task_status_store[task_id]
+    return task_status_store[task_id]

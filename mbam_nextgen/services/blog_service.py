@@ -11,8 +11,8 @@ class BlogService:
         self.stealth = stealth
         self.selectors = {
             "write_btn": ".se-toolbar-button-image, .se-image-toolbar-button",
-            "title": ".se-documentTitle, .se-placeholder, .se-title-text, span:has-text('제목')",
-            "body": ".se-content, .se-placeholder:has-text('본문')",
+            "title": ".se-documentTitle, .se-title-text",
+            "body": ".se-content, .se-main-container",
             "popup_close": "button.se-popup-button-cancel, button.se-help-close-button"
         }
 
@@ -56,9 +56,8 @@ class BlogService:
                     except: continue
             await asyncio.sleep(1)
         
-        # 실패 시 현재 페이지의 메인 프레임 시도
-        print("⚠️ [BlogService] 에디터 감지 실패. 최신 페이지의 메인 프레임으로 진행합니다.")
-        return context.pages[-1].main_frame if context.pages else page.main_frame
+        # 실패 시 예외 발생
+        raise Exception("블로그 에디터를 찾을 수 없습니다. (블로그 미개설, 휴면 상태, 비밀번호 변경 캠페인 등을 확인하세요)")
 
     async def dismiss_popups(self, frame):
         """방해 팝업(임시저장, 도움말 등) 제거"""
@@ -81,6 +80,11 @@ class BlogService:
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
+        
+        # 원고에 마침표가 있으면 줄바꿈 처리 (숫자 소수점 제외, 마침표 뒤 공백 제거)
+        content = re.sub(r'(\.+)(?!\d)\s*', r'\1\n', content)
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
         print(f"[BlogService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
         
         # 제목 입력
@@ -125,7 +129,7 @@ class BlogService:
                         selection.removeAllRanges();
                         selection.addRange(range);
                     }""")
-                    await frame.keyboard.press("Enter")
+                    await frame.page.keyboard.press("Enter")
                 img_idx += 1
                 
         if pending_text.strip():
@@ -145,7 +149,7 @@ class BlogService:
                     selection.removeAllRanges();
                     selection.addRange(range);
                 }""")
-                await frame.keyboard.press("Enter")
+                await frame.page.keyboard.press("Enter")
             img_idx += 1
             
         print("✅ [BlogService] 원고 타이핑(이미지 교차) 완료")
@@ -185,12 +189,17 @@ class BlogService:
             
             for sel in confirm_selectors:
                 try:
-                    confirm = page.locator(sel)
-                    if await confirm.count() > 0:
-                        await confirm.last.click()
-                        print("✅ [BlogService] 즉시 발행 완료!")
-                        await asyncio.sleep(3)
-                        return True
+                    for root in [frame, page]:
+                        confirm = root.locator(sel)
+                        count = await confirm.count()
+                        if count > 0:
+                            # 보이는 버튼만 필터링
+                            for i in range(count - 1, -1, -1):
+                                if await confirm.nth(i).is_visible():
+                                    await confirm.nth(i).click(timeout=5000)
+                                    print(f"✅ [BlogService] 즉시 발행 완료! (선택자: {sel})")
+                                    await asyncio.sleep(3)
+                                    return True
                 except: continue
             
             print("⚠️ [BlogService] 발행 확인 버튼을 찾지 못했습니다. 수동 확인 필요.")
@@ -262,12 +271,16 @@ class BlogService:
             
             for sel in confirm_selectors:
                 try:
-                    confirm = page.locator(sel)
-                    if await confirm.count() > 0:
-                        await confirm.last.click()
-                        print(f"✅ [BlogService] 예약 발행 완료! ({schedule_date} {schedule_time})")
-                        await asyncio.sleep(3)
-                        return True
+                    for root in [frame, page]:
+                        confirm = root.locator(sel)
+                        count = await confirm.count()
+                        if count > 0:
+                            for i in range(count - 1, -1, -1):
+                                if await confirm.nth(i).is_visible():
+                                    await confirm.nth(i).click(timeout=5000)
+                                    print(f"✅ [BlogService] 예약 발행 완료! (선택자: {sel})")
+                                    await asyncio.sleep(3)
+                                    return True
                 except: continue
             
             print("⚠️ [BlogService] 예약 확인 버튼을 찾지 못했습니다. 수동 확인 필요.")
