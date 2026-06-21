@@ -135,39 +135,57 @@ class BlogService:
             except: pass
 
     async def _reset_text_format(self, frame):
-        """영구 프로필이 기억한 '취소선 ON' 상태를 해제.
-        활성화(선택)된 취소선 버튼만 JS로 정확히 클릭해서 끈다(꺼져 있으면 건드리지 않음).
-        진단을 위해 후보 버튼 정보를 로그(mbam_sys.log)에 남긴다."""
+        """영구 프로필이 기억한 '취소선 ON'을 해제.
+        네이버는 활성 서식을 초록(#03c75a=rgb(3,199,90))으로 표시 → 취소선 버튼의
+        아이콘 색이 초록이면(=활성) 클릭해 끈다. 모든 프레임을 탐색하고 진단을 로그에 남긴다."""
         try:
             from ..core.logger import logger
         except Exception:
             logger = None
+        JS = r"""() => {
+            const GREEN = ['rgb(3, 199, 90)', '3, 199, 90', '#03c75a'];
+            const isGreen = (el) => {
+                const nodes = [el, ...el.querySelectorAll('svg,span,i,use,path,em')];
+                for (const e of nodes) {
+                    const s = getComputedStyle(e);
+                    const c = (s.color || '') + ' ' + (s.fill || '') + ' ' + (s.stroke || '');
+                    if (GREEN.some(g => c.includes(g))) return true;
+                }
+                return false;
+            };
+            const dump = [], clicked = [];
+            document.querySelectorAll('button').forEach(el => {
+                const cls = (el.className || '').toString();
+                const title = el.getAttribute('title') || '';
+                const aria = el.getAttribute('aria-pressed') || '';
+                const dname = el.getAttribute('data-name') || '';
+                const dlog = el.getAttribute('data-log') || '';
+                const hay = (cls + ' ' + title + ' ' + dname + ' ' + dlog).toLowerCase();
+                const isStrike = /(strike|through|취소선|취소)/.test(hay);
+                let active = aria === 'true' || /(^|[ _-])(on|active|selected|is-on|is-toggled|checked)([ _-]|$)/.test(cls.toLowerCase());
+                if (!active) active = isGreen(el);
+                if (active) dump.push({cls, title, dname, dlog, aria, isStrike});  // 활성 버튼 전부 덤프(진단)
+                if (isStrike && active) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
+            });
+            return {dump, clicked};
+        }"""
+        page = StealthExecutor._get_page_obj(frame)
         try:
-            res = await frame.evaluate(r"""() => {
-                const dump = [], clicked = [];
-                const nodes = document.querySelectorAll('button, a, span[role="button"]');
-                nodes.forEach(el => {
-                    const cls = (el.className || '').toString();
-                    const title = el.getAttribute('title') || '';
-                    const aria = el.getAttribute('aria-pressed') || '';
-                    const dname = el.getAttribute('data-name') || '';
-                    const dlog = el.getAttribute('data-log') || '';
-                    const txt = (el.textContent || '').trim().slice(0, 10);
-                    const hay = (cls + ' ' + title + ' ' + dname + ' ' + dlog + ' ' + txt).toLowerCase();
-                    const isStrike = /(strike|취소선|throughline|단어삭제|취소)/.test(hay);
-                    const active = aria === 'true' || /(^|[ _-])(on|active|selected|is-on|checked)([ _-]|$)/.test(cls);
-                    if (isStrike) dump.push({cls, title, dname, dlog, aria, active});
-                    if (isStrike && active) { try { el.click(); clicked.push(cls || dname || title); } catch(e){} }
-                });
-                return {dump, clicked};
-            }""")
-            if logger:
-                logger.error(f"[BlogService] 취소선 진단 dump={res.get('dump')} clicked={res.get('clicked')}")
-            if res.get("clicked"):
-                print(f"[BlogService] ✅ 활성 취소선 해제: {res['clicked']}")
-        except Exception as e:
-            if logger:
-                logger.error(f"[BlogService] _reset_text_format 오류: {e}")
+            targets = [frame] + [f for f in page.frames if f is not frame]
+        except Exception:
+            targets = [frame]
+        allres = []
+        for t in targets:
+            try:
+                r = await t.evaluate(JS)
+                if r and (r.get("dump") or r.get("clicked")):
+                    allres.append(r)
+                    if r.get("clicked"):
+                        print(f"[BlogService] ✅ 활성 취소선 해제: {r['clicked']}")
+            except Exception:
+                continue
+        if logger:
+            logger.error(f"[BlogService] 취소선 진단: {allres}")
 
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
