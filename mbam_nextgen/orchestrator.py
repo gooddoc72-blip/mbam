@@ -486,6 +486,7 @@ class WorkflowOrchestrator:
             try:
                 cur_url = page.url
                 result_url = cur_url if ("PostWriteForm" not in cur_url and "editor" not in cur_url) else ""
+                logger.info(f"📌 [Orchestrator] {account_id} 발행 결과: {'성공' if publish_result else '발행 미완료'} | URL: {result_url or '(편집화면 유지)'}")
                 self.db.log_blog(account_id=account_id, target_keyword=keyword,
                                  status="성공" if publish_result else "발행 미완료", result_url=result_url)
             except Exception:
