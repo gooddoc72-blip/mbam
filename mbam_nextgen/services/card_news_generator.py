@@ -96,8 +96,16 @@ class CardNewsGenerator:
         print(f"[CardNews] Auto thumbnail created: {filepath}")
         return filepath
 
+    def _extract_headings(self, content: str) -> list:
+        """원고의 H태그(소제목) 추출. '[소제목] 텍스트' 형식 우선."""
+        import re
+        if not content:
+            return []
+        heads = re.findall(r'^\s*\[소제목\]\s*(.+?)\s*$', content, flags=re.MULTILINE)
+        return [h.strip() for h in heads if h.strip()]
+
     def _extract_points(self, content: str, n: int):
-        """본문에서 카드 부제로 쓸 짧은 핵심 문구 n개 추출."""
+        """폴백: 본문에서 카드 부제로 쓸 짧은 핵심 문구 n개 추출."""
         import re
         if not content:
             return []
@@ -112,22 +120,29 @@ class CardNewsGenerator:
                 break
         return points
 
-    def generate_card_set(self, title: str, content: str = "", count: int = 5) -> list:
+    def generate_card_set(self, title: str, content: str = "", count: int = 5, max_cards: int = 9) -> list:
         """
-        제목/본문으로 count장(기본 5장)의 카드 뉴스 세트를 생성하고 경로 리스트 반환.
-        1장은 표지, 나머지는 본문에서 뽑은 핵심 문구를 부제로 사용(부족하면 일반 문구로 채움).
+        제목/본문으로 카드 뉴스 세트를 생성하고 경로 리스트 반환.
+        ★ 원고의 H태그(소제목)에 맞춰: 1장은 표지, 그 다음은 [소제목]별로 1장씩.
+        소제목이 없으면 기존 방식(핵심 문구/일반 문구)으로 count장 생성.
         """
-        count = max(1, count)
-        points = self._extract_points(content, count - 1)
-        generic = ["핵심 포인트 정리", "꼭 알아두세요", "한눈에 보기", "이것만 기억하세요", "마무리 체크"]
+        heads = self._extract_headings(content)
         paths = []
         # 표지
         paths.append(self.generate_image(title, subtitle="핵심 포인트 정리"))
-        # 본문 카드
-        for i in range(count - 1):
-            sub = points[i] if i < len(points) else generic[i % len(generic)]
-            paths.append(self.generate_image(title, subtitle=sub))
-        print(f"[CardNews] 카드 세트 {len(paths)}장 생성 완료")
+        if heads:
+            # H태그(소제목)별 카드
+            for h in heads[:max_cards - 1]:
+                paths.append(self.generate_image(title, subtitle=h))
+            print(f"[CardNews] 카드 세트 {len(paths)}장 생성 (H태그 {len(heads)}개 기준)")
+        else:
+            count = max(1, count)
+            points = self._extract_points(content, count - 1)
+            generic = ["핵심 포인트 정리", "꼭 알아두세요", "한눈에 보기", "이것만 기억하세요", "마무리 체크"]
+            for i in range(count - 1):
+                sub = points[i] if i < len(points) else generic[i % len(generic)]
+                paths.append(self.generate_image(title, subtitle=sub))
+            print(f"[CardNews] 카드 세트 {len(paths)}장 생성 (소제목 없음 → 폴백)")
         return paths
 
 if __name__ == "__main__":
