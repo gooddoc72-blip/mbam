@@ -69,13 +69,15 @@ export default function SaaS_Dashboard() {
   ];
 
   const renderRows = () => {
-    if (data.length === 0) return <tr><td colSpan="3" style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>최근 기록이 없습니다.</td></tr>;
-    return data.slice(0, 5).map((row, idx) => (
+    if (data.length === 0) return <tr><td colSpan="4" style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>최근 기록이 없습니다.</td></tr>;
+    return data.slice(0, 10).map((row, idx) => {
+      const url = row.result_url || row.post_url || "";
+      return (
       <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.2s" }} onMouseOver={e=>e.currentTarget.style.background="#f8fafc"} onMouseOut={e=>e.currentTarget.style.background="transparent"}>
-        <td style={{ padding: "1rem", fontSize: "0.9rem", color: "#64748b" }}>{row.created_at}</td>
-        <td style={{ padding: "1rem", color: "#1e293b", fontWeight: "600" }}>{row.target_keyword || row.cafe_name || row.place_name || row.keyword}</td>
+        <td style={{ padding: "1rem", fontSize: "0.9rem", color: "#64748b", whiteSpace: "nowrap" }}>{row.created_at}</td>
+        <td style={{ padding: "1rem", color: "#1e293b", fontWeight: "600" }}>{row.target_keyword || row.cafe_name || row.place_name || row.keyword || row.account_id || "-"}</td>
         <td style={{ padding: "1rem" }}>
-          <span style={{ 
+          <span style={{
             padding: "0.3rem 0.8rem", borderRadius: "99px", fontSize: "0.8rem", fontWeight: "700",
             background: row.status?.includes('성공') ? "#dcfce3" : "#dbeafe",
             color: row.status?.includes('성공') ? "#16a34a" : "#2563eb"
@@ -83,8 +85,15 @@ export default function SaaS_Dashboard() {
             {row.status || '완료'}
           </span>
         </td>
+        <td style={{ padding: "1rem" }}>
+          {url ? (
+            <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563eb", fontWeight: "700", fontSize: "0.85rem", textDecoration: "none" }}>결과 보기 ↗</a>
+          ) : (
+            <span style={{ color: "#cbd5e1", fontSize: "0.85rem" }}>-</span>
+          )}
+        </td>
       </tr>
-    ));
+    )});
   };
 
   return (
@@ -203,11 +212,12 @@ export default function SaaS_Dashboard() {
                 <th style={{ padding: "1rem 2rem", fontWeight: "600" }}>일시</th>
                 <th style={{ padding: "1rem 2rem", fontWeight: "600" }}>대상 키워드 / 상호명</th>
                 <th style={{ padding: "1rem 2rem", fontWeight: "600" }}>상태</th>
+                <th style={{ padding: "1rem 2rem", fontWeight: "600" }}>결과</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="3" style={{ textAlign: "center", padding: "3rem", color: "#94a3b8" }}>데이터를 불러오는 중입니다...</td></tr>
+                <tr><td colSpan="4" style={{ textAlign: "center", padding: "3rem", color: "#94a3b8" }}>데이터를 불러오는 중입니다...</td></tr>
               ) : (
                 renderRows()
               )}

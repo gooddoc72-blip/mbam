@@ -376,6 +376,10 @@ class WorkflowOrchestrator:
                 if not success:
                     error_msg = "로그인 실패: 비밀번호 오류이거나 2단계 인증/새로운 기기 차단입니다. 계정 관리에서 '계정 등록(기기 인증)'을 1회 실행해 수동 로그인+2단계 인증을 통과시켜 주세요. 이후에는 자동 로그인됩니다."
                     logger.error(f"❌ [Orchestrator] {error_msg}")
+                    try:
+                        self.db.log_blog(account_id=account_id, target_keyword=keyword, status="실패: 로그인", result_url="")
+                    except Exception:
+                        pass
                     return {"success": False, "error": error_msg}
                 self.session_manager.mark_registered(account_id)
                 await self.session_manager.save_session(context, account_id)
@@ -477,6 +481,15 @@ class WorkflowOrchestrator:
                     logger.info("✅ 수동 발행이 확인되었습니다. 다음 단계로 넘어갑니다.")
                 except Exception:
                     pass
+
+            # 대시보드 '블로그 자동화' 작업내역 기록
+            try:
+                cur_url = page.url
+                result_url = cur_url if ("PostWriteForm" not in cur_url and "editor" not in cur_url) else ""
+                self.db.log_blog(account_id=account_id, target_keyword=keyword,
+                                 status="성공" if publish_result else "발행 미완료", result_url=result_url)
+            except Exception:
+                pass
 
             return {
                 "account_id": account_id,
