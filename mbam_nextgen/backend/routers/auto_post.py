@@ -235,6 +235,11 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
         import traceback
         tb_str = traceback.format_exc()
         log(f"오류 발생: {str(e)}\n{tb_str}")
+        try:
+            from mbam_nextgen.core.logger import logger
+            logger.error(f"❌ [auto_post] {req.naver_id or '?'} 작업 실패: {str(e)} | {tb_str.splitlines()[-1] if tb_str else ''}")
+        except Exception:
+            pass
         task_status_store[task_id]["status"] = "failed"
 
 
