@@ -293,6 +293,21 @@ async def register_account(req: RegisterAccountRequest):
     }
 
 
+@router.get("/registered-accounts", summary="기기 인증(영구 프로필) 완료된 계정 ID 목록")
+async def registered_accounts():
+    import os
+    from mbam_nextgen.infrastructure.session import is_registered, PROFILES_DIR
+    ids = []
+    try:
+        if os.path.isdir(PROFILES_DIR):
+            for name in os.listdir(PROFILES_DIR):
+                if is_registered(name):
+                    ids.append(name)
+    except Exception:
+        pass
+    return {"registered": ids}
+
+
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
     if task_id in active_tasks:

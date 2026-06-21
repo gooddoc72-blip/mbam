@@ -13,6 +13,15 @@ function BlogPostingContent() {
   const [accounts, setAccounts] = useState([{ id: "", pw: "" }]);
   const [intervalMins, setIntervalMins] = useState(5);
   const [useTethering, setUseTethering] = useState(false);
+  const [registeredIds, setRegisteredIds] = useState([]);
+
+  const loadRegistered = async () => {
+    try {
+      const res = await fetchWithAuth("/api/auto_post/registered-accounts");
+      const data = await res.json();
+      if (Array.isArray(data.registered)) setRegisteredIds(data.registered);
+    } catch (e) { /* 서버 미기동 시 조용히 무시 */ }
+  };
 
   const addAccount = () => setAccounts([...accounts, { id: "", pw: "" }]);
   const removeAccount = (index) => setAccounts(accounts.filter((_, i) => i !== index));
@@ -124,7 +133,14 @@ function BlogPostingContent() {
       setTaskStatus("running");
       setLoading(true);
     }
+
+    loadRegistered();
   }, []);
+
+  // 작업(기기 인증 포함)이 끝나면 인증 완료 목록 갱신
+  useEffect(() => {
+    if (taskStatus === "completed") loadRegistered();
+  }, [taskStatus]);
 
 
   const loadAccounts = () => {
@@ -492,7 +508,11 @@ function BlogPostingContent() {
                 <span style={{ width: "20px", fontWeight: "bold", color: "#64748b" }}>{idx+1}.</span>
                 <input type="text" placeholder="네이버 아이디" value={acc.id} onChange={(e) => updateAccount(idx, "id", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 <input type="password" placeholder="비밀번호" value={acc.pw} onChange={(e) => updateAccount(idx, "pw", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
-                <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
+                {registeredIds.includes(acc.id) ? (
+                  <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="기기 인증 완료됨. 다시 인증하려면 클릭하세요." style={{ padding: "0.6rem", background: "#dcfce7", color: "#166534", border: "1px solid #86efac", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap", fontWeight: "bold" }}>✅ 인증완료</button>
+                ) : (
+                  <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
+                )}
                 {accounts.length > 1 && (
                   <button onClick={() => removeAccount(idx)} style={{ padding: "0.6rem", background: "#fee2e2", color: "#ef4444", border: "none", cursor: "pointer" }}>삭제</button>
                 )}

@@ -50,6 +50,15 @@ export default function CafeAutoPage() {
 
   // --- Common ---
   const [loading, setLoading] = useState(false);
+  const [registeredIds, setRegisteredIds] = useState([]);
+
+  const loadRegistered = async () => {
+    try {
+      const res = await fetchWithAuth("/api/auto_post/registered-accounts");
+      const data = await res.json();
+      if (Array.isArray(data.registered)) setRegisteredIds(data.registered);
+    } catch (e) { /* 서버 미기동 시 조용히 무시 */ }
+  };
   const [taskId, setTaskId] = useState(null);
   const [statusLogs, setStatusLogs] = useState([]);
   const [taskStatus, setTaskStatus] = useState("");
@@ -59,9 +68,15 @@ export default function CafeAutoPage() {
     // Load accounts and schedules if in nurture or target tab
     if (mainTab === "nurture" || mainTab === "target") {
       fetchAccounts();
+      loadRegistered();
       if (mainTab === "nurture") fetchSchedules();
     }
   }, [mainTab]);
+
+  // 기기 인증 작업이 끝나면 인증 완료 목록 갱신
+  useEffect(() => {
+    if (taskStatus === "completed") loadRegistered();
+  }, [taskStatus]);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -460,7 +475,11 @@ export default function CafeAutoPage() {
                           <span style={{ background: "#dcfce7", color: "#166534", padding: "0.2rem 0.5rem", borderRadius: "4px" }}>{acc.status}</span>
                         </td>
                         <td style={{ padding: "0.5rem" }}>
-                          <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.3rem 0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", borderRadius: "4px", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
+                          {registeredIds.includes(acc.naver_id) ? (
+                            <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="기기 인증 완료됨. 다시 인증하려면 클릭하세요." style={{ padding: "0.3rem 0.6rem", background: "#dcfce7", color: "#166534", border: "1px solid #86efac", borderRadius: "4px", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap", fontWeight: "bold" }}>✅ 인증완료</button>
+                          ) : (
+                            <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="최초 1회 수동 로그인+2단계 인증으로 기기를 등록하면 이후 자동 로그인됩니다." style={{ padding: "0.3rem 0.6rem", background: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d", borderRadius: "4px", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>🔐 기기 인증</button>
+                          )}
                         </td>
                       </tr>
                     ))}
