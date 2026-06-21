@@ -18,10 +18,21 @@ class CafeService:
             "submit": "a:has-text('등록'), button:has-text('등록'), button:has-text('작성완료'), .BaseButton:has-text('등록')"
         }
 
+    @staticmethod
+    def _cafe_url(cafe_id: str) -> str:
+        """cafe_id가 전체 URL이든 슬러그든 정상 카페 주소로 변환."""
+        cid = (cafe_id or "").strip()
+        if cid.startswith("http://") or cid.startswith("https://"):
+            return cid.rstrip("/")
+        if "cafe.naver.com/" in cid:
+            return "https://" + cid[cid.index("cafe.naver.com/"):].rstrip("/")
+        return f"https://cafe.naver.com/{cid.lstrip('/')}"
+
     async def navigate_to_cafe(self, page, cafe_id: str):
-        """카페 메인 페이지로 이동"""
-        print(f"[CafeService] 카페 진입: {cafe_id}")
-        await page.goto(f"https://cafe.naver.com/{cafe_id}")
+        """카페 메인 페이지로 이동 (전체 URL/슬러그 모두 처리)"""
+        url = self._cafe_url(cafe_id)
+        print(f"[CafeService] 카페 진입: {url}")
+        await page.goto(url)
         await asyncio.sleep(3)
 
     async def auto_enter_editor(self, page):
