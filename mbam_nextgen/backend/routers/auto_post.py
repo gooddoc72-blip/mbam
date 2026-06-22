@@ -57,6 +57,7 @@ class AutoPostRequest(BaseModel):
     source_data: Optional[str] = None
     generate_card_news: Optional[bool] = False
     prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
+    include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
     
     # Proxy / Tethering
     use_tethering: Optional[bool] = False
@@ -222,7 +223,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 reference_data=req.reference_data,
                 naver_pw=req.naver_pw,
                 source_data=req.source_data,
-                prompt_category=req.prompt_category
+                prompt_category=req.prompt_category,
+                include_source_link=req.include_source_link
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
@@ -376,7 +378,8 @@ async def _generate_impl(req: AutoPostRequest):
                 distribution_mode=req.distribution_mode,
                 source_data=final_source_data,
                 api_key=req.api_key,
-                prompt_category=req.prompt_category
+                prompt_category=req.prompt_category,
+                include_source_link=req.include_source_link
             )
             
             if content_text:

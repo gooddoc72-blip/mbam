@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import re
 import sys
 import os
 import glob
@@ -144,10 +145,23 @@ class WorkflowOrchestrator:
         text = re.sub(r'^\s*[-–—=]{2,}\s*$', '', text, flags=re.MULTILINE)  # --- === 구분선 줄
         return text
 
+    @staticmethod
+    def _append_source_link(content: str, source_data: str) -> str:
+        """source_data 의 [링크] http... 를 본문 끝에 출처로 덧붙인다 (유효 URL 있을 때만)."""
+        if not content or not source_data:
+            return content
+        m = re.search(r"\[링크\]\s*(https?://\S+)", source_data)
+        if not m:
+            return content
+        url = m.group(1).strip()
+        if url in content:  # 이미 포함되어 있으면 중복 방지
+            return content
+        return f"{content}\n\n▶ 자세히 보기: {url}"
+
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
         post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None,
-        prompt_category: str = None
+        prompt_category: str = None, include_source_link: bool = False
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -178,6 +192,8 @@ class WorkflowOrchestrator:
                     timeout=timeout,
                 )
                 logger.info(f"✅ [Orchestrator] 원고 생성 완료 ({attempt}회차)")
+                if include_source_link:
+                    content = self._append_source_link(content, source_data)
                 return content
             except asyncio.TimeoutError as e:
                 last_exc = e
@@ -307,6 +323,7 @@ class WorkflowOrchestrator:
         image_folder_path: str = None,
         source_data: str = None,
         generate_card_news: bool = False,
+        blog_id: str = None,   # 로그인ID와 다른 실제 블로그 주소(예: bonetacasa). 있으면 다이렉트 진입에 사용
         **kwargs
     ):
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -450,7 +467,7 @@ class WorkflowOrchestrator:
             # 4. 글쓰기 자동 진입 및 에디터 감지
             logger.info(f"🖼️ [Orchestrator] ({account_id}) 이미지 준비 완료: {len(washed_images)}장")
             logger.info("📝 [Orchestrator] 네이버 에디터 진입 시도...")
-            await self.blog.auto_enter_editor(page, account_id)
+            await self.blog.auto_enter_editor(page, account_id, blog_id=blog_id)
             editor_frame = await self.blog.wait_for_editor(context, page)
             logger.info(f"✅ [Orchestrator] ({account_id}) 에디터 프레임 확보: {getattr(editor_frame, 'name', '?')}")
             
@@ -594,6 +611,7 @@ class WorkflowOrchestrator:
             try:
                 result = await self.execute_blog_workflow(
                     account_id=account_id,
+                    blog_id=(account.get("blogAddr") or account.get("blog_id") or "").strip() or None,
                     keyword=keyword,
                     test_image=account.get("image", config.get("image")),
                     speed_mode=account.get("speed_mode", config.get("speed_mode", "normal")),
@@ -677,7 +695,8 @@ class WorkflowOrchestrator:
         proxy: str = None,
         naver_pw: str = None,
         source_data: str = None,
-        prompt_category: str = None
+        prompt_category: str = None,
+        include_source_link: bool = False
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -761,13 +780,15 @@ class WorkflowOrchestrator:
                         # 글감수집 등 지정 프롬프트로 AI 생성 (content/source_data를 소스로 사용)
                         cafe_content = await self._generate_content_with_retry(
                             keyword, ai_provider=ai_provider, reference_data=reference_data,
-                            source_data=(source_data or content), prompt_category=prompt_category)
+                            source_data=(source_data or content), prompt_category=prompt_category,
+                            include_source_link=include_source_link)
                     elif content:
                         cafe_content = content
                     else:
                         cafe_content = await self._generate_content_with_retry(
                             keyword, ai_provider=ai_provider, reference_data=reference_data,
-                            source_data=source_data, prompt_category=prompt_category)
+                            source_data=source_data, prompt_category=prompt_category,
+                            include_source_link=include_source_link)
                     cafe_content = self._strip_markdown(cafe_content)
 
                     # 4. 이미지 세척 / 대체

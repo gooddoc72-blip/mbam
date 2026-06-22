@@ -52,6 +52,7 @@ export default function CafeAutoPage() {
   const [loading, setLoading] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
   const [promptCategory, setPromptCategory] = useState(null);
+  const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
 
   const loadRegistered = async () => {
     try {
@@ -196,7 +197,8 @@ export default function CafeAutoPage() {
         target_keyword: targetKeyword, title, content,
         publish_mode: "instant", cafe_url: cafeUrl, board_name: boardName,
         images: images, cafe_action_type: actionType, reference_data: referenceData,
-        source_data: content, prompt_category: promptCategory
+        source_data: content, prompt_category: promptCategory,
+        include_source_link: includeSourceLink
       };
       const res = await fetchWithAuth("/api/auto_post/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
@@ -394,6 +396,12 @@ export default function CafeAutoPage() {
                 <input type="text" placeholder="타겟 키워드 (AI 댓글 생성용)" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
                 {actionType === "post" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => setTitle(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />}
                 <textarea placeholder="직접 본문 작성 시 (비워두면 AI 자동작성)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: "100px", padding: "0.8rem" }} />
+                {content && content.includes("[링크] http") && (
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", marginTop: "0.8rem", fontSize: "0.9rem", color: "#1e40af", fontWeight: "bold" }}>
+                    <input type="checkbox" checked={includeSourceLink} onChange={e => setIncludeSourceLink(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+                    🔗 글 끝에 출처(원문) 링크 추가
+                  </label>
+                )}
               </div>
               <div style={{ display: "flex", gap: "1rem" }}>
                 <button onClick={handleStartSingle} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>

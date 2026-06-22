@@ -10,8 +10,9 @@ function BlogPostingContent() {
   const [generateCardNews, setGenerateCardNews] = useState(true);
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
+  const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
 
-  const [accounts, setAccounts] = useState([{ id: "", pw: "", checked: true }]);
+  const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
   const [intervalMins, setIntervalMins] = useState(5);
   const [useTethering, setUseTethering] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
@@ -24,7 +25,7 @@ function BlogPostingContent() {
     } catch (e) { /* 서버 미기동 시 조용히 무시 */ }
   };
 
-  const addAccount = () => setAccounts([...accounts, { id: "", pw: "", checked: true }]);
+  const addAccount = () => setAccounts([...accounts, { id: "", pw: "", blogAddr: "", checked: true }]);
   const removeAccount = (index) => setAccounts(accounts.filter((_, i) => i !== index));
   const updateAccount = (index, field, value) => {
     const newAcc = [...accounts];
@@ -105,10 +106,12 @@ function BlogPostingContent() {
         setSourceData(paramSource);
       }
     }
-    // 글감수집에서 넘어온 경우 전용 프롬프트 카테고리 적용
+    // 글감수집에서 넘어온 경우 전용 프롬프트 카테고리 + 키워드 적용
     if (searchParams) {
       const pc = searchParams.get("prompt_category");
       if (pc) setPromptCategory(pc);
+      const kw = searchParams.get("keyword");
+      if (kw) setTargetKeyword(kw);
     }
 
     const saved = localStorage.getItem('autoWriteRefData');
@@ -304,6 +307,7 @@ function BlogPostingContent() {
         generate_card_news: generateCardNews,
         source_data: sourceData,
         prompt_category: promptCategory,
+        include_source_link: includeSourceLink,
         post_mode: "ai_generate",
 
         login_mode: "manual",
@@ -541,6 +545,7 @@ function BlogPostingContent() {
                 <span style={{ width: "20px", fontWeight: "bold", color: "#64748b" }}>{idx+1}.</span>
                 <input type="text" placeholder="네이버 아이디" value={acc.id} onChange={(e) => updateAccount(idx, "id", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 <input type="password" placeholder="비밀번호" value={acc.pw} onChange={(e) => updateAccount(idx, "pw", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
+                <input type="text" placeholder="블로그 주소(선택, 예: bonetacasa)" title="로그인 아이디와 블로그 주소가 다른 경우만 입력 (blog.naver.com/[여기]). 비우면 자동 감지." value={acc.blogAddr || ""} onChange={(e) => updateAccount(idx, "blogAddr", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 {registeredIds.includes(acc.id) ? (
                   <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="기기 인증 완료됨. 다시 인증하려면 클릭하세요." style={{ padding: "0.6rem", background: "#dcfce7", color: "#166534", border: "1px solid #86efac", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap", fontWeight: "bold" }}>✅ 인증완료</button>
                 ) : (
@@ -608,6 +613,16 @@ function BlogPostingContent() {
             </label>
             <p style={{ margin: "0.5rem 0 0 1.5rem", fontSize: "0.85rem", color: "#047857" }}>* 백엔드의 AI 이미지 생성기를 호출하여 원고 내용에 맞는 정보성 카드뉴스를 생성한 후 포스팅에 첨부합니다.</p>
           </div>
+
+          {sourceData && sourceData.includes("[링크] http") && (
+            <div style={{ marginTop: "1rem", padding: "1rem", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: "#1e40af" }}>
+                <input type="checkbox" checked={includeSourceLink} onChange={e => setIncludeSourceLink(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+                🔗 글 끝에 출처(원문) 링크 추가
+              </label>
+              <p style={{ margin: "0.5rem 0 0 1.5rem", fontSize: "0.85rem", color: "#3b82f6" }}>* 글감에 원문 링크가 있을 때만 본문 맨 끝에 “▶ 자세히 보기: 링크”를 덧붙입니다. (네이버 블로그는 외부링크가 노출에 불리할 수 있어 기본 꺼짐)</p>
+            </div>
+          )}
         </div>
 
         {/* 3. Content Settings */}

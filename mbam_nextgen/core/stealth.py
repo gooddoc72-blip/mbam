@@ -1,4 +1,5 @@
 import random
+import re
 import asyncio
 import numpy as np
 from playwright.async_api import Page, Frame
@@ -47,6 +48,71 @@ class StealthExecutor:
             
         await page.mouse.move(target_x, target_y)
 
+    # ── 네이버 SmartEditor ONE(SE3) 툴바 제어 (소제목 폰트 크기/굵게) ──────────
+    @staticmethod
+    async def _se3_click(obj, data_name: str) -> bool:
+        """SE3 툴바 버튼(data-name) 클릭. 성공 True. (frame 내 버튼)"""
+        try:
+            btn = obj.locator(f'button[data-name="{data_name}"]').first
+            if await btn.count() == 0:
+                return False
+            await btn.click(timeout=2000)
+            await asyncio.sleep(0.2)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _se3_bold_is_on(obj) -> bool:
+        """굵게 버튼이 현재 활성(눌림) 상태인지."""
+        try:
+            btn = obj.locator('button[data-name="bold"]').first
+            if await btn.count() == 0:
+                return False
+            cls = (await btn.get_attribute("class")) or ""
+            pressed = (await btn.get_attribute("aria-pressed")) or ""
+            return ("se-is-on" in cls) or ("is-selected" in cls) or (pressed == "true")
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _se3_set_font_size(obj, size_text: str) -> bool:
+        """폰트 크기 드롭다운을 열어 size_text(예 '19','16')를 선택."""
+        try:
+            if not await StealthExecutor._se3_click(obj, "font-size"):
+                return False
+            await asyncio.sleep(0.2)
+            # 1순위: 옵션 클래스에 fs{size} 포함, 2순위: 옵션 레이어에서 숫자 텍스트 일치
+            opt = obj.locator(f'button[class*="font-size-code"][class*="fs{size_text}"]')
+            if await opt.count() == 0:
+                opt = obj.locator('.se-toolbar-option-list button, .se-toolbar-option-layer button').filter(
+                    has_text=re.compile(rf'^\s*{size_text}\s*$'))
+            if await opt.count() == 0:
+                return False
+            await opt.first.click(timeout=2000)
+            await asyncio.sleep(0.2)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _move_cursor_end(obj, selector: str):
+        """본문 에디터의 커서를 맨 끝으로 이동(선택 해제) — 이미지/서식 보존하며 이어쓰기."""
+        try:
+            await obj.locator(selector).first.evaluate("""el => {
+                if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+                    el.focus();
+                    const r = document.createRange();
+                    r.selectNodeContents(el);
+                    r.collapse(false);
+                    const s = window.getSelection();
+                    s.removeAllRanges();
+                    s.addRange(r);
+                }
+            }""")
+        except Exception:
+            pass
+
     @staticmethod
     async def human_type(obj, selector: str, text: str, speed_mode: str = "normal", speed_multiplier: float = 1.0, do_click: bool = True):
         """
@@ -94,26 +160,39 @@ class StealthExecutor:
 
         SUBTITLE_MARK = "[소제목]"
         HEADING_BULLETS = ("■", "▶", "◆", "●", "▣", "◼", "▪", "□", "▷")
+        HEADING_SIZE = "19"   # 소제목 폰트 크기(본문 기본 16 → 19)
+        need_reset = False    # 직전 소제목 서식(크게/굵게)을 다음 본문 줄에서 원복해야 하는지
         paragraphs = text.split('\n')
+
+        async def _style_current_line(size_text, want_bold):
+            """방금 입력한 줄을 선택(Shift+Home)해 폰트 크기/굵게를 적용 후 선택 해제."""
+            try:
+                await page.keyboard.press("Shift+Home")
+                await asyncio.sleep(0.15)
+                await StealthExecutor._se3_set_font_size(obj, size_text)
+                bold_on = await StealthExecutor._se3_bold_is_on(obj)
+                if want_bold and not bold_on:
+                    await StealthExecutor._se3_click(obj, "bold")
+                elif (not want_bold) and bold_on:
+                    await StealthExecutor._se3_click(obj, "bold")
+                await page.keyboard.press("End")
+                await asyncio.sleep(0.1)
+            except Exception:
+                pass
+
         for p_idx, paragraph in enumerate(paragraphs):
-            # 소제목 줄 → 굵게(Ctrl+B) ON 후 입력, 끝나면 OFF
-            # 마커: '[소제목]'(토큰) 또는 줄 맨 앞 헤딩 불릿(■ ▶ ◆ 등, 짧은 줄)
+            # 소제목 줄 판별 — 마커 '[소제목]'(토큰) 또는 줄 맨 앞 헤딩 불릿(■ ▶ ◆ 등, 짧은 줄)
             stripped = paragraph.lstrip()
             is_sub = False
             if stripped.startswith(SUBTITLE_MARK):
                 paragraph = stripped[len(SUBTITLE_MARK):].lstrip()
                 is_sub = True
             elif stripped[:1] in HEADING_BULLETS and len(stripped) <= 50:
-                paragraph = stripped  # 불릿(■ 등)은 유지하고 굵게만
+                paragraph = stripped  # 불릿(■ 등)은 유지
                 is_sub = True
-            if is_sub:
-                try:
-                    await page.keyboard.press("Control+b")
-                except Exception:
-                    is_sub = False
 
             if not paragraph:
-                # 에디터가 빈 줄을 무시하지 않도록 공백 입력 후 지우거나 보이지 않는 문자 입력
+                # 에디터가 빈 줄을 무시하지 않도록 공백 입력 (need_reset 은 유지 → 다음 실제 본문 줄에서 원복)
                 await page.keyboard.type(" ")
                 await asyncio.sleep(0.1)
 
@@ -127,12 +206,14 @@ class StealthExecutor:
                 if char in [',', '.', '!', '?']: delay += random.uniform(0.4, 1.2) * speed_multiplier
                 await asyncio.sleep(max(0.01, delay))
 
-            if is_sub:
-                # 굵게 OFF (다음 줄부터 일반 본문)
-                try:
-                    await page.keyboard.press("Control+b")
-                except Exception:
-                    pass
+            # 소제목 줄 → 폰트 크게 + 굵게 (SE3 툴바: Ctrl+B 단축키가 불안정해 실제 버튼/드롭다운 사용)
+            if is_sub and paragraph:
+                await _style_current_line(HEADING_SIZE, want_bold=True)
+                need_reset = True
+            elif need_reset and paragraph:
+                # 소제목 다음 첫 본문 줄 → 16/굵게 해제로 원복 (서식 상속 방지)
+                await _style_current_line("16", want_bold=False)
+                need_reset = False
 
             if p_idx < len(paragraphs) - 1:
                 await page.keyboard.press("Enter", delay=100)

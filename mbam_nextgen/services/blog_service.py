@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from ..core.stealth import StealthExecutor
 from ..core.logger import logger
 
@@ -30,25 +31,63 @@ class BlogService:
             pass
         return False
 
-    async def auto_enter_editor(self, page, account_id: str):
-        """글쓰기 에디터 진입: 다이렉트 URL 시도 → 실패(홈으로 튕김) 시 '글쓰기' 버튼 클릭 폴백.
-        로그인 ID와 블로그 URL 주소가 다른 계정(ch_2101 등)은 다이렉트 URL이 안 먹혀
-        블로그 홈으로 튕기므로, 홈의 '글쓰기' 버튼을 눌러 ID 무관하게 에디터를 연다."""
+    _NON_BLOG_IDS = {"PostList", "PostView", "GoBlogWrite", "PostWriteForm", "MyBlog",
+                     "BlogHome", "ThisMonth", "guestbook", "section"}
+
+    async def _discover_real_blog_id(self, page):
+        """로그인ID ≠ 블로그주소 계정의 실제 blogId 발견 (다이렉트 URL 재시도용)."""
+        try:
+            # blog.naver.com 루트는 로그인 사용자의 실제 블로그로 리다이렉트됨
+            await page.goto("https://blog.naver.com/", wait_until="domcontentloaded")
+            await asyncio.sleep(2)
+            m = re.search(r"blog\.naver\.com/([A-Za-z0-9_-]+)(?:[/?#]|$)", page.url)
+            if m and m.group(1) not in self._NON_BLOG_IDS:
+                return m.group(1)
+            # 폴백: 페이지 내 본인 블로그 링크에서 추출
+            bid = await page.evaluate(r"""() => {
+                const ids = [...document.querySelectorAll('a[href*="blog.naver.com/"]')]
+                    .map(x => (String(x.href).match(/blog\.naver\.com\/([A-Za-z0-9_-]+)/) || [])[1])
+                    .filter(Boolean);
+                return ids[0] || null;
+            }""")
+            if bid and bid not in self._NON_BLOG_IDS:
+                return bid
+        except Exception as e:
+            logger.info(f"[BlogService] 실제 blogId 발견 실패: {e}")
+        return None
+
+    async def auto_enter_editor(self, page, account_id: str, blog_id: str = None):
+        """글쓰기 에디터 진입: 다이렉트 URL 시도 → 실패(홈으로 튕김) 시 폴백.
+        로그인 ID와 블로그 주소가 다른 계정(예: 로그인 ch_2101 / 블로그 bonetacasa)은
+        명시된 blog_id 를 우선 사용하고, 없으면 실제 blogId 자동발견 → '글쓰기' 링크 순으로 폴백한다."""
         try:
             if not account_id:
                 logger.info("[BlogService] ⚠️ account_id 없음 — 글쓰기 진입 생략")
                 return
 
-            write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={account_id}"
-            logger.info(f"[BlogService] 🚀 다이렉트 글쓰기 URL 이동: {write_url}")
+            # 명시 블로그 주소(blog_id)가 있으면 그것을, 없으면 로그인 ID를 다이렉트 URL에 사용
+            write_id = (blog_id or "").strip() or account_id
+            write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={write_id}"
+            logger.info(f"[BlogService] 🚀 다이렉트 글쓰기 URL 이동: {write_url}" + (f" (블로그 주소 지정: {blog_id})" if blog_id else ""))
             await page.goto(write_url, wait_until="domcontentloaded")
             await asyncio.sleep(4)
 
             if await self._editor_present(page):
-                logger.info(f"[BlogService] ✅ ({account_id}) 다이렉트 URL로 에디터 진입 성공")
+                logger.info(f"[BlogService] ✅ ({account_id}) 다이렉트 URL로 에디터 진입 성공 (blogId={write_id})")
                 return
 
-            # 폴백: 다이렉트 URL이 블로그 홈으로 튕긴 상태 (로그인 ID ≠ 블로그 URL 주소)
+            # 1차 폴백: 실제 blogId를 찾아 다이렉트 URL 재시도 → 메인페이지 에디터(mainFrame 경로 회피)
+            real_id = await self._discover_real_blog_id(page)
+            if real_id and real_id != write_id:
+                retry_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={real_id}"
+                logger.info(f"[BlogService] 🔁 ({account_id}) 실제 blogId={real_id} 발견 → 다이렉트 재시도: {retry_url}")
+                await page.goto(retry_url, wait_until="domcontentloaded")
+                await asyncio.sleep(4)
+                if await self._editor_present(page):
+                    logger.info(f"[BlogService] ✅ ({account_id}) 실제 blogId({real_id}) 다이렉트 진입 성공(메인페이지 에디터)")
+                    return
+
+            # 2차 폴백: 블로그 홈의 '글쓰기' 링크 클릭 (GoBlogWrite → mainFrame 경로)
             logger.info(f"[BlogService] ⚠️ ({account_id}) 다이렉트 URL이 에디터 미오픈 → 현재 {page.url} | '글쓰기' 링크 폴백")
             await asyncio.sleep(2)
             href = None
@@ -227,6 +266,32 @@ class BlogService:
             }""")
             if logger:
                 logger.error(f"[BlogService] 툴바 버튼 덤프({len(info)}개): {info}")
+
+            # 폰트 크기 드롭다운을 열어 옵션 셀렉터를 덤프 (소제목 폰트크기 적용 셀렉터 검증용)
+            try:
+                fbtn = frame.locator('button[data-name="font-size"]').first
+                if await fbtn.count() > 0:
+                    await fbtn.click(timeout=2000)
+                    await asyncio.sleep(0.4)
+                    opts = await frame.evaluate(r"""() => {
+                        const out = [];
+                        document.querySelectorAll('[class*="option"] button, [class*="option"] li').forEach(el => {
+                            const cls = (el.className || '').toString();
+                            const txt = (el.textContent || '').trim().slice(0, 6);
+                            const dv = el.getAttribute('data-value') || '';
+                            if (/font|size|fs/i.test(cls) || /^\d{2}$/.test(txt)) out.push({cls: cls.slice(0,60), txt, dv});
+                        });
+                        return out;
+                    }""")
+                    if logger:
+                        logger.error(f"[BlogService] 폰트크기 옵션 덤프({len(opts)}개): {opts}")
+                    # 드롭다운 닫기
+                    try:
+                        await frame.page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception:
             pass
 
