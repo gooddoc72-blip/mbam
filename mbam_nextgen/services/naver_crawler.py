@@ -59,6 +59,52 @@ def fetch_place_by_mid(mid):
             "source": "error"
         }
 
+def fetch_place_coords(mid):
+    """매장(MID)의 실제 좌표(위경도)를 추출한다.
+    플레이스 순위는 검색자 위치 기반으로 개인화되므로, 로컬 순위 측정 시
+    더미 좌표가 아닌 '대상 매장 위치'를 기준점으로 써야 정확하다.
+    상세 페이지(__APOLLO_STATE__/og:image)에 좌표가 들어있어 외부 지오코딩이 불필요하다.
+    반환: {"success":bool, "x":lng, "y":lat, "gps":"lat,lng", "address":str}
+    """
+    # 카테고리별로 경로 세그먼트가 다름(restaurant/hospital/place 등) → 여러 후보 시도
+    kinds = ["restaurant", "place", "hospital", "hairshop", "beauty", "attraction"]
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(user_agent=USER_AGENT)
+            try:
+                for kind in kinds:
+                    try:
+                        page.goto(f"https://pcmap.place.naver.com/{kind}/{mid}/home", wait_until="domcontentloaded", timeout=12000)
+                        page.wait_for_timeout(1500)
+                        html = page.content()
+                    except Exception:
+                        continue
+                    m = (re.search(r'"coordinate":\{[^}]*?"x":"?([\d.]+)"?[^}]*?"y":"?([\d.]+)"?', html)
+                         or re.search(r'"x":"(1[0-9]{2}\.\d+)","y":"(3[0-9]\.\d+)"', html)
+                         or re.search(r'center=([\d.]+)%2C([\d.]+)', html)
+                         or re.search(r'center=([\d.]+),([\d.]+)', html))
+                    if m:
+                        lng, lat = float(m.group(1)), float(m.group(2))
+                        # 한국 좌표 sanity check (경도 124~132, 위도 33~43)
+                        if not (124 <= lng <= 132 and 33 <= lat <= 43):
+                            continue
+                        addr_m = re.search(r'"(?:roadAddress|address)":"([^"]{4,60})"', html)
+                        return {
+                            "success": True,
+                            "mid": str(mid),
+                            "x": lng,
+                            "y": lat,
+                            "gps": f"{lat},{lng}",
+                            "address": addr_m.group(1) if addr_m else "",
+                        }
+                return {"success": False, "mid": str(mid), "error": "좌표를 찾지 못했습니다."}
+            finally:
+                browser.close()
+    except Exception as e:
+        return {"success": False, "mid": str(mid), "error": str(e)}
+
+
 def search_keyword_ranking(keyword, limit=300, gps=None, proxy=None):
     """
     네이버 플레이스 '자연 순위' 수집기.
@@ -160,66 +206,147 @@ def search_keyword_ranking(keyword, limit=300, gps=None, proxy=None):
             seen = set()
             per = 70
 
-            # 2) start를 늘려가며 list API를 직접 호출 → placeList를 순서대로 누적
-            for start in range(1, limit + 1, per):
-                u = re.sub(r"([?&]start=)\d+", r"\g<1>" + str(start), base)
-                if "start=" not in u:
-                    u += f"&start={start}"
-                u = re.sub(r"([?&]display=)\d+", r"\g<1>" + str(per), u)
-                if "display=" not in u:
-                    u += f"&display={per}"
+            def _save_bucket(saves):
+                if saves > 50000: return f"{saves // 1000 * 1000:,}+"
+                if saves > 1000:  return f"{saves // 100 * 100:,}+"
+                return f"~{saves // 50 * 50}"
+
+            # ── GraphQL 페이지네이션 (start 무시되는 SSR을 대체, 350+위 수집 가능) ──
+            # 네이버 list UI의 페이지 버튼 클릭 시 'getRestaurantsPcmap' graphql POST가 나간다.
+            # 그 요청 본문(현재 유효한 쿼리)을 캡처해 start=1,71,141…로 재생하여 깊이 수집한다.
+            gql = {"body": None, "ref": None}
+
+            def on_gql(req):
                 try:
-                    page.goto(u, wait_until="domcontentloaded")
-                    html = page.content()
+                    if "pcmap-api.place.naver.com/graphql" in req.url and req.method == "POST" and gql["body"] is None:
+                        pd = req.post_data or ""
+                        if "placeList" in pd or "getRestaurantsPcmap" in pd:
+                            gql["body"] = pd
+                            gql["ref"] = req.headers.get("referer")
                 except Exception:
-                    break
+                    pass
 
-                data = _extract_apollo(html)
-                if not data:
-                    break
-                items = _largest_placelist(data)
-                if not items:
-                    break
+            page.on("request", on_gql)
 
-                added = 0
-                for it in items:
-                    ref = it.get("__ref", "") if isinstance(it, dict) else ""
-                    d = data.get(ref, {}) if ref else {}
-                    name = (d.get("name") or "").strip()
-                    if not name or name in seen:
-                        continue
-                    seen.add(name)
+            # 결과 iframe에서 '2'(또는 다음페이지) 클릭 → 유효 쿼리 유발/캡처
+            try:
+                fr = None
+                for f in page.frames:
+                    if "pcmap.place.naver.com" in (f.url or "") and "list" in (f.url or ""):
+                        fr = f; break
+                if fr:
+                    btn = fr.locator("a.mBN2s:has-text('2'), a:has-text('다음페이지')")
+                    if btn.count() > 0:
+                        btn.first.click(timeout=4000)
+                        page.wait_for_timeout(2500)
+            except Exception:
+                pass
 
-                    cat = d.get("category") or ""
-                    if isinstance(cat, list):
-                        cat = cat[-1] if cat else ""
+            # gps("lat,lng") → (x=lng, y=lat) 문자열
+            gps_xy = None
+            if gps:
+                try:
+                    a, b = [float(x) for x in re.split(r"[ ,;]+", gps.strip())[:2]]
+                    gps_xy = (str(max(a, b)), str(min(a, b)))
+                except Exception:
+                    gps_xy = None
 
-                    saves = _int(d.get("saveCount"))
-                    if saves > 50000:
-                        save_str = f"{saves // 1000 * 1000:,}+"
-                    elif saves > 1000:
-                        save_str = f"{saves // 100 * 100:,}+"
-                    else:
-                        save_str = f"~{saves // 50 * 50}"
+            if gql["body"]:
+                try:
+                    tmpl = json.loads(gql["body"])
+                except Exception:
+                    tmpl = None
+                arr = tmpl if isinstance(tmpl, list) else ([tmpl] if tmpl else [])
+                qobj = None
+                for q in arr:
+                    if isinstance(q, dict) and q.get("operationName") == "getRestaurantsPcmap":
+                        qobj = q; break
+                if qobj is None and arr:
+                    qobj = arr[0]
+                ref = gql["ref"] or "https://pcmap.place.naver.com/"
 
-                    results.append({
-                        "mid": str(d.get("id") or (ref.split(":")[-1] if ":" in ref else ref) or "0"),
-                        "name": name,
-                        "cat": cat,
-                        "rec": _int(d.get("visitorReviewCount")),
-                        "rec_d": 0,
-                        "blog": _int(d.get("blogCafeReviewCount")),
-                        "blog_d": 0,
-                        "save": save_str,
-                        "is_new": bool(d.get("newOpening")) or ("새로오픈" in str(d.get("markerLabel") or "")),
-                        "has_revisit": bool(d.get("repeatVisit")),
-                    })
-                    added += 1
-                    if len(results) >= limit:
-                        break
+                if qobj:
+                    for start in range(1, limit + 1, per):
+                        body = json.loads(json.dumps(qobj))
+                        inp = body.setdefault("variables", {}).setdefault("input", {})
+                        inp["query"] = keyword
+                        inp["start"] = start
+                        inp["display"] = per
+                        if gps_xy:
+                            inp["x"], inp["y"] = gps_xy
+                        try:
+                            resp = page.request.post(
+                                "https://pcmap-api.place.naver.com/graphql",
+                                data=json.dumps([body]),
+                                headers={"Content-Type": "application/json", "Referer": ref, "Origin": "https://pcmap.place.naver.com"},
+                            )
+                            d = json.loads(resp.text())
+                        except Exception:
+                            break
+                        d0 = d[0] if isinstance(d, list) else d
+                        items = []
+                        for k, v in (d0.get("data") or {}).items():
+                            if isinstance(v, dict) and isinstance(v.get("businesses"), dict):
+                                items = v["businesses"].get("items") or []
+                                break
+                        if not items:
+                            break
+                        added = 0
+                        for it in items:
+                            pid = str(it.get("id") or "")
+                            name = (it.get("name") or "").strip()
+                            if not pid or not name or pid in seen:
+                                continue
+                            seen.add(pid)
+                            cat = it.get("category") or ""
+                            if isinstance(cat, list):
+                                cat = cat[-1] if cat else ""
+                            results.append({
+                                "mid": pid, "name": name, "cat": cat,
+                                "rec": _int(it.get("visitorReviewCount")), "rec_d": 0,
+                                "blog": _int(it.get("blogCafeReviewCount")), "blog_d": 0,
+                                "save": _save_bucket(_int(it.get("saveCount"))),
+                                "is_new": bool(it.get("newOpening")) or ("새로오픈" in str(it.get("markerLabel") or "")),
+                                "has_revisit": bool(it.get("repeatVisit")),
+                            })
+                            added += 1
+                            if len(results) >= limit:
+                                break
+                        if added == 0 or len(results) >= limit:
+                            break
 
-                if added == 0 or len(results) >= limit:
-                    break
+            # ── 폴백: GraphQL 미캡처(결과 ≤70 등) 시 SSR 첫 페이지라도 파싱 ──
+            if not results:
+                try:
+                    u = re.sub(r"([?&]display=)\d+", r"\g<1>" + str(per), base)
+                    if "display=" not in u:
+                        u += f"&display={per}"
+                    page.goto(u, wait_until="domcontentloaded")
+                    data = _extract_apollo(page.content())
+                    items = _largest_placelist(data) if data else []
+                    for it in items:
+                        ref0 = it.get("__ref", "") if isinstance(it, dict) else ""
+                        d = data.get(ref0, {}) if ref0 else {}
+                        name = (d.get("name") or "").strip()
+                        if not name or name in seen:
+                            continue
+                        seen.add(name)
+                        cat = d.get("category") or ""
+                        if isinstance(cat, list):
+                            cat = cat[-1] if cat else ""
+                        results.append({
+                            "mid": str(d.get("id") or (ref0.split(":")[-1] if ":" in ref0 else ref0) or "0"),
+                            "name": name, "cat": cat,
+                            "rec": _int(d.get("visitorReviewCount")), "rec_d": 0,
+                            "blog": _int(d.get("blogCafeReviewCount")), "blog_d": 0,
+                            "save": _save_bucket(_int(d.get("saveCount"))),
+                            "is_new": bool(d.get("newOpening")) or ("새로오픈" in str(d.get("markerLabel") or "")),
+                            "has_revisit": bool(d.get("repeatVisit")),
+                        })
+                        if len(results) >= limit:
+                            break
+                except Exception:
+                    pass
 
             browser.close()
             return results[:limit]
@@ -229,6 +356,9 @@ def search_keyword_ranking(keyword, limit=300, gps=None, proxy=None):
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "detail":
         res = fetch_place_by_mid(sys.argv[2])
+        print(json.dumps(res))
+    elif len(sys.argv) >= 3 and sys.argv[1] == "coords":
+        res = fetch_place_coords(sys.argv[2])
         print(json.dumps(res))
     elif len(sys.argv) >= 3 and sys.argv[1] == "search":
         keyword = sys.argv[2]

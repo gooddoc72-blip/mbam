@@ -82,7 +82,7 @@ export default function SettingsPage() {
             )}
 
             {/* Telegram API Settings */}
-            <div style={{ 
+            <div style={{
                 background: "white", 
                 borderRadius: "16px", 
                 padding: "2rem", 

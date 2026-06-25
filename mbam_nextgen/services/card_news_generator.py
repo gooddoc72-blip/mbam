@@ -134,12 +134,12 @@ class CardNewsGenerator:
         """
         heads = self._extract_headings(content)
         paths = []
-        # 표지
+        # 표지 — 글 제목을 크게
         paths.append(self.generate_image(title, subtitle="핵심 포인트 정리"))
         if heads:
-            # H태그(소제목)별 카드
+            # H태그(소제목)별 카드 — 각 카드의 '큰 제목'을 그 소제목으로 (글 제목 반복 X)
             for h in heads[:max_cards - 1]:
-                paths.append(self.generate_image(title, subtitle=h))
+                paths.append(self.generate_image(h, subtitle=""))
             print(f"[CardNews] 카드 세트 {len(paths)}장 생성 (H태그 {len(heads)}개 기준)")
         else:
             count = max(1, count)

@@ -17,6 +17,17 @@ if __name__ == "__main__":
         except Exception: pass
         try: conn.execute(text('ALTER TABLE shopping_tracked_items ADD COLUMN latest_report TEXT;'))
         except Exception: pass
+        try: conn.execute(text('ALTER TABLE naver_accounts ADD COLUMN blog_addr TEXT;'))
+        except Exception: pass
+        # 게시글 부스트(조회수/좋아요) 스케줄 컬럼
+        try: conn.execute(text('ALTER TABLE cafe_schedules ADD COLUMN target_post_url TEXT;'))
+        except Exception: pass
+        try: conn.execute(text('ALTER TABLE cafe_schedules ADD COLUMN do_view INTEGER DEFAULT 1;'))
+        except Exception: pass
+        try: conn.execute(text('ALTER TABLE cafe_schedules ADD COLUMN do_like INTEGER DEFAULT 1;'))
+        except Exception: pass
+        try: conn.execute(text('ALTER TABLE cafe_schedules ADD COLUMN visit_interval_min INTEGER DEFAULT 30;'))
+        except Exception: pass
         conn.commit()
 
     uvicorn.run("mbam_nextgen.backend.main:app", host="0.0.0.0", port=8000)

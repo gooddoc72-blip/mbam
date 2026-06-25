@@ -28,9 +28,9 @@ export default function RootLayout({ children }) {
       </head>
       <body suppressHydrationWarning>
         <AuthGuard>
-          <div style={{ display: "flex", minHeight: "100vh" }}>
+          <div className="app-shell">
             <Sidebar />
-            <main style={{ flex: 1, padding: "2rem", overflowY: "auto", height: "100vh" }}>
+            <main className="app-main">
               {children}
             </main>
           </div>

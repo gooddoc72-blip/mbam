@@ -31,13 +31,41 @@ def mark_registered(account_id: str):
         pass
 
 
+def kill_profile_chrome(account_id: str):
+    """해당 프로필(user-data-dir)을 점유 중인 잔존 Chrome 프로세스를 강제 종료.
+    이전 작업이 비정상 종료되어 좀비 Chrome이 프로필 락을 잡고 있으면,
+    새 launch_persistent_context가 즉시 닫힘(Target page closed, exitCode 21)으로 실패하므로 먼저 정리한다."""
+    import sys, subprocess
+    if sys.platform != "win32":
+        return
+    d = get_profile_dir(account_id)
+    try:
+        # 명령줄에 이 프로필 경로가 포함된 chrome.exe만 선별 종료 (다른 계정/일반 크롬은 건드리지 않음)
+        out = subprocess.run(
+            ["wmic", "process", "where", "name='chrome.exe'", "get", "ProcessId,CommandLine", "/FORMAT:LIST"],
+            capture_output=True, text=True, timeout=12, errors="ignore",
+        ).stdout or ""
+        cmdline = ""
+        for raw in out.splitlines():
+            line = raw.strip()
+            if line.startswith("CommandLine="):
+                cmdline = line[len("CommandLine="):]
+            elif line.startswith("ProcessId="):
+                pid = line[len("ProcessId="):].strip()
+                if pid.isdigit() and d in cmdline:
+                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=6)
+                cmdline = ""
+    except Exception:
+        pass
+
+
 def clear_stale_locks(account_id: str):
     """
-    이전 비정상 종료(서버 강제종료/크래시)로 남은 Chromium 프로필 잠금 파일 제거.
-    제거하지 않으면 '새 창은 뜨는데 프로필을 못 열어 시작 못함' 증상이 발생한다.
-    주의: 같은 계정의 브라우저 창이 '실제로' 열려 있을 때 호출하면 충돌할 수 있으니,
+    이전 비정상 종료(서버 강제종료/크래시)로 남은 Chromium 프로필 잠금 + 좀비 Chrome 정리.
+    제거하지 않으면 '새 창은 뜨는데 프로필을 못 열어 시작 못함'/'즉시 닫힘(exitCode 21)' 증상이 발생한다.
     한 계정당 한 창만 띄우는 전제로 사용한다.
     """
+    kill_profile_chrome(account_id)  # 프로필 점유 중인 좀비 Chrome 먼저 종료
     d = get_profile_dir(account_id)
     for name in ("SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"):
         try:

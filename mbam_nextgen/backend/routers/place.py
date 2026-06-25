@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from mbam_nextgen.backend.quota import consume_generation_quota
 from pydantic import BaseModel
 from typing import Optional
 import os
@@ -19,13 +20,29 @@ def fetch_place_by_mid_cli(mid):
     except Exception as e:
         return {"error": str(e)}
 
+def fetch_place_coords_cli(mid):
+    """대상 매장(MID)의 실제 좌표를 가져온다. 실패 시 None."""
+    crawler_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "services", "naver_crawler.py")
+    try:
+        result = subprocess.run(["python", crawler_path, "coords", str(mid)], capture_output=True, text=True, check=True, timeout=30)
+        output = result.stdout
+        start_idx = output.find('{')
+        end_idx = output.rfind('}') + 1
+        data = json.loads(output[start_idx:end_idx]) if start_idx != -1 and end_idx > start_idx else {}
+        if data.get("success") and data.get("gps"):
+            return data
+        return None
+    except Exception:
+        return None
+
 def search_keyword_ranking_cli(keyword, limit=300, gps=None):
     crawler_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "services", "naver_crawler.py")
     try:
         args = ["python", crawler_path, "search", keyword, "--limit", str(limit)]
         if gps:
             args.extend(["--gps", gps])
-        result = subprocess.run(args, capture_output=True, text=True, check=True, timeout=45)
+        # 300위 전체 수집은 콜드스타트/네이버 지연 시 45초를 넘길 수 있어 여유있게 90초.
+        result = subprocess.run(args, capture_output=True, text=True, check=True, timeout=90)
         output = result.stdout
         start_idx = output.find('[')
         end_idx = output.rfind(']') + 1
@@ -241,7 +258,7 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
             import json
             parsed = json.loads(row[0])
             if parsed and len(parsed) >= 20:
-                cached_competitors = [{"mid": p["mid"], "name": p["name"], "cat": p["category"], "rec": p["visitor_reviews"], "blog": p["blog_reviews"], "save": p["saves"], "rec_d": p.get("c_rec_d", 0), "blog_d": p.get("c_blog_d", 0), "is_new": p.get("is_new", False), "has_revisit": p.get("has_revisit", False), "local_rank": p.get("local_rank")} for p in parsed if p.get("rank", 300) < 300]
+                cached_competitors = [{"mid": p["mid"], "name": p["name"], "cat": p["category"], "rec": p["visitor_reviews"], "blog": p["blog_reviews"], "save": p["saves"], "rec_d": p.get("c_rec_d", 0), "blog_d": p.get("c_blog_d", 0), "is_new": p.get("is_new", False), "has_revisit": p.get("has_revisit", False), "local_rank": p.get("local_rank")} for p in parsed if p.get("rank", 400) < 400]
     except Exception as e:
         pass
     finally:
@@ -256,19 +273,24 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
         competitors = cached_competitors
     else:
         # 전국 통합 크롤러 (Crawler A)
-        competitors = search_keyword_ranking_cli(keyword, limit=300)
-        
-        # 내 매장 기준 로컬 크롤러 (Crawler B - GPS Spoofing)
-        # TODO: 실제 target_mid의 주소를 Geocoding하여 위경도 주입 (현재는 전포동 테스트용 GPS 강제 주입)
-        dummy_gps = "35.1555,129.0620"
-        competitors_local = search_keyword_ranking_cli(keyword, limit=300, gps=dummy_gps)
-        
+        competitors = search_keyword_ranking_cli(keyword, limit=400)
+
+        # 내 매장 기준 로컬 크롤러 (Crawler B - 위치 기반 순위)
+        # 플레이스 순위는 검색자 위치로 개인화되므로, 대상 매장의 '실제 좌표'를 기준점으로 사용.
+        # (이전: 전포동 더미 좌표 하드코딩 → 매장이 다른 지역이면 로컬 순위가 부정확)
+        target_coords = fetch_place_coords_cli(target_mid)
+        competitors_local = None
+        if target_coords and target_coords.get("gps"):
+            competitors_local = search_keyword_ranking_cli(keyword, limit=400, gps=target_coords["gps"])
+        else:
+            print(f"[place] 대상 매장({target_mid}) 좌표를 찾지 못해 로컬 순위는 생략합니다.")
+
         # 에러 처리
         if isinstance(competitors, dict) and "error" in competitors:
             raise Exception(f"크롤러 에러: {competitors['error']}")
         if not isinstance(competitors, list):
             raise Exception(f"크롤러 응답 오류: {competitors}")
-            
+
         # 로컬 순위 병합
         if isinstance(competitors_local, dict) and "error" in competitors_local:
             print(f"LOCAL CRAWLER ERROR: {competitors_local['error']}")
@@ -303,12 +325,17 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
     
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute("SELECT snapshot_json FROM place_rank_history WHERE keyword=? AND date<=? ORDER BY date DESC LIMIT 1", (keyword, compare_target_date))
-    prev_row = c.fetchone()
-    if not prev_row:
-        c.execute("SELECT snapshot_json FROM place_rank_history WHERE keyword=? ORDER BY date ASC LIMIT 1", (keyword,))
+    # 테이블이 아직 없을 수 있음(최초 분석/데이터 초기화 직후) → 없으면 과거데이터 없이 진행
+    prev_row = None
+    try:
+        c.execute("SELECT snapshot_json FROM place_rank_history WHERE keyword=? AND date<=? ORDER BY date DESC LIMIT 1", (keyword, compare_target_date))
         prev_row = c.fetchone()
-        
+        if not prev_row:
+            c.execute("SELECT snapshot_json FROM place_rank_history WHERE keyword=? ORDER BY date ASC LIMIT 1", (keyword,))
+            prev_row = c.fetchone()
+    except sqlite3.OperationalError:
+        prev_row = None
+
     prev_map = {}
     if prev_row and prev_row[0]:
         import json
@@ -319,8 +346,8 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
             pass
     conn.close()
 
-    # 3. 300개 매장에 대해 점수 계산 및 내 매장 순위 찾기
-    target_rank = 300
+    # 3. 400개 매장에 대해 점수 계산 및 내 매장 순위 찾기
+    target_rank = 400
     places_data = []
     
     # 가상의 Top 3 / Top 10 평균
@@ -398,7 +425,7 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
         })
         
     # 내 매장이 수집된 경쟁사 목록(Top N)에 없는 경우, 표 맨 아래에 표시하기 위해 강제 추가
-    if target_rank == 300:
+    if target_rank == 400:
         my_rec = target_info.get("visitor_reviews", 0)
         my_blog = target_info.get("blog_reviews", 0)
         my_save = _save_to_int(target_info.get("saves", 0))
@@ -416,7 +443,7 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
             "rev_delta": 0,
             "blog_delta": 0,
             "rank_delta": 0,
-            "rank": 300,
+            "rank": 400,
             "local_rank": c_local_rank,
             "is_target": True,
             "is_new": False,
@@ -639,10 +666,14 @@ def get_place_history(req: HistoryRequest):
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-            
-        c.execute("SELECT date, rank, saves, visitor_reviews, blog_reviews, n1, n2, n3, n4, n5, snapshot_json FROM place_rank_history WHERE mid=? AND keyword=? ORDER BY date ASC", 
-                  (req.target_mid.strip(), req.keyword.strip()))
-        rows = c.fetchall()
+
+        # 테이블이 아직 없으면(분석 이력 없음) 빈 히스토리로 응답
+        try:
+            c.execute("SELECT date, rank, saves, visitor_reviews, blog_reviews, n1, n2, n3, n4, n5, snapshot_json FROM place_rank_history WHERE mid=? AND keyword=? ORDER BY date ASC",
+                      (req.target_mid.strip(), req.keyword.strip()))
+            rows = c.fetchall()
+        except sqlite3.OperationalError:
+            rows = []
         conn.close()
         
         history_data = []
@@ -745,7 +776,7 @@ async def fetch_place_reviews_api(req: FetchReviewsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/news/generate-with-theme")
-async def generate_with_theme_api(req: GenerateWithThemeRequest):
+async def generate_with_theme_api(req: GenerateWithThemeRequest, _q: dict = Depends(consume_generation_quota)):
     """
     Step 2: 수집된 리뷰와 선택된 테마를 기반으로 AI 원고 및 영상 생성
     """
@@ -790,7 +821,7 @@ async def generate_with_theme_api(req: GenerateWithThemeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/news/generate")
-async def generate_place_news_api(req: PlaceNewsGenerateRequest):
+async def generate_place_news_api(req: PlaceNewsGenerateRequest, _q: dict = Depends(consume_generation_quota)):
     """
     1. 리뷰 크롤링
     2. AI 원고 생성

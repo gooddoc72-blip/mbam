@@ -151,6 +151,12 @@ def load_css():
 # 더욱 공격적인 셀렉터로 테두리 강제 적용
 st.markdown("""
 <style>
+    /* 한국어 줄바꿈(단어 단위 유지) 강제 적용 */
+    body, p, h1, h2, h3, h4, h5, h6, div, span {
+        word-break: keep-all !important;
+        overflow-wrap: break-word !important;
+    }
+    
     /* 모든 종류의 입력 필드 외곽선 강제 적용 */
     div[data-baseweb="input"], 
     div[data-baseweb="select"], 

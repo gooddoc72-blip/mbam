@@ -44,34 +44,52 @@ def scrape_coupang_sync(keyword: str, target_mid: str, product_name: str):
     results = []
     target_stats = None
     
+    from mbam_nextgen.infrastructure.session import get_profile_dir, clear_stale_locks
+    UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    clear_stale_locks("__coupang_bot__")
+    profile_dir = get_profile_dir("__coupang_bot__")
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--window-size=1920,1080',
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ]
+        # 쿠팡 Akamai 봇차단 회피 시도: 실제 설치 Chrome(channel) + 헤드풀 + 영구 프로필.
+        # (검증: 홈은 통과하나 검색 SRP는 차단되는 경우가 많음 → 차단 시 안내 반환)
+        launch_kwargs = dict(
+            user_data_dir=profile_dir,
+            headless=False,
+            args=['--disable-blink-features=AutomationControlled', '--disable-infobars', '--no-sandbox', '--disable-dev-shm-usage'],
+            viewport={'width': 1440, 'height': 900},
+            user_agent=UA,
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
         )
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        Stealth().apply_stealth_sync(page)
-        
+        try:
+            context = p.chromium.launch_persistent_context(channel="chrome", **launch_kwargs)
+        except Exception:
+            # 시스템 Chrome 없으면 번들 Chromium 으로 폴백
+            context = p.chromium.launch_persistent_context(**launch_kwargs)
+        page = context.pages[0] if context.pages else context.new_page()
+        try:
+            Stealth().apply_stealth_sync(page)
+        except Exception:
+            pass
+
         try:
             import urllib.parse
             url = f"https://www.coupang.com/np/search?q={urllib.parse.quote(keyword)}&channel=user&component=&eventCategory=SRP&trcid=&traid=&sId=&itemSize=36"
-            
-            # 페이지 로드 후 응답 확인
-            response = page.goto(url, wait_until="networkidle", timeout=30000)
-            
+
+            # 워밍업: 홈 먼저 방문해 쿠키/세션 확보 후 검색 진입
+            try:
+                page.goto("https://www.coupang.com/", wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2500)
+            except Exception:
+                pass
+
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2500)
+
             # 접근 차단(Access Denied) 감지
-            if "Access Denied" in page.title() or (response and response.status == 403):
-                browser.close()
-                return {"error": "쿠팡 서버가 자동화된 접근을 차단했습니다 (Access Denied). 잠시 후 다시 시도해주세요."}
+            if "Access Denied" in (page.title() or "") or (response and response.status == 403):
+                context.close()
+                return {"error": "쿠팡이 자동화 접근(검색 결과)을 차단했습니다 (Akamai Access Denied). 쿠팡은 네이버보다 봇차단이 강해 현재 방식으론 순위 수집이 불가합니다."}
             
             # 스크롤을 끝까지 내려서 모든 아이템 로딩
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -138,11 +156,13 @@ def scrape_coupang_sync(keyword: str, target_mid: str, product_name: str):
                     target_stats = parsed_item
                     
         except Exception as e:
-            browser.close()
+            try: context.close()
+            except Exception: pass
             return {"error": f"크롤링 중 에러 발생: {str(e)}"}
-            
-        browser.close()
-        
+
+        try: context.close()
+        except Exception: pass
+
     return {"places": results, "target_stats": target_stats}
 
 @router.post("/analyze")

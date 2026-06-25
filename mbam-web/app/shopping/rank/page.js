@@ -41,6 +41,13 @@ export default function ShoppingRankDashboard() {
   };
 
   const [activeRightTab, setActiveRightTab] = useState("ranking"); // "history" or "ranking"
+  // 검색→상품 클릭 유입 부스트
+  const [boostClicks, setBoostClicks] = useState(5);
+  const [boostInterval, setBoostInterval] = useState(10);
+  const [boostTethering, setBoostTethering] = useState(false);
+  const [boostTaskId, setBoostTaskId] = useState(null);
+  const [boostStatus, setBoostStatus] = useState("");
+  const [boostLogs, setBoostLogs] = useState([]);
   const abortControllerRef = useRef(null);
 
   // Fetch tracked shopping items on mount
@@ -165,6 +172,39 @@ export default function ShoppingRankDashboard() {
     }
   };
 
+  // 부스트 상태 폴링
+  useEffect(() => {
+    if (!boostTaskId || boostStatus === "completed" || boostStatus === "failed") return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetchWithAuth(`/api/shopping/boost/status/${boostTaskId}`);
+        if (res.ok) { const d = await res.json(); setBoostLogs(d.logs || []); setBoostStatus(d.status); }
+      } catch (e) {}
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [boostTaskId, boostStatus]);
+
+  const startBoost = async () => {
+    if (!keyword.trim()) return alert("검색 키워드를 입력하세요.");
+    if (!targetMid.trim() && !targetName.trim()) return alert("내 상품 식별용 스토어명 또는 MID를 입력하세요.");
+    if (!window.confirm("⚠️ 유입 보조 도구입니다. 비정상 클릭은 네이버 어뷰징 감지·페널티 위험이 있습니다.\n계속할까요?")) return;
+    setBoostLogs([]); setBoostStatus("running"); setBoostTaskId(null);
+    try {
+      const res = await fetchWithAuth("/api/shopping/boost", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword, store_name: targetName, target_mid: targetMid, clicks: Number(boostClicks), interval_min: Number(boostInterval), use_tethering: boostTethering }),
+      });
+      const d = await res.json();
+      if (d.success && d.task_id) setBoostTaskId(d.task_id);
+      else alert(d.detail || "시작 실패");
+    } catch (e) { alert("서버 오류: " + e.message); }
+  };
+
+  const cancelBoost = async () => {
+    if (!boostTaskId) return;
+    try { await fetchWithAuth(`/api/shopping/boost/cancel/${boostTaskId}`, { method: "POST" }); setBoostStatus("failed"); } catch (e) {}
+  };
+
   const handleAnalyze = async (e) => {
     e.preventDefault();
     if (!keyword.trim()) {
@@ -197,6 +237,14 @@ export default function ShoppingRankDashboard() {
         const extRes = await extPromise;
         if (!extRes || !extRes.success) throw new Error("확장 프로그램 수집 실패: " + (extRes ? extRes.error : "Unknown Error"));
         const extItems = extRes.data;
+        // 수집 진단: 0개이거나 가격/구매/리뷰/찜이 전부 0이면 실제 DOM 구조를 안내(셀렉터 보정용)
+        if (extRes.diag && (extRes.diag.count === 0 || extRes.diag.allZeroFields)) {
+          console.warn("[MBAM] 쇼핑 수집 진단:", extRes.diag);
+          alert("⚠️ 상품 데이터 수집이 비어있습니다(네이버 DOM 변경 가능).\n\n[진단]\n발견 항목 수: " + extRes.diag.count +
+                "\n첫 항목 class: " + (extRes.diag.firstClass || "(없음)") +
+                "\n첫 항목 텍스트: " + (extRes.diag.firstText || "(없음)").slice(0, 150) +
+                "\n\n이 내용을 개발자에게 전달하면 셀렉터를 정확히 맞출 수 있습니다.");
+        }
 
         const res = await fetchWithAuth("/api/shopping/analyze-keyword-ext", {
           method: "POST",
@@ -373,8 +421,30 @@ export default function ShoppingRankDashboard() {
                 </div>
               </div>
             </form>
+
+            {/* 검색→상품 클릭 유입 부스트 */}
+            <div style={{ marginTop: "1rem", padding: "1rem", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px" }}>
+              <div style={{ fontWeight: "bold", color: "#9a3412", marginBottom: "0.5rem" }}>🔎 검색 → 내 상품 클릭 유입 (부스트)</div>
+              <p style={{ margin: "0 0 0.7rem", fontSize: "0.8rem", color: "#b45309" }}>위 <b>키워드 + 스토어명/MID</b>로 검색해 내 상품을 찾아 클릭·체류합니다. ⚠️ 유입 보조용(순위 보장 X), 과도하면 어뷰징 페널티 위험. 프록시/테더링 IP로 분산하세요.</p>
+              <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: "0.85rem" }}>클릭 횟수 <input type="number" min="1" value={boostClicks} onChange={e => setBoostClicks(e.target.value)} style={{ width: "60px", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} /></label>
+                <label style={{ fontSize: "0.85rem" }}>간격 <input type="number" min="0" value={boostInterval} onChange={e => setBoostInterval(e.target.value)} style={{ width: "60px", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} /> 분</label>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.85rem", fontWeight: "bold", color: boostTethering ? "#3b82f6" : "#64748b" }}>
+                  <input type="checkbox" checked={boostTethering} onChange={e => setBoostTethering(e.target.checked)} /> 📱 USB 테더링 IP 회전
+                </label>
+                {boostStatus === "running"
+                  ? <button onClick={cancelBoost} style={{ padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>■ 중지</button>
+                  : <button onClick={startBoost} style={{ padding: "0.5rem 1rem", background: "#ea580c", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>🚀 유입 시작</button>}
+                {boostStatus && <span style={{ fontSize: "0.85rem", color: boostStatus === "running" ? "#16a34a" : boostStatus === "completed" ? "#2563eb" : "#64748b" }}>{boostStatus === "running" ? "● 진행중" : boostStatus === "completed" ? "✓ 완료" : "중지됨"}</span>}
+              </div>
+              {boostLogs.length > 0 && (
+                <div style={{ marginTop: "0.7rem", maxHeight: "160px", overflowY: "auto", background: "#1e293b", color: "#e2e8f0", padding: "0.7rem", borderRadius: "6px", fontFamily: "monospace", fontSize: "0.8rem" }}>
+                  {boostLogs.map((l, i) => <div key={i}>{l}</div>)}
+                </div>
+              )}
+            </div>
           </div>
-          
+
           {/* AI 컨설팅 리포트 */}
           {result && result.report && (
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "1.5rem", borderRadius: "8px", position: "relative" }}>
@@ -667,10 +737,18 @@ export default function ShoppingRankDashboard() {
                                   🏢 {place.storeName}
                                 </div>
                               )}
+                              {(place.is_compare || place.reg_date) && (
+                                <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "2px" }}>
+                                  {place.is_compare && <span style={{ color: "#7c3aed", fontWeight: "bold" }}>📊 가격비교</span>}
+                                  {place.is_compare && place.reg_date && " · "}
+                                  {place.reg_date && `등록일 ${place.reg_date}`}
+                                </div>
+                              )}
                             </td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{place.purchases.toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{place.reviews.toLocaleString()}</td>
-                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{place.keeps.toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#0f766e", fontWeight: "bold" }}>{place.price ? place.price.toLocaleString() + "원" + (place.is_compare ? " 최저" : "") : "-"}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#10b981", fontWeight: "bold" }}>{(place.purchases || 0).toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#f59e0b" }}>{(place.reviews || 0).toLocaleString()}</td>
+                            <td style={{ padding: "0.8rem 0.5rem", color: "#8b5cf6" }}>{(place.keeps || 0).toLocaleString()}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#3b82f6" }}>{formatN(place.n1)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#10b981" }}>{formatN(place.n2)}</td>
                             <td style={{ padding: "0.8rem 0.2rem", color: "#8b5cf6" }}>{formatN(place.n3)}</td>

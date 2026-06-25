@@ -197,7 +197,7 @@ export default function PlaceSeoDashboard() {
     <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
       <header style={{ marginBottom: "0.5rem" }}>
         <h1 style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#1e293b", margin: 0 }}>
-          플레이스 300위 순위 및 N지수 비교분석
+          플레이스 400위 순위 및 N지수 비교분석
         </h1>
       </header>
 
@@ -327,7 +327,7 @@ export default function PlaceSeoDashboard() {
                   ))}
                 </div>
 
-                {activeRightTab === "history" && <span style={{ marginLeft: "auto", paddingRight: "1.5rem", fontSize: "0.85rem", color: "#64748b" }}>실시간 300위 경쟁사 비교는 상단의 [조회]를 눌러주세요.</span>}
+                {activeRightTab === "history" && <span style={{ marginLeft: "auto", paddingRight: "1.5rem", fontSize: "0.85rem", color: "#64748b" }}>실시간 400위 경쟁사 비교는 상단의 [조회]를 눌러주세요.</span>}
                 {activeRightTab === "ranking" && result && result.places && result.places.length > 0 && <span style={{ marginLeft: "auto", paddingRight: "1.5rem", fontSize: "0.85rem", color: "#3b82f6", fontWeight: "bold" }}>Top {result.places.length} 순위</span>}
               </div>
               
@@ -426,7 +426,7 @@ export default function PlaceSeoDashboard() {
                       )}
                       {loading && (
                         <tr>
-                          <td colSpan="10" style={{ padding: "4rem", color: "#3b82f6", fontWeight: "bold" }}>네이버 플레이스 300위 듀얼 크롤링(전국/로컬)을 동시 진행하고 있습니다... (30~40초)</td>
+                          <td colSpan="10" style={{ padding: "4rem", color: "#3b82f6", fontWeight: "bold" }}>네이버 플레이스 400위 듀얼 크롤링(전국/로컬)을 동시 진행하고 있습니다... (40~60초)</td>
                         </tr>
                       )}
                       {result && result.places && result.places.length === 0 && !loading && (

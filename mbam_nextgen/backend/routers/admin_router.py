@@ -19,9 +19,19 @@ class QuotaUpdateRequest(BaseModel):
 @router.get("/users", summary="전체 사용자 목록 조회")
 async def get_all_users(db: Session = Depends(get_db), admin: dict = Depends(verify_admin)):
     from ..database import DeviceSession
+    from ..models import UserAIKey
     # 지금은 Advertiser(광고주) 테이블을 기본 사용자로 취급합니다.
     users = db.query(Advertiser).order_by(Advertiser.created_at.desc()).all()
-    
+
+    # BYOK(자기 AI키 보유) 사용자 집합 — user_id 는 로그인 sub(=email)
+    byok = set()
+    try:
+        for r in db.query(UserAIKey).all():
+            if r.claude_key or r.gemini_key or r.openai_key:
+                byok.add(r.user_id)
+    except Exception:
+        pass
+
     result = []
     for u in users:
         device_count = db.query(DeviceSession).filter(DeviceSession.user_id == u.id).count()
@@ -35,7 +45,8 @@ async def get_all_users(db: Session = Depends(get_db), admin: dict = Depends(ver
             "max_usage": u.max_usage,
             "trial_ends_at": u.trial_ends_at,
             "created_at": u.created_at,
-            "device_count": device_count
+            "device_count": device_count,
+            "has_byok": u.email in byok,  # True=설치형(본인키), False=웹(서버키+쿼터)
         })
     return result
 

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from mbam_nextgen.backend.quota import consume_generation_quota
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uuid
@@ -129,8 +130,9 @@ async def run_multi_workflow(task_id: str, req: MultiTaskRequest):
         log(f"오류 발생: {str(e)}")
         task_status_store[task_id]["status"] = "failed"
 
+@router.post("")
 @router.post("/")
-async def trigger_multi_task(req: MultiTaskRequest):
+async def trigger_multi_task(req: MultiTaskRequest, _q: dict = Depends(consume_generation_quota)):
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_multi_workflow(task_id, req))
     active_multi_tasks[task_id] = task

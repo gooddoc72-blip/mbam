@@ -47,6 +47,7 @@ class WorkflowOrchestrator:
         self,
         account_id: str,
         keyword: str,
+        account_pw: str = None,
         limit: int = 5,
         do_like: bool = True,
         do_comment: bool = True,
@@ -55,78 +56,129 @@ class WorkflowOrchestrator:
         neighbor_msg: str = "서로이웃 해요!",
         proxy: str = None,
         min_delay: int = 30,
-        max_delay: int = 120
+        max_delay: int = 120,
+        stop_event=None
     ):
         """블로그 소통(공감/댓글/이웃) 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
-        
+        # 진행 상황을 UI 모니터링 로그로 전달 (communication 라우터가 task_logger.set 으로 주입)
+        try:
+            report = task_logger.get()
+        except Exception:
+            report = print
+
         logger.info(f"🚀 [Orchestrator] 블로그 소통 워크플로우 시작: {account_id}")
-        
+
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                proxy=proxy_config
+            # 계정별 영구 프로필 → '기기 인증(1회 수동 로그인)' 세션을 재사용해 로그인 유지
+            profile_dir = self.session_manager.get_profile_dir(account_id)
+            self.session_manager.clear_stale_locks(account_id)  # 이전 비정상 종료 잠금/좀비 크롬 정리
+            persistent_opts = dict(
+                headless=False,
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                viewport={'width': 1280, 'height': 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                locale="ko-KR",
+                timezone_id="Asia/Seoul",
             )
-            
-            # 1. 세션 준비 및 로그인
-            has_session = await self.session_manager.load_session(context, account_id)
-            page = await context.new_page()
-            
-            if not has_session:
-                pw = os.getenv("NAVER_PW", "")
-                await self.authenticator.login_with_bypass(page, account_id, pw)
-                await self.session_manager.save_session(context, account_id)
-            
-            
+            if proxy_config:
+                persistent_opts["proxy"] = proxy_config
+            try:
+                context = await p.chromium.launch_persistent_context(profile_dir, **persistent_opts)
+            except Exception as e:
+                report(f"❌ 브라우저 실행 실패: {e}")
+                return {"success": False, "error": f"브라우저 실행 실패: {e}"}
+
+            page = context.pages[0] if context.pages else await context.new_page()
+            RUNNING_PAGES[account_id] = page
+            page.on("dialog", lambda d: asyncio.create_task(d.accept()))
+
+            # 1. 로그인 확인 (기기 인증된 영구 프로필은 이미 로그인 상태)
+            if not self.session_manager.is_registered(account_id):
+                report("로그인 세션이 없어 로그인을 시도합니다. (캡챠/2단계 인증은 창에서 직접 완료해 주세요)")
+                pw = account_pw or os.getenv("NAVER_PW", "")
+                ok = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=180)
+                if ok:
+                    self.session_manager.mark_registered(account_id)
+                    report("✅ 로그인 완료")
+                else:
+                    report("⚠️ 로그인이 확인되지 않았습니다. [계정 관리 > 기기인증]을 먼저 1회 진행하면 이후 자동 로그인됩니다. (공감/댓글/이웃추가는 로그인 상태라야 동작)")
+
             # 2. 타겟 수집
+            report(f"'{keyword}' 검색에서 대상 블로그 수집 중...")
             targets = await self.neighbor.find_targets_from_search(page, keyword, limit=limit)
-            
+            report(f"대상 블로그 {len(targets)}곳을 찾았습니다.")
+
             results = []
-            for target in targets:
+            for idx, target in enumerate(targets):
+                if stop_event is not None and stop_event.is_set():
+                    report("⏹ 사용자 요청으로 중지되었습니다.")
+                    break
                 target_id = target["id"]
                 post_url = target["post_url"]
-                logger.info(f"👉 대상 블로그 진입: {target_id}")
-                
+                report(f"[{idx+1}/{len(targets)}] {target_id} 방문 중...")
+
                 try:
-                    # 포스팅 페이지 이동
-                    await page.goto(post_url)
-                    await asyncio.sleep(random.randint(3, 7)) # 체류 시간 흉내
-                    
+                    await page.goto(post_url, wait_until="domcontentloaded", timeout=20000)
+                    await asyncio.sleep(random.randint(3, 7))  # 체류 시간 흉내
+
+                    # 블로그 본문·공감·댓글은 mainFrame iframe 내부에 있음
+                    frame = page.frame(name="mainFrame")
+                    content_target = frame if frame else page
+
+                    actions = []
                     # 공감
                     if do_like:
-                        await self.neighbor.click_like(page)
-                    
+                        liked = await self.neighbor.click_like(content_target)
+                        actions.append("공감✓" if liked else "공감✗")
+
                     # 댓글
+                    comment_text = ""
                     if do_comment:
                         if comment_msg and comment_msg.strip():
                             comment_text = comment_msg
                         else:
-                            # 포스트 내용을 읽어서 AI 댓글 생성 (선택 사항, 여기선 기본 구현)
                             comment_text = await self._generate_content_with_retry(f"{keyword} 관련해서 잘 읽었습니다!")
-                        await self.neighbor.leave_comment(page, comment_text)
-                    
-                    # 이웃 추가
+                        commented = await self.neighbor.leave_comment(content_target, comment_text)
+                        actions.append("댓글✓" if commented else "댓글✗")
+
+                    # 이웃 추가 (모바일 폼 사용 — 별도 페이지 이동)
                     if do_neighbor:
-                        await self.neighbor.add_neighbor(page, target_id, message=neighbor_msg)
-                    
+                        added = await self.neighbor.add_neighbor(page, target_id, message=neighbor_msg)
+                        actions.append("이웃✓" if added else "이웃✗")
+
+                    report(f"   → {target_id}: {', '.join(actions) if actions else '액션 없음'}")
                     self.db.log_engagement(target_url=post_url, action_type="소통", comment_text=comment_text if do_comment else "공감/이웃", status="성공")
-                    results.append({"id": target_id, "success": True})
-                    
-                    # 다음 작업 전 대기 (마지막 타겟이 아닐 경우만)
-                    if target_id != targets[-1]["id"]:
+                    results.append({"id": target_id, "success": True, "actions": actions})
+
+                    # 다음 작업 전 대기 (마지막 타겟 제외) — 대기 중에도 중지 요청에 즉시 반응
+                    if idx < len(targets) - 1:
                         delay = random.randint(min_delay, max_delay)
-                        logger.info(f"⏳ 다음 블로그 방문 전 {delay}초 대기 중...")
-                        await asyncio.sleep(delay)
-                    
+                        report(f"   ⏳ 다음 방문까지 {delay}초 대기...")
+                        if stop_event is not None:
+                            try:
+                                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                                report("⏹ 사용자 요청으로 중지되었습니다.")
+                                break
+                            except asyncio.TimeoutError:
+                                pass
+                        else:
+                            await asyncio.sleep(delay)
+
                 except PlaywrightTimeoutError as e:
-                    logger.warning(f"⚠️ {target_id} 타임아웃 오류 (로딩 실패): {e}")
-                    self.db.log_engagement(target_url=post_url, action_type="소통", comment_text="", status=f"실패: 타임아웃")
+                    report(f"   ⚠️ {target_id} 타임아웃")
+                    self.db.log_engagement(target_url=post_url, action_type="소통", comment_text="", status="실패: 타임아웃")
                     results.append({"id": target_id, "success": False, "error": "Timeout"})
                 except Exception as e:
-                    logger.error(f"⚠️ {target_id} 작업 중 알 수 없는 오류: {e}")
+                    report(f"   ⚠️ {target_id} 오류: {e}")
                     self.db.log_engagement(target_url=post_url, action_type="소통", comment_text="", status=f"실패: {e}")
                     results.append({"id": target_id, "success": False, "error": str(e)})
+
+            try:
+                await context.close()
+            except Exception:
+                pass
+            return results
 
 
     # ═══════════════════════════════════════════════
@@ -144,6 +196,44 @@ class WorkflowOrchestrator:
         text = re.sub(r'^\s{0,3}\d+[.)]\s+', '', text, flags=re.MULTILINE)  # 1. 2. 번호 (네이버 자동 번호목록 방지)
         text = re.sub(r'^\s*[-–—=]{2,}\s*$', '', text, flags=re.MULTILINE)  # --- === 구분선 줄
         return text
+
+    @staticmethod
+    def _align_card_markers(content: str, n_images: int) -> str:
+        """카드 이미지를 [표지=맨 위] + 본문 곳곳에 '분산' 배치하도록 [이미지] 마커를 재정렬.
+        우선순위: 소제목(■/[소제목]) 앞 → 부족하면 단락 경계(빈 줄)에 균등 분산.
+        (소제목이 적은 카페 글에서 이미지가 맨 끝에 몰리는 문제 방지)"""
+        if not content or n_images <= 0:
+            return content
+        content = re.sub(r'\s*\[이미지\]\s*', '\n', content)  # 기존 마커 제거
+        BULLETS = "■▶◆●▣◼▪□▷"
+        lines = content.split('\n')
+
+        head_pos, para_pos = [], []
+        for idx, line in enumerate(lines):
+            s = line.strip()
+            if s.startswith("[소제목]") or (len(s) > 0 and s[0] in BULLETS and len(s) <= 50):
+                head_pos.append(idx)
+            elif s == "":
+                para_pos.append(idx)
+
+        rest = max(0, n_images - 1)              # 표지 1장 제외
+        positions = list(head_pos[:rest])        # 1순위: 소제목 앞
+        if len(positions) < rest and para_pos:   # 부족분: 단락 경계에 균등 분산
+            need = rest - len(positions)
+            step = max(1, len(para_pos) // need)
+            for p in para_pos[::step]:
+                if p not in positions:
+                    positions.append(p)
+                if len(positions) >= rest:
+                    break
+        pos_set = set(positions)
+
+        out = ["[이미지]"]   # 표지(첫 카드)는 본문 맨 위
+        for idx, line in enumerate(lines):
+            if idx in pos_set:
+                out.append("[이미지]")
+            out.append(line)
+        return "\n".join(out)
 
     @staticmethod
     def _append_source_link(content: str, source_data: str) -> str:
@@ -463,8 +553,28 @@ class WorkflowOrchestrator:
                     washed_img = self.armor.wash_image(gp, f"washed_gen_{account_id}_{idx_c}.jpg")
                     if washed_img:
                         washed_images.append(washed_img)
+                # 카드(표지 + 소제목별)를 소제목 위치에 맞춰 배치: 본문 [이미지] 마커 재정렬
+                blog_content = self._align_card_markers(blog_content, len(washed_images))
 
             # 4. 글쓰기 자동 진입 및 에디터 감지
+            # blog_id(블로그 주소)가 화면에서 안 넘어왔으면 계정관리(DB)에 저장된 값을 자동 조회.
+            # → 로그인ID≠블로그주소 계정(ch_2101/bonetacasa)이 어느 경로로 발행하든 적용됨.
+            if not blog_id:
+                try:
+                    from mbam_nextgen.backend.database import SessionLocal, NaverAccount
+                    _db = SessionLocal()
+                    try:
+                        acc = (_db.query(NaverAccount)
+                               .filter(NaverAccount.naver_id == account_id, NaverAccount.blog_addr.isnot(None))
+                               .order_by(NaverAccount.created_at.desc()).first())
+                        if acc and (acc.blog_addr or "").strip():
+                            blog_id = acc.blog_addr.strip()
+                            logger.info(f"[Orchestrator] ({account_id}) 계정관리 저장값에서 블로그 주소 사용: {blog_id}")
+                    finally:
+                        _db.close()
+                except Exception as e:
+                    logger.info(f"[Orchestrator] 블로그 주소 조회 실패: {e}")
+
             logger.info(f"🖼️ [Orchestrator] ({account_id}) 이미지 준비 완료: {len(washed_images)}장")
             logger.info("📝 [Orchestrator] 네이버 에디터 진입 시도...")
             await self.blog.auto_enter_editor(page, account_id, blog_id=blog_id)
@@ -677,6 +787,80 @@ class WorkflowOrchestrator:
     # 카페 워크플로우
     # ═══════════════════════════════════════════════
     
+    async def execute_cafe_boost(self, account_id: str, post_url: str, do_view: bool = True,
+                                 do_like: bool = False, visits: int = 1, naver_pw: str = None,
+                                 use_tethering: bool = False, visit_interval_min: int = 30):
+        """게시글 부스트: 대상 카페 글을 방문해 조회수를 올리고(반복 방문) 좋아요를 누른다.
+        방문은 visit_interval_min(분) 간격으로 분산 수행하며, 대기 중에는 브라우저를 닫아 리소스를 점유하지 않는다.
+        좋아요는 첫 방문에서 1회만 누른다. post_url이 카페 메인 주소면 방문(육성)만 수행."""
+        import asyncio as _aio, random as _rnd
+        n = max(1, int(visits or 1))
+        interval = max(0, int(visit_interval_min or 0)) * 60
+        logger.info(f"\n👍 [Orchestrator] 카페 부스트 | 계정:{account_id} | 방문:{n}회 | 간격:{visit_interval_min}분 | 좋아요:{do_like}")
+        logger.info(f"   대상: {post_url}")
+
+        liked = False
+        ok_visits = 0
+        for v in range(n):
+            # 방문마다 IP 회전(테더링) → 조회가 서로 다른 IP로 인정되도록
+            if use_tethering:
+                try:
+                    new_ip = await self.proxy_manager.rotate_tethering_ip()
+                    logger.info(f"✨ [Orchestrator] 방문 {v+1} IP: {new_ip}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 테더링 실패(계속): {e}")
+            # 방문마다 브라우저 열고 → 방문/좋아요 → 닫기 (대기 시간엔 미점유)
+            async with async_playwright() as p:
+                context = None
+                try:
+                    profile_dir = self.session_manager.get_profile_dir(account_id)
+                    self.session_manager.clear_stale_locks(account_id)
+                    context = await p.chromium.launch_persistent_context(
+                        profile_dir, headless=False,
+                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                        viewport={'width': 1920, 'height': 1080},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        locale="ko-KR", timezone_id="Asia/Seoul",
+                    )
+                    has_session = self.session_manager.is_registered(account_id)
+                    await self.session_manager.load_session(context, account_id)
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    if not has_session:
+                        pw = naver_pw or os.getenv("NAVER_PW", "")
+                        if await self.authenticator.login_with_bypass(page, account_id, pw):
+                            self.session_manager.mark_registered(account_id)
+                        await self.session_manager.save_session(context, account_id)
+
+                    await page.goto(post_url, wait_until="domcontentloaded", timeout=30000)
+                    await _aio.sleep(_rnd.uniform(2.5, 5.0))  # 체류(조회수 인정)
+                    try:
+                        await page.evaluate("window.scrollBy(0, 600)")
+                    except Exception:
+                        pass
+                    await _aio.sleep(_rnd.uniform(1.0, 2.5))
+                    if do_like and not liked:
+                        try:
+                            liked = await self.cafe.click_like(page)
+                        except Exception as e:
+                            logger.warning(f"좋아요 클릭 실패: {e}")
+                    ok_visits += 1
+                    logger.info(f"   - 방문 {v+1}/{n} 완료" + (" (좋아요)" if (do_like and liked) else ""))
+                except Exception as e:
+                    logger.error(f"방문 {v+1}/{n} 실패: {e}")
+                finally:
+                    if context:
+                        try:
+                            await context.close()
+                        except Exception:
+                            pass
+            # 다음 방문 전 텀 대기(브라우저 닫힌 상태)
+            if v < n - 1 and interval > 0:
+                logger.info(f"⏳ [Orchestrator] 다음 방문까지 {interval // 60}분 대기...")
+                await _aio.sleep(interval)
+
+        self.db.log_cafe(account_id=account_id, cafe_id=post_url, keyword="부스트", status="성공" if ok_visits else "실패")
+        return {"success": ok_visits > 0, "visits": ok_visits, "liked": liked}
+
     async def execute_cafe_workflow(
         self,
         account_id: str,
@@ -696,14 +880,25 @@ class WorkflowOrchestrator:
         naver_pw: str = None,
         source_data: str = None,
         prompt_category: str = None,
-        include_source_link: bool = False
+        include_source_link: bool = False,
+        image_folder_path: str = None,
+        use_tethering: bool = False
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
-        
+
         logger.info(f"\n☕ [Orchestrator] 카페 워크플로우 시작")
         logger.info(f"   계정: {account_id} | 카페: {cafe_id} | 게시판: {board_name}")
         logger.info(f"   키워드: {keyword} | 자동등록: {'ON' if auto_submit else 'OFF'}")
+
+        # USB 테더링 IP 변경 처리 (계정 발행 전 IP 회전)
+        if use_tethering:
+            try:
+                logger.info("📱 [Orchestrator] USB 테더링 IP 전환 중...")
+                new_ip = await self.proxy_manager.rotate_tethering_ip()
+                logger.info(f"✨ [Orchestrator] 할당된 IP: {new_ip}")
+            except Exception as e:
+                logger.warning(f"⚠️ [Orchestrator] 테더링 IP 전환 실패(계속 진행): {e}")
         
         async with async_playwright() as p:
             context = None
@@ -793,13 +988,26 @@ class WorkflowOrchestrator:
 
                     # 4. 이미지 세척 / 대체
                     washed_images = []
-                    if test_image:
+                    _img_folder = image_folder_path
+                    if _img_folder and os.path.isdir(_img_folder):
+                        # 사용자가 첨부한 이미지(글감 생성용 업로드 등)를 글에 첨부
+                        import glob as _glob
+                        files = sorted(_glob.glob(os.path.join(_img_folder, "*")))
+                        for idx_f, fp in enumerate(files):
+                            if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+                                wimg = self.armor.wash_image(fp, f"washed_cafe_up_{account_id}_{idx_f}.jpg")
+                                if wimg:
+                                    washed_images.append(wimg)
+                        logger.info(f"[Orchestrator] 첨부 이미지 폴더에서 {len(washed_images)}장 사용")
+                    if washed_images:
+                        pass
+                    elif test_image:
                         washed_images.append(self.armor.wash_image(test_image, f"washed_cafe_{account_id}.jpg"))
                     else:
                         logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
                         card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (title or "정보")
                         card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
-                        for idx_c, gp in enumerate(self.card_news.generate_card_set(card_title, content=cafe_content, count=5)):
+                        for idx_c, gp in enumerate(self.card_news.generate_card_set(card_title, content=cafe_content, count=3)):
                             if not gp:
                                 continue
                             wimg = self.armor.wash_image(gp, f"washed_gen_cafe_{account_id}_{idx_c}.jpg")
@@ -826,17 +1034,17 @@ class WorkflowOrchestrator:
                             if not title:
                                 title = extracted_title
                             cafe_content = re.sub(r'^\s*\[제목\].*?\n+', '', cafe_content, count=1).strip()
-                            
-                    # 8. 원고 타이핑
+
+                    # 카드(표지+소제목별)를 소제목 위치에 맞춰 배치 (블로그와 동일)
+                    cafe_content = self._align_card_markers(cafe_content, len(washed_images))
+
+                    # 8. 원고 타이핑 (이미지를 [이미지] 마커 위치에 인라인 삽입)
                     post_title = title if title else f"{keyword} 관련 테스트"
                     await self.cafe.write_post(
                         editor_frame, post_title, cafe_content,
+                        images=washed_images,
                         speed_mode=speed_mode, speed_multiplier=speed_multiplier
                     )
-                    
-                    # 9. 이미지 업로드
-                    if washed_images:
-                        await self.cafe.upload_images(editor_frame, washed_images)
                     
                     # 10. 등록
                     if auto_submit:
@@ -879,111 +1087,284 @@ class WorkflowOrchestrator:
         ai_provider: str = "claude",
         delay_min: int = 30,
         delay_max: int = 60,
-        logger_func=None
+        use_tethering: bool = False,
+        comment_content: str = "",
+        do_like: bool = True,
+        logger_func=None,
+        stop_event=None,
     ):
-        """다중 계정으로 특정 게시글 URL들을 순회하며 댓글 작업 (여론 형성 모드)"""
+        """다중 계정으로 특정 카페 게시글 URL들을 순회하며 댓글 작업 (여론 형성 모드).
+
+        do_like: True면 댓글 작성과 함께 게시글 좋아요(공감)도 누름.
+
+        comment_content: 직접 입력한 댓글 내용. 여러 줄이면 게시글/계정마다 무작위로 하나 선택.
+                         비어 있으면 keyword 뉘앙스로 AI 자동 생성(폴백).
+
+        재작성 포인트:
+        - 계정별 영구 프로필(기기인증) 로그인 재사용 (블로그 소통과 동일 방식)
+        - (옵션) USB 테더링으로 계정마다 IP 로테이션 + 현재 IP 로그
+        - 신형 카페(ca-fe SPA) 대응: cafe_main iframe 내부 .se-main-container 본문 읽기,
+          댓글창은 다중 폴백 셀렉터로 탐색 + 실패 시 DOM 덤프(로그인 상태 셀렉터 확정용)
+        - 인코딩 안전 로깅 + 취소(CancelledError) 즉시 반응
+        """
+        import os
+        import time as _time
         if not logger_func:
             logger_func = logger.info
-            
-        logger_func("\n" + "═" * 50)
-        logger_func(f"🚀 [다중 타겟 모드] 계정 {len(accounts_data)}개로 {len(target_urls)}개 타겟 작업 시작")
-        logger_func("═" * 50)
-        
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            
+
+        def _safe(msg):
             try:
-                for acc_idx, acc in enumerate(accounts_data):
-                    account_id = acc["id"]
-                    pw = acc.get("pw", "")
-                    
-                    logger_func(f"\n👉 [{acc_idx+1}/{len(accounts_data)}] 계정 로그인: {account_id}")
-                    
-                    context = await browser.new_context(
-                        viewport={'width': 1920, 'height': 1080},
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                logger_func(msg)
+            except Exception:
+                try:
+                    logger_func(str(msg).encode("ascii", "replace").decode("ascii"))
+                except Exception:
+                    pass
+
+        # 직접 입력 댓글(여러 줄 = 여러 후보). 있으면 AI 대신 이 중에서 무작위 선택.
+        manual_comments = [l.strip() for l in (comment_content or "").splitlines() if l.strip()]
+
+        _safe("═" * 40)
+        _safe(f"🚀 [다중 타겟 댓글] 계정 {len(accounts_data)}개 × 타겟 {len(target_urls)}개 시작 "
+              f"(댓글={'직접입력 ' + str(len(manual_comments)) + '개' if manual_comments else 'AI 자동'}, "
+              f"테더링={'ON' if use_tethering else 'OFF'})")
+
+        async def _write_comment(cafe_frame, text):
+            """신형 ca-fe 댓글창에 댓글 작성. 성공 True. 댓글창 못 찾으면 DOM 덤프."""
+            try:
+                await cafe_frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(1.2)
+            except Exception:
+                pass
+            input_sels = [
+                "textarea.comment_inbox_text", ".comment_inbox_text",
+                ".CommentWriter textarea", ".comment_inbox textarea",
+                "textarea[placeholder*='댓글']", "[class*=comment] textarea",
+                "div.comment_inbox_text[contenteditable=true]",
+                ".CommentWriter [contenteditable=true]",
+            ]
+            chosen = None
+            for s in input_sels:
+                try:
+                    loc = cafe_frame.locator(s).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        chosen = (s, loc)
+                        break
+                except Exception:
+                    continue
+            if not chosen:
+                try:
+                    html = await cafe_frame.evaluate(
+                        "() => { const a = document.querySelector('[class*=Comment], [class*=comment], #cmt, .comment_area');"
+                        " return a ? a.outerHTML.slice(0,5000) : document.body.innerHTML.slice(0,5000); }"
                     )
-                    page = await context.new_page()
-                    
-                    # 로그인
-                    await self.authenticator.login_with_bypass(page, account_id, pw)
-                    await asyncio.sleep(2)
-                    
-                    # 타겟 URL 순회
+                    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+                    os.makedirs(log_dir, exist_ok=True)
+                    path = os.path.join(log_dir, f"cafe_comment_dom_{int(_time.time())}.html")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(html or "")
+                    _safe(f"  ⚠️ 댓글창 못 찾음 — 로그인 상태 DOM 덤프 저장: {path} (이 파일 주시면 셀렉터 확정)")
+                except Exception as e:
+                    _safe(f"  ⚠️ 댓글창 못 찾음 (덤프 실패: {e})")
+                return False
+            sel, loc = chosen
+            try:
+                await loc.click()
+                await asyncio.sleep(0.4)
+                if "textarea" in sel:
+                    await loc.fill(text)
+                else:
+                    await loc.type(text, delay=30)
+            except Exception:
+                try:
+                    await self.stealth_engine.human_type(cafe_frame, sel, text)
+                except Exception as e:
+                    _safe(f"  ⚠️ 댓글 입력 실패: {e}")
+                    return False
+            await asyncio.sleep(0.8)
+            submit_sels = [
+                ".btn_register", "a.btn_register", "button.btn_register",
+                "button:has-text('등록')", "a:has-text('등록')",
+                ".CommentWriter button[type=submit]",
+            ]
+            for s in submit_sels:
+                try:
+                    btn = cafe_frame.locator(s).first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        await btn.click()
+                        await asyncio.sleep(1.5)
+                        return True
+                except Exception:
+                    continue
+            _safe("  ⚠️ 등록 버튼 못 찾음")
+            return False
+
+        async def _click_like(cafe_frame):
+            """게시글 좋아요(공감) 버튼 클릭. 신형 카페 LikeIt 위젯(.ReactionLikeIt). 이미 눌렀으면 건너뜀."""
+            like_sels = [
+                ".ReactionLikeIt", "a.ReactionLikeIt", "button.ReactionLikeIt",
+                ".u_likeit_list_btn", "a.u_likeit_list_btn",
+                ".like_article .u_likeit_list_btn", "[class*=LikeIt]:not([class*=count])",
+                "a:has-text('좋아요')",
+            ]
+            for s in like_sels:
+                try:
+                    btn = cafe_frame.locator(s).first
+                    if await btn.count() == 0 or not await btn.is_visible():
+                        continue
+                    # 이미 눌린 상태면(on/selected) 건너뜀
+                    cls = (await btn.get_attribute("class")) or ""
+                    pressed = (await btn.get_attribute("aria-pressed")) or ""
+                    if "on" in cls.split() or "is-selected" in cls or pressed == "true":
+                        _safe("  ❤️ 이미 좋아요 상태 — 건너뜀")
+                        return True
+                    await btn.click()
+                    await asyncio.sleep(1.0)
+                    _safe("  ❤️ 좋아요 완료")
+                    return True
+                except Exception:
+                    continue
+            _safe("  ⚠️ 좋아요 버튼 못 찾음")
+            return False
+
+        async def _interruptible_sleep(seconds):
+            for _ in range(int(seconds)):
+                if stop_event is not None and stop_event.is_set():
+                    return
+                await asyncio.sleep(1)
+
+        async with async_playwright() as p:
+            for acc_idx, acc in enumerate(accounts_data):
+                if stop_event is not None and stop_event.is_set():
+                    _safe("⏹ 중지 요청으로 종료합니다.")
+                    break
+                account_id = acc["id"]
+                pw = acc.get("pw", "")
+                _safe(f"👉 [{acc_idx+1}/{len(accounts_data)}] 계정: {account_id}")
+
+                # (옵션) USB 테더링 IP 로테이션 — 계정마다 새 IP
+                if use_tethering:
+                    _safe("📶 USB 테더링 IP 변경 중...")
+                    try:
+                        new_ip = await self.proxy_manager.rotate_tethering_ip()
+                        _safe(f"  ✨ 새 IP: {new_ip}")
+                    except Exception as e:
+                        _safe(f"  ⚠️ 테더링 IP 변경 실패(계속 진행): {e}")
+
+                profile_dir = self.session_manager.get_profile_dir(account_id)
+                self.session_manager.clear_stale_locks(account_id)
+                try:
+                    context = await p.chromium.launch_persistent_context(
+                        profile_dir,
+                        headless=False,
+                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                        viewport={'width': 1280, 'height': 900},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        locale="ko-KR",
+                        timezone_id="Asia/Seoul",
+                    )
+                except Exception as e:
+                    _safe(f"  ❌ 브라우저 실행 실패: {e}")
+                    continue
+
+                page = context.pages[0] if context.pages else await context.new_page()
+                page.on("dialog", lambda d: asyncio.create_task(d.accept()))
+
+                try:
+                    # 로그인 확인 (기기인증된 영구 프로필은 이미 로그인 상태)
+                    if not self.session_manager.is_registered(account_id):
+                        _safe("  🔑 로그인 세션 없음 → 로그인 시도 (캡챠/2단계는 창에서 직접 완료)")
+                        ok = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=180)
+                        if ok:
+                            self.session_manager.mark_registered(account_id)
+                            _safe("  ✅ 로그인 완료")
+                        else:
+                            _safe("  ⚠️ 로그인 미확인 — [계정관리 > 기기인증] 1회 진행 필요 (댓글은 로그인 상태라야 동작)")
+
+                    try:
+                        cur_ip = await self.proxy_manager.verify_ip(page)
+                        _safe(f"  🌐 현재 IP: {cur_ip}")
+                    except Exception:
+                        pass
+
                     for url_idx, target_url in enumerate(target_urls):
-                        logger_func(f"  🔗 타겟 접속 ({url_idx+1}/{len(target_urls)}): {target_url}")
-                        
+                        if stop_event is not None and stop_event.is_set():
+                            _safe("⏹ 중지 요청"); break
+                        _safe(f"  🔗 ({url_idx+1}/{len(target_urls)}) {target_url}")
                         try:
-                            await page.goto(target_url)
+                            await page.goto(target_url, timeout=20000)
                             await asyncio.sleep(random.randint(3, 5))
-                            
-                            # 1. 카페 본문 읽기
+
                             cafe_frame = page.frame(name="cafe_main")
                             if not cafe_frame:
-                                logger_func("  ⚠️ cafe_main 프레임을 찾을 수 없습니다.")
+                                _safe("  ⚠️ cafe_main 프레임 없음 — 스킵")
                                 continue
-                                
-                            content_loc = cafe_frame.locator(".se-main-container, .se-content, .ContentRenderer")
-                            post_content_text = ""
-                            if await content_loc.count() > 0:
-                                post_content_text = await content_loc.first.inner_text()
-                                
-                            # 2. AI 댓글 생성
-                            prompt = f"다음 카페글 본문에 대해 '{keyword}'의 뉘앙스로 자연스럽게 동조/호응하는 짧은 1문장 댓글을 달아줘. 본문: {post_content_text[:300]}"
+
+                            # 본문 읽기 (신형 ca-fe: .se-main-container 확인됨)
+                            content_text = ""
                             try:
-                                comment_text = await self.soul.rewrite_for_blog("", prompt, provider=ai_provider)
-                            except Exception as e:
-                                logger_func(f"  ⚠️ AI 생성 오류: {e}")
-                                comment_text = f"잘 읽었습니다! ({keyword})"
-                                
-                            logger_func(f"  💬 작성 댓글: {comment_text}")
-                            
-                            # 3. 댓글 달기
-                            comment_input = cafe_frame.locator(".comment_inbox_text")
-                            if await comment_input.count() > 0:
-                                await comment_input.first.click()
-                                await asyncio.sleep(0.5)
-                                await self.stealth_engine.human_type(cafe_frame, ".comment_inbox_text", comment_text)
-                                await asyncio.sleep(1)
-                                
-                                submit_btn = cafe_frame.locator(".btn_register")
-                                if await submit_btn.count() > 0:
-                                    await submit_btn.first.click()
-                                    logger_func("  ✅ 등록 완료")
-                                    self.db.log_cafe(account_id=account_id, cafe_id=target_url, keyword=keyword, status="타겟 댓글 성공")
-                                else:
-                                    logger_func("  ⚠️ 등록 버튼 찾기 실패")
+                                cl = cafe_frame.locator(".se-main-container, .ArticleContentBox, .article_viewer").first
+                                if await cl.count() > 0:
+                                    content_text = (await cl.inner_text())[:400]
+                            except Exception:
+                                pass
+
+                            # 댓글 결정 — ① 직접 입력(있으면 무작위 선택) ② 없으면 AI 자동 생성
+                            if manual_comments:
+                                comment_text = random.choice(manual_comments)
                             else:
-                                logger_func("  ⚠️ 댓글 입력창을 찾을 수 없습니다. (막힘 또는 에러)")
-                                
+                                prompt = (f"다음 카페글에 '{keyword}' 뉘앙스로 자연스럽게 호응하는 짧은 1문장 댓글을 작성해줘. "
+                                          f"광고/홍보 느낌 없이 진심 어린 톤. 댓글 문장만 출력. 본문: {content_text[:300]}")
+                                try:
+                                    comment_text = await self.soul.rewrite_for_blog("", prompt, provider=ai_provider)
+                                    comment_text = (comment_text or "").strip().split("\n")[0][:80]
+                                    # AI 메타/거절성 응답이면 버리고 안전 기본값 사용 (예: "요청하신 내용을 살펴보니...")
+                                    _bad = ("요청하신", "살펴보니", "두 가지", "작업이 섞", "죄송", "도와드릴",
+                                            "무엇을", "어떤 도움", "assistant", "AI", "말씀")
+                                    if not comment_text or any(b in comment_text for b in _bad):
+                                        comment_text = f"잘 봤습니다! ({keyword})"
+                                except Exception as e:
+                                    _safe(f"  ⚠️ AI 생성 실패 — 기본 댓글 사용: {e}")
+                                    comment_text = f"잘 봤습니다! ({keyword})"
+                            _safe(f"  💬 {comment_text}")
+
+                            ok = await _write_comment(cafe_frame, comment_text)
+                            if ok:
+                                _safe("  ✅ 댓글 등록 완료")
+                                try:
+                                    self.db.log_cafe(account_id=account_id, cafe_id=target_url, keyword=keyword, status="타겟 댓글 성공")
+                                except Exception:
+                                    pass
+                            else:
+                                _safe("  ❌ 댓글 등록 실패")
+
+                            # 좋아요(공감) — 댓글과 함께
+                            if do_like:
+                                try:
+                                    await _click_like(cafe_frame)
+                                except Exception as e:
+                                    _safe(f"  ⚠️ 좋아요 처리 예외: {e}")
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
-                            logger_func(f"  ⚠️ 작업 중 예외 발생: {e}")
-                            
-                        # 마지막 타겟이 아니면 딜레이
+                            _safe(f"  ⚠️ 처리 중 예외: {e}")
+
                         if url_idx < len(target_urls) - 1:
-                            delay = random.randint(delay_min, delay_max)
-                            logger_func(f"  ⏳ {delay}초 대기...")
-                            await asyncio.sleep(delay)
-                    
-                    # 컨텍스트(세션) 종료 후 다음 계정으로
-                    await context.close()
-                    
-                    if acc_idx < len(accounts_data) - 1:
-                        logger_func(f"⏳ 계정 전환을 위해 10초 대기...")
-                        await asyncio.sleep(10)
-                        
-                logger_func("🎉 다중 타겟 댓글 작업 종료")
-                return True
-            except asyncio.CancelledError:
-                logger_func("🛑 다중 타겟 댓글 작업이 강제 취소되었습니다.")
-                raise
-            finally:
-                if browser:
+                            d = random.randint(delay_min, delay_max)
+                            _safe(f"  ⏳ {d}초 대기...")
+                            await _interruptible_sleep(d)
+                finally:
                     try:
-                        await browser.close()
-                    except: pass
+                        await context.close()
+                    except Exception:
+                        pass
+
+                if acc_idx < len(accounts_data) - 1 and not (stop_event is not None and stop_event.is_set()):
+                    _safe("⏳ 계정 전환 10초 대기...")
+                    await _interruptible_sleep(10)
+
+            _safe("🎉 다중 타겟 댓글 작업 종료")
+            return True
 
 from contextvars import ContextVar
 task_logger = ContextVar("task_logger", default=print)

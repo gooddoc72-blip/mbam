@@ -23,8 +23,74 @@ router = APIRouter(prefix="/api/shopping", tags=["shopping"])
 
 SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송'}
 
+# 상품명에 부적합한 '정보/질문형' 연관어(검색 의도가 구매가 아닌 '정보탐색') → 상품명 토큰 풀에서 제외.
+# 예: 그릭요거트 가격/성분/유통기한/효능/먹는법 … 은 정보성이라 상품명에 넣으면 어색.
+INFO_STOPWORDS = {
+    '가격', '최저가', '가격비교', '성분', '원재료', '재료', '유통기한', '기한', '보관', '보관법', '보관방법',
+    '위치', '파는곳', '판매처', '매장', '어디', '냄새', '유당', '함량', '칼로리', '효능', '효과', '부작용',
+    '후기', '리뷰', '디시', '정보', '방법', '만들기', '만드는법', '먹는법', '먹는방법', '레시피', '요리',
+    '차이', '비교', '사용법', '뜻', '직구', '냉동', '해동', '추천', '순위', '내돈내산', '협찬',
+    '유통', '요즘', '영어', '일본어', '중국어', '한글', '발음', '실비', '정가', '가품', '가짜', '진품', '종류',
+}
+
+# 태그 풀에서 추가로 거르는 단위·조각성·판매채널 단어(상품명/태그에 부적합).
+TAG_STOPWORDS = {
+    # 단위(숫자 떨어진 조각)
+    'kg', 'g', 'ml', 'l', 'cc', 'mg', '리터', '그램', '키로', '킬로',
+    # 판매/배송 채널성
+    '정기', '정기배송', '배달', '납품', '판매', '구매', '주문', '도매', '소매', '직배',
+    '당일', '새벽', '새벽배송', '당일배송', '택배', '무배',
+    # 조각/오타성
+    '무당', '대용', '시설', '밀폐', '용기', '해썹', '인증', '국내', '국산지',
+}
+
+_UNIT_RE = re.compile(r'^\d*(kg|g|ml|l|cc|mg|t|매|개|입|팩)$', re.IGNORECASE)
+
 # Utility functions imported from keyword_seo
-from mbam_nextgen.services.keyword_seo import analyze_seo_keyword
+from mbam_nextgen.services.keyword_seo import analyze_seo_keyword, clean_and_tokenize, fetch_autocomplete_related, fetch_search_ad_keywords, fetch_top_10_shopping
+
+# 상품 '형태/타입' 속성어(상품명에 적합) — 분류용
+ATTR_TYPE_WORDS = {
+    '무가당', '가당', '플레인', '냉장', '상온', '분말', '파우더', '액상', '스틱', '오리지널',
+    '저지방', '무지방', '수제', '국산', '유기농', '프리미엄', '휴대용', '충전식', '무선', '유선',
+    '미니', '초소형', '소형', '대형', '접이식', '대용량', '소용량', '저당', '제로', '고단백', '단백질',
+}
+
+
+def classify_tokens(tokens):
+    """수집 토큰을 상품명 관점으로 분류: 용량/중량·수량/세트·형태/타입·핵심."""
+    groups = {"용량중량": [], "수량세트": [], "형태타입": [], "핵심키워드": []}
+    for t in tokens:
+        if re.search(r"\d", t) and re.search(r"(kg|g|ml|l|리터|리뷰)$", t.lower()):
+            groups["용량중량"].append(t)
+        elif t in {"대용량", "소용량", "중량"}:
+            groups["용량중량"].append(t)
+        elif re.search(r"\d+(개|입|팩|박스|세트|구|매)$", t) or t in {"세트", "묶음", "대량", "벌크"}:
+            groups["수량세트"].append(t)
+        elif t in ATTR_TYPE_WORDS:
+            groups["형태타입"].append(t)
+        else:
+            groups["핵심키워드"].append(t)
+    return groups
+
+
+def _parse_vol(v):
+    if isinstance(v, str):
+        if "<" in v:
+            return 10
+        try:
+            return int(float(v.replace(",", "").strip()))
+        except (ValueError, TypeError):
+            return 0
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return 0
+
+
+def remove_duplicates_keep_order(items):
+    """순서를 유지하며 중복 제거."""
+    return list(dict.fromkeys(items))
 
 # ==========================================
 # 2. 키워드 분석 (모듈 1, 2)
@@ -36,30 +102,118 @@ class KeywordAnalyzeRequest(BaseModel):
 @router.post("/keyword/analyze")
 async def analyze_keyword(req: KeywordAnalyzeRequest):
     """
-    연관 키워드 확장 및 NLP 토큰 풀 추출
+    실제 연관 키워드(태그) 수집 + NLP 토큰 풀 추출.
+    네이버 자동완성(무료)으로 시드와 '실제로 연관된' 검색어를 수집한 뒤,
+    형태소 분석(Kiwi)·스팸 제거·중복 제거로 클린 토큰 풀을 만든다.
     """
     seed = req.seed_keyword.strip()
-    
-    # Mock data for 연관 키워드 추출
-    mock_related_keywords = [
-        f"{seed} 추천", f"가성비 {seed}", f"예쁜 {seed}", f"사무실 {seed}", 
-        f"소형 {seed}", f"2026 신상 {seed} 특가"
-    ]
-    
-    all_tokens = []
-    for kw in mock_related_keywords:
-        tokens = clean_and_tokenize(kw)
-        all_tokens.extend(tokens)
-        
-    unique_tokens = remove_duplicates_keep_order(all_tokens)
     seed_tokens = clean_and_tokenize(seed)
-    
+
+    # 1) 연관검색어 수집
+    #    (A) 네이버 검색광고 키워드도구 = 정석(실제 연관키워드 + 검색량). 키 필요.
+    #    (B) 자동완성 = 무료 보강/폴백.
+    vol_map = {}
+    ad_related = []
+    source = "자동완성"
+    try:
+        ad_items = await fetch_search_ad_keywords(seed)
+        for k in (ad_items or []):
+            kw = (k.get("relKeyword") or "").strip()
+            if not kw:
+                continue
+            ad_related.append(kw)
+            vol_map[kw] = _parse_vol(k.get("monthlyPcQcCnt", 0)) + _parse_vol(k.get("monthlyMobileQcCnt", 0))
+        if ad_related:
+            source = "검색광고 키워드도구"
+    except Exception as e:
+        print("keywordstool error:", e)
+
+    auto_related = await fetch_autocomplete_related(seed)
+    if len(seed_tokens) >= 2:
+        core = seed_tokens[-1]
+        if core and core != seed:
+            auto_related += await fetch_autocomplete_related(core)
+
+    # 검색광고 연관어 우선(검색량순) + 자동완성 보강
+    ad_related.sort(key=lambda kw: vol_map.get(kw, 0), reverse=True)
+    related_raw = remove_duplicates_keep_order([r for r in (ad_related + auto_related) if r and r != seed])
+
+    # ⭐ 관련성 필터: 시드 핵심어를 포함한 검색어만 남김(예: '그릭요거트' → '광주맛집' 제외).
+    #    검색광고/자동완성은 시드와 무관한 키워드도 반환하므로, 시드 토큰/무공백 시드를 포함하는 것만 통과.
+    _seed_ns = seed.replace(" ", "")
+    _seed_cores = [c for c in (list(set(seed_tokens)) + [_seed_ns]) if len(c) >= 2]
+
+    def _related_relevant(kw):
+        kw_ns = kw.replace(" ", "")
+        return any(c in kw_ns for c in _seed_cores)
+
+    related = [r for r in related_raw if _related_relevant(r)]
+
+    # (C) 쇼핑 1~N위 상품명 = 상품명용 키워드의 최고 소스(실제 판매 상품 제목). 키 필요.
+    shop_titles = []
+    try:
+        shop_titles = await fetch_top_10_shopping(seed)
+    except Exception as e:
+        print("shop top error:", e)
+    if shop_titles:
+        source = "쇼핑Top + " + source
+
+    seed_set = set(seed_tokens)
+    seed_nospace = seed.replace(" ", "")
+    # 시드 핵심어(부분 일치 필터용): 시드 토큰 + 무공백 시드
+    seed_cores = {s for s in (list(seed_set) + [seed_nospace]) if len(s) >= 2}
+
+    def _contains_seed_core(t):
+        """'무가당그릭요거트'처럼 시드 핵심어를 포함한 변형 검색어 → 태그 아님(연관키워드)."""
+        return any(c in t and t != c for c in seed_cores)
+
+    def _is_tag(t):
+        return (
+            t not in seed_set
+            and t not in INFO_STOPWORDS
+            and t.lower() not in TAG_STOPWORDS    # 단위·채널·조각성 단어 제외
+            and not _UNIT_RE.match(t)             # kg/ml/500g 등 단위 토큰 제외
+            and t not in seed_nospace
+            and not re.fullmatch(r"\d+", t)
+            and 2 <= len(t) <= 6           # 너무 긴 토큰은 합성 검색어 → 태그에서 제외
+            and not _contains_seed_core(t)
+        )
+
+    # 2) [태그 풀] = '네이버에 등록된 키워드'(검색광고 키워드도구/자동완성 연관어)에서만 추출.
+    #    쇼핑 상품명 토큰화는 '해썹/시설/밀폐/용기' 같은 제목 조각·인증·스펙 부스러기가 섞이므로 태그 풀에서 제외.
+    #    related 는 이미 ① 관련성 필터(시드 포함) ② 검색량순 정렬 적용됨 → 토큰도 그 순서/품질 유지.
+    related_tokens = []
+    for kw in related:
+        related_tokens.extend(clean_and_tokenize(kw))
+
+    valid_tokens_pool = remove_duplicates_keep_order([t for t in related_tokens if _is_tag(t)])
+    # 연관어가 비었을 때(키 미설정 등)만 쇼핑 상품명 토큰으로 폴백
+    if not valid_tokens_pool:
+        shop_tokens = []
+        for title in shop_titles:
+            shop_tokens.extend(clean_and_tokenize(title))
+        valid_tokens_pool = remove_duplicates_keep_order([t for t in shop_tokens if _is_tag(t)])
+
+    # 3) 분류 (용량/중량·수량/세트·형태/타입·핵심)
+    classified = classify_tokens(valid_tokens_pool)
+
+    # [연관키워드] = 수집된 검색어 원문 + 검색량(검색광고 키 있을 때). 검색량순 정렬, 화면에서 분리 표시.
+    related_with_volume = sorted(
+        [{"keyword": kw, "volume": vol_map.get(kw, 0)} for kw in related],
+        key=lambda x: x["volume"], reverse=True
+    )
+
     return {
         "seed_keyword": seed,
         "seed_tokens": seed_tokens,
-        "related_keywords_count": len(mock_related_keywords),
-        "valid_tokens_pool": unique_tokens,
-        "message": "분석 완료"
+        "related_keywords": related,                 # 연관 검색어 원문
+        "related_with_volume": related_with_volume,  # 연관키워드 + 검색량(검색량순)
+        "related_keywords_count": len(related),
+        "valid_tokens_pool": valid_tokens_pool,      # 태그 풀(상품명/태그용 클린 토큰)
+        "classified_tokens": classified,             # 그룹별 분류
+        "shop_title_count": len(shop_titles),
+        "source": source,
+        "message": f"분석 완료 (소스: {source})"
     }
 
 # ==========================================
@@ -77,12 +231,18 @@ async def assemble_title(req: TitleAssembleRequest):
     """
     50자 이내 SEO 최적화 상품명 조립
     """
+    # 요청에서 값 추출 (이전: seed/brand/front_tokens 미정의로 NameError 발생)
+    seed = (req.seed_keyword or "").strip()
+    brand = (req.brand_name or "").strip()
+    # 최신성 버프: 토큰 풀의 앞쪽 일부를 시드/브랜드보다 먼저(전진) 배치
+    front_tokens = list(req.tokens[:2]) if req.tokens else []
+
     title = ""
     # 중복 방지를 위해 시드와 브랜드명을 단어 단위로 쪼개어 used_words에 넣음
     used_words = set()
     if seed: used_words.update(seed.split())
     if brand: used_words.update(brand.split())
-    
+
     for t in front_tokens:
         if t not in used_words:
             title += f"{t} "
@@ -329,6 +489,21 @@ from sqlalchemy.orm import Session
 
 # 전역 ThreadPoolExecutor 선언 (동시 브라우저 실행 갯수 제한)
 playwright_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+
+# 네이버 쇼핑 차단 우회용 (로그인 가능 영구 프로필 + 테더링 IP 회전 + 프록시 준비)
+from mbam_nextgen.infrastructure.proxy import ProxyManager
+from mbam_nextgen.infrastructure.session import get_profile_dir as _get_profile_dir
+_shopping_proxy_mgr = ProxyManager()
+# 차단/캡차 페이지 식별 키워드
+SHOPPING_BLOCK_KEYWORDS = ("일시적으로 제한", "비정상적인 접근", "보안 확인을 완료", "보안확인", "로봇이 아닙니다")
+
+def _shopping_proxy_config():
+    """웹배포 후 프록시: 환경변수 SHOPPING_PROXY가 있으면 그 프록시를 사용(예: http://user:pass@host:port).
+    없으면 None(로컬은 테더링으로 IP를 바꾸므로 per-browser 프록시 불필요)."""
+    try:
+        return ProxyManager.get_browser_proxy_config(os.environ.get("SHOPPING_PROXY"))
+    except Exception:
+        return None
 from fastapi import Depends, HTTPException, APIRouter, Query
 from pydantic import BaseModel
 import math
@@ -418,31 +593,74 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
     top_competitors = []
     target_stats = None
     
+    # 차단 회피: 기기인증(로그인)된 네이버 계정 프로필이 있으면 그걸 사용(신뢰 기기 → 캡차 감소). 없으면 전용 프로필.
+    _scrape_profile = "shopping_scraper"
+    try:
+        from mbam_nextgen.backend.database import NaverAccount as _NA
+        from mbam_nextgen.infrastructure.session import is_registered as _is_reg
+        _uid = current_user.get("sub")
+        for _a in db.query(_NA).filter(_NA.user_id == _uid).all():
+            if _is_reg(_a.naver_id):
+                _scrape_profile = _a.naver_id
+                break
+    except Exception:
+        pass
+
+    blocked_flag = {"v": False}
     def scrape_sync():
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
+            # 차단 우회: 영구 프로필(쿠키 누적/로그인 가능) + 비헤드리스 + (배포 시) 프록시
+            profile_dir = _get_profile_dir(_scrape_profile)
+            ctx_opts = dict(
+                headless=False,
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--disable-infobars',
+                    '--no-sandbox',
                     '--window-size=1920,1080',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                ]
-            )
-            context = browser.new_context(
+                ],
                 viewport={'width': 1920, 'height': 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                locale="ko-KR", timezone_id="Asia/Seoul",
             )
-            page = context.new_page()
-            stealth(page)
-            
+            pc = _shopping_proxy_config()
+            if pc:
+                ctx_opts["proxy"] = pc
+            context = p.chromium.launch_persistent_context(profile_dir, **ctx_opts)
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                stealth(page)
+            except Exception:
+                pass
+
             def scrape_page(pg_num):
                 url = f"https://search.shopping.naver.com/search/all?query={urllib.parse.quote(req.keyword)}&pagingIndex={pg_num}&pagingSize=40"
-                page.goto(url, wait_until="networkidle", timeout=30000)
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2500)
+                # 차단/캡차 페이지 감지 → 상위에서 테더링 IP 회전 후 재시도
+                try:
+                    body_txt = page.inner_text("body")[:400]
+                except Exception:
+                    body_txt = ""
+                if any(k in body_txt for k in SHOPPING_BLOCK_KEYWORDS):
+                    blocked_flag["v"] = True
+                    return []
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                page.wait_for_timeout(500)
-                items = page.query_selector_all("[class^='product_item__'], [class^='basicList_item__']")
-                
+                page.wait_for_timeout(700)
+                items = page.query_selector_all(
+                    "[class^='product_item__'], [class^='basicList_item__'], "
+                    "[class*='product_item'], [class*='basicList_item'], "
+                    "[class*='adProduct_item'], [class*='basicProductCard'], "
+                    "[class*='superSavingProduct'], div[class*='product_list_item'], li[data-shp-page-key]"
+                )
+                # 진단: 항목 수 + 첫 항목 class/텍스트 (차단인지 vs 파싱 실패인지 판별)
+                try:
+                    first_cls = items[0].get_attribute("class") if items else ""
+                    first_txt = (items[0].inner_text()[:200].replace("\n", " ")) if items else body_txt[:200]
+                    print(f"[shopping] pg{pg_num} items={len(items)} firstClass={first_cls!r} firstText={first_txt!r}")
+                except Exception:
+                    pass
+
                 results = []
                 for idx, item in enumerate(items):
                     html_content = item.inner_text()
@@ -506,12 +724,23 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
                 target_page_items = scrape_page(target_pg)
                 t_stats = next((c for c in target_page_items if c["is_target"]), None)
             
-            browser.close()
+            context.close()
             return top_comp, t_stats
-            
+
+    scrape_blocked = False
     try:
         loop = asyncio.get_running_loop()
         top_competitors, target_stats = await loop.run_in_executor(playwright_executor, scrape_sync)
+        # 차단/캡차 감지 시: 테더링 IP 회전 후 1회 재시도
+        if blocked_flag["v"]:
+            try:
+                new_ip = await _shopping_proxy_mgr.rotate_tethering_ip()
+                print(f"[shopping] 차단 감지 → 테더링 IP 회전: {new_ip}")
+            except Exception as e:
+                print(f"[shopping] 테더링 IP 회전 실패: {e}")
+            blocked_flag["v"] = False
+            top_competitors, target_stats = await loop.run_in_executor(playwright_executor, scrape_sync)
+        scrape_blocked = blocked_flag["v"]
     except Exception as e:
          return {"found": False, "message": f"크롤링 에러 발생: {str(e)}"}
          
@@ -611,7 +840,10 @@ async def analyze_keyword_shopping(req: AnalyzeRequest, db: Session = Depends(ge
         "places": all_items,
         "page1_stats": page1_stats,
         "report": report,
-        "history": []
+        "history": [],
+        "scrape_blocked": scrape_blocked,
+        "notice": ("⚠️ 네이버 쇼핑이 자동 접속을 일시 제한(차단/보안확인)하여 구매수·리뷰·찜수는 수집하지 못했습니다. "
+                   "가격·순위는 공식 API 기준으로 표시됩니다. 잠시 후 다시 시도하거나, USB 테더링으로 IP를 바꿔 재시도하세요.") if scrape_blocked else ""
     }
 
 
@@ -634,23 +866,84 @@ async def analyze_keyword_shopping_ext(req: AnalyzeExtRequest, db: Session = Dep
     api_rank, api_data, top_api_items = await fetch_target_rank_via_api(req.keyword, req.store_name, req.product_name, req.target_mid)
     
     top_competitors = req.items
-    
+
+    # 진단: 확장이 보낸 원본 텍스트(html_content)와 파싱값을 로그로 — 실제 형식 확인용
+    try:
+        _dbg = [0, 1, 2, 5, 7]
+        for _i in _dbg:
+            if _i < len(top_competitors):
+                _it = top_competitors[_i]
+                _msg = f"[shopping-ext] item{_i} text={(_it.get('html_content') or '')[:260]!r}"
+                print(_msg)
+                if logger: logger.error(_msg)
+    except Exception:
+        pass
+
     # Process top_competitors to add rank, n1_base, is_target, mid, category, is_new
     results = []
     tokens = req.keyword.split()
-    
+
     for idx, item in enumerate(top_competitors):
         current_rank = idx + 1
         html_content = item.get("html_content", "")
-        
+        href = item.get("href", "") or item.get("link", "")
+
+        # 확장이 보낸 원본 텍스트에서 가격/리뷰/구매/찜/스토어를 정확히 재파싱 (확장 정규식 보정)
+        def _num(s):
+            s = (s or "").replace(",", "").replace(" ", "")
+            try:
+                return int(float(s.replace("만", "")) * 10000) if "만" in s else int(float(s))
+            except Exception:
+                return 0
+        # 리뷰수: "리뷰 (539)" 또는 "별점 4.76 (17)"/"★4.76 (17)" (리뷰 글자 없는 형식 모두 대응)
+        mm = re.search(r'(?:리뷰|별점\s*[\d.]+|★\s*[\d.]+)\s*\(\s*([\d.,]+\s*만?)\s*\)', html_content)
+        if mm: item["reviews"] = _num(mm.group(1))
+        mm = re.search(r'구매\s*([\d.,]+\s*만?)', html_content)
+        if mm: item["purchases"] = _num(mm.group(1))
+        mm = re.search(r'찜(?!하기)\s*([\d.,]+\s*만?)', html_content)
+        if mm: item["keeps"] = _num(mm.group(1))
+        # 가격비교(카탈로그)면 최저가 + 가격비교 표시, 아니면 판매가
+        is_compare = bool(re.search(r'판매처\s*\d', html_content)) or ('쇼핑몰별 최저가' in html_content)
+        item["is_compare"] = is_compare
+        if is_compare:
+            pm = re.search(r'최저\s*([\d,]{2,})\s*원', html_content) or re.search(r'([\d,]{3,})\s*원', html_content)
+        else:
+            pm = re.search(r'([\d,]{2,})\s*원', html_content)
+        if pm: item["price"] = _num(pm.group(1))
+        # 등록일 (예: "등록일 2025.04.")
+        mm = re.search(r'등록일\s*([0-9]{4}\.\s?[0-9]{1,2}\.?)', html_content)
+        if mm: item["reg_date"] = mm.group(1).strip()
+        # 스토어명: ①"톡톡 \t {store}정보" ②일반 "{store}정보"(블랙리스트 제외) ③"{store} 정보 상품만 보기"
+        _store_bl = ("상품", "구매", "배송", "판매", "상세", "기본", "추가", "제품", "리뷰", "카드",
+                     "할인", "이벤트", "혜택", "적립", "포인트", "무이자", "안내", "공지", "수정", "신고", "최저")
+        store_txt = ""
+        mm = re.search(r'톡톡\s*\t?\s*([가-힣A-Za-z0-9&.\-]{2,20}?)정보', html_content)
+        if mm:
+            store_txt = mm.group(1)
+        else:
+            for cm in re.finditer(r'([가-힣A-Za-z0-9][가-힣A-Za-z0-9&.\- ]{1,18}?)\s*정보(?:\s*상품만|\s|$)', html_content):
+                cand = cm.group(1).strip()
+                if cand and not any(b in cand for b in _store_bl):
+                    store_txt = cand
+                    break
+        if store_txt:
+            item["storeName"] = store_txt
+        elif is_compare:
+            item["storeName"] = "가격비교"
+
         match_count = sum(1 for t in tokens if t in html_content)
         n1_base = int((match_count / len(tokens)) * 100) if tokens else 0
-        
+
+        def _norm(s):
+            return (s or "").replace(" ", "").lower()
         is_match = False
-        if req.target_mid and req.target_mid in html_content: is_match = True
-        elif req.store_name and req.store_name in html_content: is_match = True
-        elif req.product_name and req.product_name in html_content: is_match = True
-        
+        if req.target_mid and (req.target_mid in html_content or req.target_mid in href):
+            is_match = True
+        elif req.store_name and (_norm(req.store_name) in _norm(html_content) or _norm(req.store_name) in _norm(store_txt)):
+            is_match = True
+        elif req.product_name and _norm(req.product_name) in _norm(html_content):
+            is_match = True
+
         item["rank"] = current_rank
         item["n1_base"] = n1_base
         item["is_target"] = is_match
@@ -691,37 +984,70 @@ async def analyze_keyword_shopping_ext(req: AnalyzeExtRequest, db: Session = Dep
     if not all_items:
         return {"found": False, "message": "데이터가 없습니다."}
 
-    # --- Math Algorithm (Log Scaling & Min-Max Norm) ---
-    all_purchases = [log_scale(c.get('purchases', 0)) for c in all_items]
-    all_reviews = [log_scale(c.get('reviews', 0)) for c in all_items]
-    all_keeps = [log_scale(c.get('keeps', 0)) for c in all_items]
-    
-    p_max, p_min = max(all_purchases), min(all_purchases)
-    r_max, r_min = max(all_reviews), min(all_reviews)
-    k_max, k_min = max(all_keeps), min(all_keeps)
-    
+    # --- N지수 스코어링 (개선판) ---
+    # 정규화 기준 = 1페이지(Top 40) 실제 항목 (API 0값 더미 제외 → 상위권 변별력 유지)
+    from datetime import datetime as _dt
+    from collections import Counter as _Counter
+    base_items = top_competitors[:40] or all_items
+    def _logvals(key):
+        return [log_scale(c.get(key, 0) or 0) for c in base_items]
+    lp, lr, lk = _logvals('purchases'), _logvals('reviews'), _logvals('keeps')
+    p_min, p_max = min(lp), max(lp)
+    r_min, r_max = min(lr), max(lr)
+    k_min, k_max = min(lk), max(lk)
+    _now = _dt.now()
+    kw_tokens = [t for t in (req.keyword or '').split() if t]
+
+    def _recency(item):
+        m = re.match(r'(\d{4})\.\s?(\d{1,2})', item.get('reg_date') or '')
+        if not m:
+            return 50.0  # 등록일 미상 → 중립
+        months = (_now.year - int(m.group(1))) * 12 + (_now.month - int(m.group(2)))
+        return max(0.0, min(100.0, 100.0 - months * 3))  # 0개월=100, 약 33개월=0
+
     for item in all_items:
-        p_norm = min_max_norm(log_scale(item.get('purchases', 0)), p_min, p_max) * 100
-        r_norm = min_max_norm(log_scale(item.get('reviews', 0)), r_min, r_max) * 100
-        k_norm = min_max_norm(log_scale(item.get('keeps', 0)), k_min, k_max) * 100
-        
-        n2 = 0.6 * p_norm + 0.3 * r_norm + 0.1 * k_norm
-        n3 = 80 if item.get('is_new') else (k_norm * 0.5 + 30)
-        n4 = 1.0
+        p_norm = min_max_norm(log_scale(item.get('purchases', 0) or 0), p_min, p_max) * 100
+        r_norm = min_max_norm(log_scale(item.get('reviews', 0) or 0), r_min, r_max) * 100
+        k_norm = min_max_norm(log_scale(item.get('keeps', 0) or 0), k_min, k_max) * 100
         title_str = item.get('title') or ''
-        title_len = len(title_str)
-        if title_len > 50:
-            n4 = 0.7 
-        
-        n1 = item.get('n1_base', 80)
-        s_shop = (0.3 * n1 + 0.7 * (0.8 * n2 + 0.2 * n3)) * n4
-        
+
+        # N1 적합도: 키워드 토큰 일치 + 제목 앞쪽 배치 가중(전진배치 버프)
+        n1 = float(item.get('n1_base', 80))
+        if kw_tokens and title_str:
+            head = title_str[:max(1, len(title_str) // 2)]
+            front = sum(1 for t in kw_tokens if t in head) / len(kw_tokens)
+            n1 = min(100.0, n1 + front * 15)
+
+        # N2 실거래: 구매 0.6 + 리뷰 0.4
+        n2 = 0.6 * p_norm + 0.4 * r_norm
+
+        # N3 트래픽/인기: 찜 인기 0.6 + 최신성 0.4 (+ 신상 보너스)
+        n3 = 0.6 * k_norm + 0.4 * _recency(item)
+        if item.get('is_new'):
+            n3 = min(100.0, n3 + 20)
+
+        # N4 페널티: 제목 길이/특수문자/중복 키워드/스팸 단어
+        n4 = 1.0
+        if len(title_str) > 50:
+            n4 *= 0.7
+        if re.search(r'[!@#$%^&*()\[\]{},.~]', title_str):
+            n4 *= 0.9
+        words = title_str.split()
+        if words and max(_Counter(words).values()) >= 3:
+            n4 *= 0.9
+        if sum(1 for s in SPAM_WORDS if s in title_str) >= 2:
+            n4 *= 0.9
+        n4 = max(0.5, n4)
+
+        # 총점: 실거래(N2) 50% 중심 + 적합도 25% + 인기/최신성 25%, 페널티 곱
+        s_shop = (0.25 * n1 + 0.50 * n2 + 0.25 * n3) * n4
+
         item['n1'] = round(n1, 2)
         item['n2'] = round(n2, 2)
         item['n3'] = round(n3, 2)
         item['n4'] = round(n4, 2)
         item['n5'] = round(s_shop, 2)
-        
+
     page1_purchases = [c.get('purchases', 0) for c in top_competitors]
     avg_sales = sum(page1_purchases) / len(page1_purchases) if page1_purchases else 0
     max_sales = max(page1_purchases) if page1_purchases else 0
@@ -735,12 +1061,12 @@ async def analyze_keyword_shopping_ext(req: AnalyzeExtRequest, db: Session = Dep
     report = f"""[네이버 쇼핑 N지수 타겟 가이드 리포트]
 1. 1페이지(Top 40) 커트라인 분석:
   - 1페이지 제품들의 평균 구매수는 {page1_stats['avg_purchases']:,}건, 평균 리뷰수는 {page1_stats['avg_reviews']:,}건 입니다.
-  - 최상위권 진입을 위해서는 구매수(N2)의 실거래 실적이 가장 큰 비중(60%)을 차지합니다.
+  - 최상위권 진입을 위해서는 구매·리뷰 실거래(N2)가 가장 큰 비중(50%)을 차지합니다. (적합도 25% / 인기·최신성 25%, 패널티 곱)
 
 2. 내 상품({target_stats.get('title', '')}) 진단 결과:
   - 현재 순위: {target_stats.get('rank', '측정불가')}
   - 현재 누적 구매수는 {target_stats.get('purchases', 0):,}건, 리뷰는 {target_stats.get('reviews', 0):,}건 입니다.
-  - 검색 적합성(N1): {target_stats.get('n1', 0)}점 / 실거래 인기도(N2): {target_stats.get('n2', 0)}점 / 최신성(N3): {target_stats.get('n3', 0)}점 / 패널티(N4): {target_stats.get('n4', 1.0)} (1.0 만점)
+  - 검색 적합성(N1): {target_stats.get('n1', 0)}점 / 실거래(N2): {target_stats.get('n2', 0)}점 / 인기·최신성(N3): {target_stats.get('n3', 0)}점 / 패널티(N4): {target_stats.get('n4', 1.0)} (1.0 만점)
   - 최종 랭킹 역산 점수(S_total): {target_stats.get('n5', 0)}점
   - 액션 가이드: { '상품명이 50자를 초과하여 N4 패널티(-30%)를 받고 있습니다. 50자 이내로 즉시 수정하세요.' if target_stats.get('n4', 1.0) < 1.0 else '적합도(N1) 형태소 배열이 안전합니다. 리뷰 이벤트를 통해 구매수(N2)를 1페이지 평균까지 끌어올리는 데 집중하세요.' }
 """ if target_stats else "타겟 상품을 찾지 못했습니다."
@@ -1010,3 +1336,157 @@ async def delete_tracked_shopping(req: DeleteTrackedRequest, db: Session = Depen
     db.delete(item)
     db.commit()
     return {"success": True, "message": "삭제되었습니다."}
+
+
+# ══════════════════════════════════════════════════════════════
+# 네이버 쇼핑 검색→상품 클릭 유입 부스트 (프록시/테더링 IP 회전)
+#  ⚠️ '유입 보조' 도구 — 순위 보장 아님. 비정상 클릭은 어뷰징 감지·페널티 위험.
+# ══════════════════════════════════════════════════════════════
+import uuid as _uuid_boost
+shopping_boost_tasks = {}
+
+def _shopping_click_sync(keyword: str, store_name: str, mid: str, proxy_config):
+    """검색 후 내 상품(스토어명/MID)을 찾아 클릭하고 체류. (found, clicked, blocked, rank) 반환."""
+    import urllib.parse, random
+    out = {"found": False, "clicked": False, "blocked": False, "rank": 0}
+    with sync_playwright() as p:
+        profile_dir = _get_profile_dir("shopping_boost")
+        opts = dict(
+            headless=False,
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox', '--window-size=1920,1080'],
+            viewport={'width': 1920, 'height': 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="ko-KR", timezone_id="Asia/Seoul",
+        )
+        if proxy_config:
+            opts["proxy"] = proxy_config
+        ctx = p.chromium.launch_persistent_context(profile_dir, **opts)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            try:
+                stealth(page)
+            except Exception:
+                pass
+            sn = (store_name or "").replace(" ", "")
+            for pg in range(1, 6):  # 최대 5페이지(약 200위)까지 탐색
+                url = f"https://search.shopping.naver.com/search/all?query={urllib.parse.quote(keyword)}&pagingIndex={pg}&pagingSize=40"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2000 + random.randint(0, 1500))
+                body = page.inner_text("body")[:400]
+                if any(k in body for k in SHOPPING_BLOCK_KEYWORDS):
+                    out["blocked"] = True
+                    break
+                for _ in range(3):  # 사람처럼 스크롤
+                    page.evaluate("window.scrollBy(0, 1200)")
+                    page.wait_for_timeout(450 + random.randint(0, 400))
+                items = page.query_selector_all(
+                    "[class*='product_item'], [class*='basicList_item'], [class*='adProduct'], [class*='basicProductCard'], li[data-shp-page-key]"
+                )
+                for idx, it in enumerate(items):
+                    try:
+                        txt = it.inner_text()
+                    except Exception:
+                        txt = ""
+                    a = it.query_selector("a[href]")
+                    href = (a.get_attribute("href") if a else "") or ""
+                    matched = (mid and mid in (href + txt)) or (sn and sn in txt.replace(" ", ""))
+                    if matched:
+                        out["found"] = True
+                        out["rank"] = (pg - 1) * 40 + idx + 1
+                        link = a or it.query_selector("a")
+                        if link:
+                            try:
+                                link.scroll_into_view_if_needed()
+                                page.wait_for_timeout(600)
+                                link.click()
+                                out["clicked"] = True
+                                page.wait_for_timeout(3000 + random.randint(0, 3500))  # 체류
+                                prod = ctx.pages[-1]  # 새 탭이면 그쪽
+                                try:
+                                    prod.evaluate("window.scrollBy(0, 1600)")
+                                    prod.wait_for_timeout(1500 + random.randint(0, 1500))
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        break
+                if out["found"] or out["blocked"]:
+                    break
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+    return out
+
+
+async def _shopping_boost_worker(task_id, keyword, store_name, mid, clicks, interval_min, use_tethering):
+    st = shopping_boost_tasks[task_id]
+    loop = asyncio.get_running_loop()
+    for i in range(clicks):
+        if st.get("cancel"):
+            st["logs"].append("⏹️ 사용자에 의해 중단되었습니다.")
+            break
+        if use_tethering:
+            try:
+                ip = await _shopping_proxy_mgr.rotate_tethering_ip()
+                st["logs"].append(f"📱 IP 회전: {ip}")
+            except Exception as e:
+                st["logs"].append(f"⚠️ IP 회전 실패(계속): {e}")
+        pc = _shopping_proxy_config()
+        try:
+            r = await loop.run_in_executor(playwright_executor, lambda: _shopping_click_sync(keyword, store_name, mid, pc))
+        except Exception as e:
+            r = {"error": str(e)}
+        if r.get("error"):
+            st["logs"].append(f"[{i+1}/{clicks}] 오류: {r['error'][:120]}")
+        elif r.get("blocked"):
+            st["logs"].append(f"[{i+1}/{clicks}] ⚠️ 네이버 접속 제한(차단) — 건너뜀 (테더링/프록시 IP 변경 권장)")
+        elif r.get("clicked"):
+            st["logs"].append(f"[{i+1}/{clicks}] ✅ {r.get('rank')}위 상품 클릭·체류 완료")
+        elif r.get("found"):
+            st["logs"].append(f"[{i+1}/{clicks}] 상품 찾음(클릭 실패) — {r.get('rank')}위")
+        else:
+            st["logs"].append(f"[{i+1}/{clicks}] 상품 못 찾음(상위 200위 밖이거나 키워드 불일치)")
+        if i < clicks - 1 and interval_min > 0 and not st.get("cancel"):
+            st["logs"].append(f"⏳ 다음 유입까지 {interval_min}분 대기...")
+            await asyncio.sleep(interval_min * 60)
+    if st.get("status") == "running":
+        st["status"] = "completed"
+        st["logs"].append("🏁 유입 작업 완료")
+
+
+class ShoppingBoostReq(BaseModel):
+    keyword: str
+    store_name: Optional[str] = ""
+    target_mid: Optional[str] = ""
+    clicks: Optional[int] = 5
+    interval_min: Optional[int] = 10
+    use_tethering: Optional[bool] = False
+
+@router.post("/boost", summary="검색→내 상품 클릭 유입(부스트) 시작")
+async def start_shopping_boost(req: ShoppingBoostReq, current_user: dict = Depends(check_quota)):
+    if not req.keyword or not (req.store_name or req.target_mid):
+        raise HTTPException(status_code=400, detail="검색 키워드와 스토어명(또는 MID)을 입력하세요.")
+    tid = _uuid_boost.uuid4().hex
+    shopping_boost_tasks[tid] = {"status": "running", "logs": ["🚀 검색→상품 클릭 유입 작업을 시작합니다."], "cancel": False}
+    asyncio.create_task(_shopping_boost_worker(
+        tid, req.keyword, req.store_name or "", req.target_mid or "",
+        max(1, int(req.clicks or 1)), max(0, int(req.interval_min or 0)), bool(req.use_tethering),
+    ))
+    return {"success": True, "task_id": tid}
+
+@router.get("/boost/status/{task_id}")
+async def shopping_boost_status(task_id: str):
+    t = shopping_boost_tasks.get(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    return {"status": t["status"], "logs": t["logs"][-100:]}
+
+@router.post("/boost/cancel/{task_id}")
+async def shopping_boost_cancel(task_id: str):
+    t = shopping_boost_tasks.get(task_id)
+    if t:
+        t["cancel"] = True
+        t["status"] = "failed"
+    return {"success": True}

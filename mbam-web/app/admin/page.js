@@ -511,6 +511,7 @@ export default function AdminDashboard() {
               <tr style={{ background: "#f8fafc", color: "#475569", fontSize: "0.9rem" }}>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>이메일 / 이름</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>플랜</th>
+                <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>라이선스(AI)</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>사용량 / 쿼터</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>기기 등록</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>만료일</th>
@@ -533,8 +534,19 @@ export default function AdminDashboard() {
                       {user.plan_type === "trial" ? "무료체험" : user.plan_type}
                     </span>
                   </td>
+                  <td style={{ padding: "1rem 1.5rem" }}>
+                    <span style={{
+                      padding: "0.2rem 0.7rem", borderRadius: "99px", fontSize: "0.8rem", fontWeight: "600",
+                      background: user.has_byok ? "#ede9fe" : "#e0f2fe",
+                      color: user.has_byok ? "#6d28d9" : "#0369a1"
+                    }}>
+                      {user.has_byok ? "설치형 · 본인키" : "웹 · 서버키(쿼터)"}
+                    </span>
+                  </td>
                   <td style={{ padding: "1rem 1.5rem", color: "#475569" }}>
-                    <span style={{ fontWeight: "600", color: "#3b82f6" }}>{user.usage_count}</span> / {user.max_usage}회
+                    {user.has_byok
+                      ? <span style={{ color: "#94a3b8" }}>무제한(BYOK)</span>
+                      : <><span style={{ fontWeight: "600", color: "#3b82f6" }}>{user.usage_count}</span> / {user.max_usage}회</>}
                   </td>
                   <td style={{ padding: "1rem 1.5rem", color: "#475569", fontSize: "0.9rem" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -582,6 +594,9 @@ export default function AdminDashboard() {
                   style={{ width: "100%", padding: "0.8rem", borderRadius: "8px", border: "1px solid #cbd5e1" }}
                 >
                   <option value="trial">무료체험 (Trial)</option>
+                  <option value="web_basic">웹 Basic (서버키+쿼터)</option>
+                  <option value="web_pro">웹 Pro (서버키+쿼터)</option>
+                  <option value="installed">설치형 (BYOK·본인키)</option>
                   <option value="Basic">Basic</option>
                   <option value="Pro">Pro</option>
                   <option value="Enterprise">Enterprise</option>

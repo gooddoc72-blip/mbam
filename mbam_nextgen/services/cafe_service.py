@@ -1,6 +1,10 @@
 import asyncio
 import os
 from ..core.stealth import StealthExecutor
+try:
+    from ..core.logger import logger
+except Exception:
+    logger = None
 
 class CafeService:
     """
@@ -11,7 +15,7 @@ class CafeService:
         self.stealth = stealth
         self.selectors = {
             "write_btn": "#cafe-write-btn, .cafe-write-btn, a:has-text('카페 글쓰기'), a:has-text('글쓰기')",
-            "title": "#subject, input[name='subject'], .textarea_input",
+            "title": ".se-documentTitle, .se-title-text, textarea[placeholder*='제목'], input[placeholder*='제목'], [contenteditable='true'][class*='title' i], .textarea_input, #subject, input[name='subject']",
             "body": "#content, .se-content, .se-placeholder",
             "board_select": "#menuId, select[name='menuId'], .select_component, button:has-text('게시판 선택')",
             "popup_close": "button.se-popup-button-cancel, button:has-text('취소'), button:has-text('닫기')",
@@ -93,35 +97,56 @@ class CafeService:
         """게시판(말머리) 선택"""
         page = StealthExecutor._get_page_obj(frame)
         print(f"[CafeService] 게시판 선택: {board_name}")
-        
-        try:
-            # 방법 1: select 드롭다운 또는 커스텀 드롭다운
-            select_el = page.locator(self.selectors["board_select"])
-            if await select_el.count() > 0:
-                # 보이는 요소만 클릭
-                count = await select_el.count()
-                for i in range(count):
-                    if await select_el.nth(i).is_visible():
-                        await select_el.nth(i).click()
-                        await asyncio.sleep(1)
-                        break
-                
-                # 게시판 이름으로 옵션 클릭
-                option = page.locator(f"option:has-text('{board_name}'), li:has-text('{board_name}'), a:has-text('{board_name}'), button:has-text('{board_name}')")
-                if await option.count() > 0:
-                    for i in range(await option.count()):
-                        if await option.nth(i).is_visible():
-                            await option.nth(i).click()
-                            print(f"[CafeService] ✅ 게시판 선택 완료: {board_name}")
-                            await asyncio.sleep(1)
-                            return True
-            
-            print(f"[CafeService] ⚠️ '{board_name}' 게시판을 찾을 수 없습니다.")
-            return False
-            
-        except Exception as e:
-            print(f"[CafeService] ⚠️ 게시판 선택 중 오류: {e}")
-            return False
+
+        # 진단: 실제 게시판 선택 UI 후보를 로그에 덤프 (셀렉터 확정용, 비파괴)
+        if logger:
+            try:
+                cand = await frame.evaluate(r"""() => {
+                    const out = [];
+                    document.querySelectorAll('select, button, a').forEach(el => {
+                        const txt = (el.textContent || '').trim().slice(0, 20);
+                        const cls = (el.className || '').toString().slice(0, 50);
+                        const nm = el.getAttribute('name') || '';
+                        if (/게시판|메뉴|menu|board|말머리/i.test(txt + ' ' + cls + ' ' + nm)) {
+                            out.push({tag: el.tagName, txt, cls, name: nm});
+                        }
+                    });
+                    return out.slice(0, 25);
+                }""")
+                logger.error(f"[CafeService] 게시판 선택 후보({len(cand)}개): {cand}")
+            except Exception:
+                pass
+
+        # 실측 구조: 트리거 button.button("게시판을 선택해 주세요.") → 옵션 button.option(게시판명)
+        for root in (frame, page):
+            try:
+                # 1) 드롭다운 트리거 클릭
+                trigger = root.locator("button.button").filter(has_text="게시판").first
+                if await trigger.count() == 0:
+                    trigger = root.locator("button.button").first
+                if await trigger.count() == 0:
+                    # 폴백: 기존 셀렉터
+                    trigger = root.locator(self.selectors["board_select"]).first
+                if await trigger.count() == 0 or not await trigger.is_visible():
+                    continue
+                await trigger.click()
+                await asyncio.sleep(0.8)
+
+                # 2) 게시판명 옵션 클릭 (button/li만 — a 링크는 다른 페이지로 네비게이션되어 에디터가 닫히므로 제외)
+                opt = root.locator("button.option").filter(has_text=board_name).first
+                if await opt.count() == 0:
+                    opt = root.locator(f"button:has-text('{board_name}'), li[role='option']:has-text('{board_name}'), li:has-text('{board_name}')").first
+                if await opt.count() > 0 and await opt.is_visible():
+                    await opt.click()
+                    print(f"[CafeService] ✅ 게시판 선택 완료: {board_name}")
+                    await asyncio.sleep(0.8)
+                    return True
+                print(f"[CafeService] ⚠️ '{board_name}' 옵션을 찾지 못함 (드롭다운은 열림)")
+            except Exception as e:
+                print(f"[CafeService] 게시판 선택 시도 중 오류: {e}")
+                continue
+        print(f"[CafeService] ⚠️ '{board_name}' 게시판 선택 실패")
+        return False
 
     async def dismiss_popups(self, frame):
         """방해 팝업 제거"""
@@ -132,27 +157,210 @@ class CafeService:
                 print("[CafeService] 방해 팝업 제거 완료")
         except: pass
 
-    async def write_post(self, frame, title: str, content: str, speed_mode: str = "normal", speed_multiplier: float = 1.0):
-        """카페 원고 타이핑"""
+    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
+        """카페 원고 타이핑 (블로그와 동일: 본문 가공 + 소제목 위치에 이미지 인라인 삽입)"""
+        import re
         print(f"[CafeService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
-        
-        # 제목 입력
+
+        # 본문 줄바꿈/단락 가공 (블로그·카페 공용)
+        content = StealthExecutor.format_body(content)
+
+        # 진단: 모든 입력 가능한 필드(input/textarea/contenteditable)를 frame·page 양쪽에서 덤프
+        page = StealthExecutor._get_page_obj(frame)
+        if logger:
+            dump_js = r"""() => {
+                const out = [];
+                document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(el => {
+                    out.push({
+                        tag: el.tagName,
+                        cls: (el.className || '').toString().slice(0, 45),
+                        ph: (el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || '').slice(0, 20),
+                        type: el.getAttribute('type') || ''
+                    });
+                });
+                return out.slice(0, 25);
+            }"""
+            for rn, ro in (("frame", frame), ("page", page)):
+                try:
+                    fc = await ro.evaluate(dump_js)
+                    logger.error(f"[CafeService] 입력필드 후보({rn}, {len(fc)}개): {fc}")
+                except Exception:
+                    pass
+
+        # 제목 입력 — 여러 셀렉터 후보를 순차 시도 (SE3 .se-documentTitle 우선)
         title_sel = self.selectors["title"]
-        try:
-            await frame.wait_for_selector(title_sel, timeout=10000)
-            await frame.click(title_sel)
-            await self.stealth.human_type(frame, title_sel, title, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-        except:
-            # 제목이 프레임 밖에 있을 수 있음
-            page = StealthExecutor._get_page_obj(frame)
-            await page.locator(title_sel).first.click()
-            await self.stealth.human_type(page, title_sel, title, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-        
-        # 본문 입력
+        title_done = False
+        page = StealthExecutor._get_page_obj(frame)
+        for root in (frame, page):
+            for sel in title_sel.split(","):
+                sel = sel.strip()
+                try:
+                    loc = root.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        await loc.click()
+                        await asyncio.sleep(0.3)
+                        # human_type은 시작 시 SE3 툴바를 눌러 포커스를 빼앗아 제목이 안 들어감 →
+                        # 제목은 fill()로 직접 입력(이벤트 포함). 실패 시 키보드 타이핑 폴백.
+                        ok = False
+                        try:
+                            await loc.fill("")
+                            await loc.fill(title)
+                            ok = True
+                        except Exception:
+                            try:
+                                await loc.click()
+                                pg = StealthExecutor._get_page_obj(root)
+                                await pg.keyboard.type(title, delay=20)
+                                ok = True
+                            except Exception:
+                                ok = False
+                        # 입력 검증: 값이 실제로 들어갔는지 확인
+                        try:
+                            val = (await loc.input_value()) if await loc.evaluate("el => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'") else (await loc.inner_text())
+                        except Exception:
+                            val = ""
+                        if ok and (val or "").strip():
+                            print(f"[CafeService] ✅ 제목 입력 성공: {sel} = '{(val or '')[:20]}'")
+                            if logger:
+                                logger.error(f"[CafeService] ✅ 제목 입력 확인: {sel} = '{(val or '')[:30]}'")
+                            title_done = True
+                            break
+                        else:
+                            print(f"[CafeService] ⚠️ 제목 입력했으나 값 비어있음: {sel}")
+                except Exception:
+                    continue
+            if title_done:
+                break
+        if not title_done:
+            print("[CafeService] ⚠️ 제목 입력 필드를 찾지 못했습니다.")
+
+        # 본문 + 이미지 교차 입력 ([이미지] 마커 위치에 이미지 삽입)
         body_sel = self.selectors["body"]
         await frame.click(body_sel)
-        await self.stealth.human_type(frame, body_sel, content, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-        print("✅ [CafeService] 카페 원고 타이핑 완료")
+
+        # 진단: 이미지 업로드 버튼 후보 + [이미지] 마커 수 로그 (셀렉터 확정용)
+        if logger:
+            try:
+                imgcand = await frame.evaluate(r"""() => {
+                    const out = [];
+                    document.querySelectorAll('button').forEach(el => {
+                        const cls = (el.className || '').toString();
+                        const dn = el.getAttribute('data-name') || '';
+                        if (/image|사진|photo/i.test(cls + ' ' + dn)) out.push({cls: cls.slice(0,45), dn});
+                    });
+                    return out.slice(0, 10);
+                }""")
+                logger.error(f"[CafeService] 이미지버튼 후보({len(imgcand)}개): {imgcand} | 본문 [이미지] 마커 {content.count('[이미지]')}개")
+            except Exception:
+                pass
+
+        async def _cursor_to_end():
+            try:
+                await frame.locator(body_sel).first.evaluate("""el => {
+                    const sel = window.getSelection(); const r = document.createRange();
+                    r.selectNodeContents(el); r.collapse(false);
+                    sel.removeAllRanges(); sel.addRange(r);
+                }""")
+            except Exception:
+                pass
+
+        # 이미지 업로드는 카페 사진 팝업 때문에 멈출(hang) 수 있어 타임아웃으로 보호 → 실패해도 본문은 계속
+        async def _safe_upload(img_path):
+            try:
+                await asyncio.wait_for(self.stealth.upload_image(frame, img_path), timeout=25)
+                await asyncio.sleep(2)
+                await _cursor_to_end()
+                try:
+                    await frame.page.keyboard.press("Enter")
+                except Exception:
+                    pass
+                return True
+            except asyncio.TimeoutError:
+                if logger: logger.error(f"[CafeService] ⏱️ 이미지 업로드 타임아웃(건너뜀): {os.path.basename(img_path)}")
+                return False
+            except Exception as e:
+                if logger: logger.error(f"[CafeService] 이미지 업로드 실패(건너뜀): {e}")
+                return False
+
+        chunks = re.split(r'\[이미지\]', content)
+        images = images or []
+        img_idx = 0
+        pending_text = ""
+        if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {len(images)}장, 청크 {len(chunks)}개)")
+        for i, chunk in enumerate(chunks):
+            if chunk.strip():
+                pending_text += chunk.strip() + "\n\n"
+            if i < len(chunks) - 1 and img_idx < len(images):
+                img_path = images[img_idx]
+                if img_path and os.path.exists(img_path):
+                    if pending_text.strip():
+                        await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+                        pending_text = ""
+                    if logger: logger.info(f"[CafeService] 이미지 업로드 {img_idx+1}/{len(images)}")
+                    await _safe_upload(img_path)
+                img_idx += 1
+
+        if pending_text.strip():
+            await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+
+        # 남은 이미지는 글 맨 하단에 추가 (안전장치)
+        while img_idx < len(images):
+            img_path = images[img_idx]
+            if img_path and os.path.exists(img_path):
+                if logger: logger.info(f"[CafeService] (하단)이미지 업로드 {img_idx+1}/{len(images)}")
+                await _safe_upload(img_path)
+            img_idx += 1
+
+        if logger: logger.info("[CafeService] ✅ 카페 원고 타이핑(이미지 교차) 완료")
+        print("✅ [CafeService] 카페 원고 타이핑(이미지 교차) 완료")
+
+    async def click_like(self, page):
+        """대상 게시글의 좋아요(공감) 버튼 클릭. 이미 눌린 상태면 그대로 둔다. (비파괴 진단 포함)"""
+        # 신형 카페 SPA는 본문이 iframe(cafe_main) 안에 있을 수 있어 frame·page 모두 시도
+        roots = []
+        try:
+            fr = page.frame(name="cafe_main")
+            if fr:
+                roots.append(fr)
+        except Exception:
+            pass
+        roots.append(page)
+        selectors = [
+            "a.u_likeit_list_btn", "a.u_likeit_list_btn._button",
+            ".like_no a", ".like_article a", "a.like_article", "button.like_article",
+            "a:has-text('좋아요')", "button:has-text('좋아요')",
+            "a:has-text('공감')", "button:has-text('공감')",
+        ]
+        for root in roots:
+            if logger:
+                try:
+                    cand = await root.evaluate(r"""() => {
+                        const out=[];
+                        document.querySelectorAll('a,button').forEach(el=>{
+                            const t=(el.textContent||'').trim().slice(0,12);
+                            const c=(el.className||'').toString().slice(0,40);
+                            if(/like|좋아|공감|u_likeit/i.test(c+' '+t)) out.push({t,c,pressed:el.getAttribute('aria-pressed')});
+                        });
+                        return out.slice(0,12);
+                    }""")
+                    logger.error(f"[CafeService] 좋아요 버튼 후보({len(cand)}): {cand}")
+                except Exception:
+                    pass
+            for sel in selectors:
+                try:
+                    loc = root.locator(sel).first
+                    if await loc.count() > 0 and await loc.is_visible():
+                        if (await loc.get_attribute("aria-pressed")) == "true":
+                            print("[CafeService] 이미 좋아요 상태")
+                            return True
+                        await loc.click(timeout=4000)
+                        print(f"[CafeService] ✅ 좋아요 클릭: {sel}")
+                        await asyncio.sleep(1.0)
+                        return True
+                except Exception:
+                    continue
+        print("[CafeService] ⚠️ 좋아요 버튼을 찾지 못함")
+        return False
 
     async def upload_images(self, frame, image_paths: list):
         """세척된 이미지 순차 업로드"""
@@ -166,19 +374,62 @@ class CafeService:
         print("[CafeService] 🚀 즉시 발행 시도 중...")
         try:
             page = StealthExecutor._get_page_obj(frame)
-            for root in [frame, page]:
-                submit_btn = root.locator(self.selectors["submit"])
-                count = await submit_btn.count()
-                if count > 0:
-                    # 보이는 버튼만 필터링
-                    for i in range(count - 1, -1, -1):
-                        if await submit_btn.nth(i).is_visible():
-                            await submit_btn.nth(i).click(timeout=5000)
-                            print("[CafeService] ✅ 즉시 발행 완료!")
-                            await asyncio.sleep(3)
-                            return True
-            print("⚠️ [CafeService] 등록 버튼을 찾지 못했습니다.")
-            return False
+
+            # 진단: 등록 버튼 후보를 로그에 덤프 (셀렉터 확정용, 비파괴)
+            if logger:
+                try:
+                    for root_name, root_obj in (("frame", frame), ("page", page)):
+                        cand = await root_obj.evaluate(r"""() => {
+                            const out = [];
+                            document.querySelectorAll('button, a').forEach(el => {
+                                const txt = (el.textContent || '').trim().slice(0, 16);
+                                const cls = (el.className || '').toString().slice(0, 50);
+                                if (/등록|작성완료|발행|확인/i.test(txt)) out.push({txt, cls});
+                            });
+                            return out.slice(0, 20);
+                        }""")
+                        logger.error(f"[CafeService] 등록 버튼 후보({root_name}, {len(cand)}개): {cand}")
+                except Exception:
+                    pass
+
+            import re
+            # 정확히 '등록'인 버튼만 클릭 (임시등록/임시저장 제외). .BaseButton 우선.
+            async def _click_exact(root, words):
+                pat = re.compile(r'^\s*(?:' + '|'.join(words) + r')\s*$')
+                for sel in (".BaseButton", "button", "a", "span[role='button']"):
+                    loc = root.locator(sel).filter(has_text=pat)
+                    n = await loc.count()
+                    for i in range(n):
+                        try:
+                            if await loc.nth(i).is_visible():
+                                await loc.nth(i).click(timeout=5000)
+                                return True
+                        except Exception:
+                            continue
+                return False
+
+            clicked = False
+            for root in (frame, page):
+                if await _click_exact(root, ["등록"]):
+                    print("[CafeService] '등록' 클릭")
+                    clicked = True
+                    break
+            if not clicked:
+                print("⚠️ [CafeService] '등록' 버튼을 찾지 못했습니다.")
+                return False
+
+            # 등록 후 확인/최종 등록 팝업이 뜨면 한 번 더 처리
+            await asyncio.sleep(2)
+            for root in (frame, page):
+                try:
+                    if await _click_exact(root, ["등록", "확인"]):
+                        print("[CafeService] 발행 확인 클릭")
+                        break
+                except Exception:
+                    continue
+            await asyncio.sleep(3)
+            print("[CafeService] ✅ 발행 처리 완료")
+            return True
         except Exception as e:
             print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False

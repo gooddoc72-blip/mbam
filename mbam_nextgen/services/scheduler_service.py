@@ -221,7 +221,31 @@ class SchedulerService:
             import os
             os.environ["NAVER_PW"] = acc.naver_pw # Temporarily pass password via env if needed
             
-            # Check if this schedule is for Content Category posting
+            # 0순위: 게시글 부스트(조회수/좋아요) — 대상 글 URL이 있으면 방문+좋아요
+            target_url = getattr(sch, 'target_post_url', None)
+            do_view = bool(getattr(sch, 'do_view', 1))
+            do_like = bool(getattr(sch, 'do_like', 1))
+            visits = max(1, getattr(sch, 'post_count_per_day', 1) or 1)
+            interval = int(getattr(sch, 'visit_interval_min', 30) or 30)
+            if target_url:
+                logger.info(f"👍 [Scheduler] 게시글 부스트: {target_url} (방문 {visits}회/{interval}분 간격, 좋아요 {do_like})")
+                await orchestrator.execute_cafe_boost(
+                    account_id=acc.naver_id, post_url=target_url,
+                    do_view=do_view, do_like=do_like, visits=visits, naver_pw=acc.naver_pw,
+                    visit_interval_min=interval,
+                )
+                return
+            # 대상 글 URL이 없으면: 카페 방문(육성)만 → 방문횟수 증가
+            if not (hasattr(sch, 'content_category') and sch.content_category):
+                logger.info(f"🚶 [Scheduler] 일반 육성(방문만): {cafe.cafe_url} (방문 {visits}회/{interval}분 간격)")
+                await orchestrator.execute_cafe_boost(
+                    account_id=acc.naver_id, post_url=cafe.cafe_url,
+                    do_view=True, do_like=False, visits=visits, naver_pw=acc.naver_pw,
+                    visit_interval_min=interval,
+                )
+                return
+
+            # (레거시) Content Category 기반 자동 포스팅
             if hasattr(sch, 'content_category') and sch.content_category:
                 logger.info(f"🚀 [Scheduler] Running content-based cafe post for category: {sch.content_category}")
                 from mbam_nextgen.services.gov_data import GovDataCollector
@@ -414,13 +438,41 @@ class SchedulerService:
             
             content_time_str = content_sch.schedule_time
             hr_str, mn_str = content_time_str.split(":")
+            # misfire_grace_time: 정시에 서버가 잠깐 꺼져 놓쳐도, 이후 1시간 내 기동하면 발화
+            # coalesce: 여러 번 밀린 경우 1회로 합침
             self.scheduler.add_job(
                 self.run_content_sync_job,
                 CronTrigger(hour=int(hr_str), minute=int(mn_str)),
                 id="content_sync",
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=3600,
+                coalesce=True,
             )
             logger.info(f"Loaded content sync schedule: {content_time_str} daily.")
+
+            # 기동 시 보충: 오늘 예정 시각이 이미 지났는데 '오늘 수집 기록'이 없으면 30초 뒤 1회 즉시 수집
+            # (로컬 PC 특성상 정시에 서버가 꺼져 있던 날을 위한 안전장치)
+            try:
+                import json
+                from datetime import timedelta
+                now = datetime.now()
+                sched_today = now.replace(hour=int(hr_str), minute=int(mn_str), second=0, microsecond=0)
+                ran_today = False
+                binfo = os.path.join("mbam_nextgen", "data", "batch_info.json")
+                if os.path.exists(binfo):
+                    with open(binfo, encoding="utf-8") as bf:
+                        last_run = (json.load(bf).get("last_batch_run") or "")
+                    if last_run[:10] == now.strftime("%Y-%m-%d"):
+                        ran_today = True
+                if now >= sched_today and not ran_today:
+                    self.scheduler.add_job(
+                        self.run_content_sync_job, 'date',
+                        run_date=now + timedelta(seconds=30),
+                        id="content_sync_catchup", replace_existing=True,
+                    )
+                    logger.info("오늘 예정 글감수집 미실행 감지 → 기동 30초 뒤 보충 수집 예약")
+            except Exception as e:
+                logger.error(f"글감수집 보충 체크 실패: {e}")
 
             # 4. 플레이스 소식(리뷰 기반) 스케줄러 (매주 월요일 10:00 체크)
             self.scheduler.add_job(

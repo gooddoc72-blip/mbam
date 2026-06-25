@@ -298,11 +298,9 @@ class BlogService:
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
         import os, asyncio, re
-        
-        # 문장이 끝나면(. ! ? + 공백) 줄바꿈. '공백이 뒤따를 때만' 끊어 도메인(bokjiro.go.kr),
-        # 소수점(3.5), 목록번호(1.) 처럼 점 뒤에 공백이 없는 경우는 끊지 않음.
-        content = re.sub(r'(?<![0-9])([.!?]+["\'”’)\]]*)[ \t]+', r'\1\n', content)
-        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        # 본문 줄바꿈/단락 가공 (블로그·카페 공용 로직)
+        content = StealthExecutor.format_body(content)
 
         print(f"[BlogService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
         
@@ -321,7 +319,8 @@ class BlogService:
         await frame.click(self.selectors["body"])
         # 이전 세션에서 켜진 채 기억된 서식(취소선/굵게 등) 해제 — best effort
         await self._reset_text_format(frame)
-        await self._dump_toolbar(frame)  # 소제목 스타일/크기 버튼 셀렉터 확인용(진단) — C 구현 후 제거 예정
+        # (진단용 _dump_toolbar 제거 — 폰트크기 드롭다운 열고 Escape 누르는 동작이 SE3에서
+        #  '작성 취소/나가기'를 유발해 창이 닫히던 원인. 셀렉터(fs16/fs19)는 이미 확보됨)
 
         chunks = re.split(r'\[이미지\]', content)
         images = images or []

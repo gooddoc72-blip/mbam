@@ -1,0 +1,9 @@
+customtkinter
+pandas
+openpyxl
+pyinstaller
+requests
+fastapi
+uvicorn
+selenium
+undetected-chromedriver

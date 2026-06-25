@@ -82,6 +82,7 @@ class NaverAccount(Base):
     user_id = Column(String, index=True) # ID of Advertiser, Agency, or Distributor
     naver_id = Column(String, index=True)
     naver_pw = Column(String) # 암호화되어 저장됨
+    blog_addr = Column(String, nullable=True)  # 로그인ID와 다른 실제 블로그 주소(예: bonetacasa)
     status = Column(String, default="active") # active, blocked, etc.
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -106,9 +107,28 @@ class CafeSchedule(Base):
     content_category = Column(String, nullable=True) # e.g. "소상공인 24"
     content_item_id = Column(String, nullable=True)
     content_item_title = Column(String, nullable=True)
-    post_count_per_day = Column(Integer, default=1) # 1일 작성 횟수
+    post_count_per_day = Column(Integer, default=1) # 1일 작성/방문 횟수
     post_qty_per_time = Column(Integer, default=1) # 1회당 작성 수량
+    # 게시글 부스트(조회수/좋아요): 대상 글 URL이 있으면 방문+좋아요, 없으면 방문(육성)만
+    target_post_url = Column(String, nullable=True)
+    do_view = Column(Integer, default=1)   # 조회수 올리기(방문)
+    do_like = Column(Integer, default=1)   # 좋아요 누르기
+    visit_interval_min = Column(Integer, default=30)  # 방문 간 텀(분)
     is_active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CafeManuscript(Base):
+    """카페 일괄 발행용 저장 원고: 계정별로 (원고 + 타겟 카페/게시판)을 각각 저장 → 일괄 발행."""
+    __tablename__ = "cafe_manuscripts"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    account_id = Column(String)   # 발행 네이버 아이디
+    cafe_url = Column(String)     # 타겟 카페 URL
+    board_name = Column(String)   # 게시판 이름
+    title = Column(String)
+    content = Column(Text)
+    status = Column(String, default="saved")  # saved | posted
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class ContentSchedule(Base):

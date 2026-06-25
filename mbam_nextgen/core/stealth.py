@@ -82,11 +82,10 @@ class StealthExecutor:
             if not await StealthExecutor._se3_click(obj, "font-size"):
                 return False
             await asyncio.sleep(0.2)
-            # 1순위: 옵션 클래스에 fs{size} 포함, 2순위: 옵션 레이어에서 숫자 텍스트 일치
-            opt = obj.locator(f'button[class*="font-size-code"][class*="fs{size_text}"]')
+            # SE3 옵션 버튼은 data-value="fs16"/"fs19" 형태 (검증됨). 클래스/텍스트보다 신뢰도 높음.
+            opt = obj.locator(f'button[data-value="fs{size_text}"]')
             if await opt.count() == 0:
-                opt = obj.locator('.se-toolbar-option-list button, .se-toolbar-option-layer button').filter(
-                    has_text=re.compile(rf'^\s*{size_text}\s*$'))
+                opt = obj.locator(f'button[class*="fs{size_text}"]')
             if await opt.count() == 0:
                 return False
             await opt.first.click(timeout=2000)
@@ -112,6 +111,62 @@ class StealthExecutor:
             }""")
         except Exception:
             pass
+
+    @staticmethod
+    def format_body(content: str) -> str:
+        """본문 줄바꿈/단락 가공 (블로그·카페 공용):
+        - 문장(. ! ?)마다 줄바꿈, 긴 문단(4문장↑)은 3문장씩 블록 분리
+        - 소제목(■/[소제목])·해시태그(#태그 2개↑) 줄 앞에 한 줄 띄움
+        - [이미지] 마커는 보존(이후 이미지 인라인 삽입에 사용)"""
+        bullets = "■▶◆●▣◼▪□▷"
+        # 긴 문장을 절(쉼표/연결어미) 경계에서 끊기 위한 연결어미 목록
+        CONNECTIVES = ('지만', '으니', '니까', '면서', '는데', '어서', '아서', '하여',
+                       '하고', '이고', '되고', '되며', '하며', '때문에', '통해', '위해',
+                       '라면', '다면', '거나', '으며', '데요', '지요', '으면', '려면')
+
+        def _split_long(sent, limit=42, soft=20):
+            """한 문장이 길면 쉼표·연결어미 뒤에서 끊어 여러 줄로. 짧으면 그대로."""
+            if len(sent) <= limit:
+                return [sent]
+            lines, cur = [], ''
+            for w in sent.split(' '):
+                cur = (cur + ' ' + w).strip() if cur else w
+                w_clean = w.rstrip(',.')
+                ends_clause = w.endswith(',') or any(w_clean.endswith(c) for c in CONNECTIVES)
+                if ends_clause and len(cur) >= soft:
+                    lines.append(cur)
+                    cur = ''
+                elif len(cur) >= limit and ' ' in cur:
+                    lines.append(cur)  # 절 경계가 없어도 너무 길면 단어 경계에서 끊음
+                    cur = ''
+            if cur:
+                lines.append(cur)
+            return lines if lines else [sent]
+
+        out_lines = []
+        for line in (content or "").split('\n'):
+            s = line.strip()
+            if not s or s.startswith('[소제목]') or s.startswith('[이미지]') or s[:1] in bullets:
+                out_lines.append(line)
+                continue
+            sents = [x.strip() for x in re.split(r'(?<=[.!?])\s+', s) if x.strip()]
+
+            def _emit(group):
+                for sent in group:
+                    out_lines.extend(_split_long(sent))
+
+            if len(sents) <= 3:
+                _emit(sents)
+            else:
+                for i in range(0, len(sents), 3):
+                    _emit(sents[i:i + 3])
+                    if i + 3 < len(sents):
+                        out_lines.append('')
+        content = '\n'.join(out_lines)
+        content = re.sub(r'\n[ \t]*(?=(?:\[소제목\]|[■▶◆●▣◼▪□▷]))', r'\n\n', content)
+        content = re.sub(r'\n(?=[^\n]*#\S+[^\n]*#\S+)', r'\n\n', content)
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        return content
 
     @staticmethod
     async def human_type(obj, selector: str, text: str, speed_mode: str = "normal", speed_multiplier: float = 1.0, do_click: bool = True):
@@ -161,24 +216,40 @@ class StealthExecutor:
         SUBTITLE_MARK = "[소제목]"
         HEADING_BULLETS = ("■", "▶", "◆", "●", "▣", "◼", "▪", "□", "▷")
         HEADING_SIZE = "19"   # 소제목 폰트 크기(본문 기본 16 → 19)
-        need_reset = False    # 직전 소제목 서식(크게/굵게)을 다음 본문 줄에서 원복해야 하는지
         paragraphs = text.split('\n')
 
         async def _style_current_line(size_text, want_bold):
-            """방금 입력한 줄을 선택(Shift+Home)해 폰트 크기/굵게를 적용 후 선택 해제."""
+            """방금 입력한 (짧은) 소제목 줄을 선택해 굵게→폰트크기 순으로 적용. 본문엔 사용하지 않음."""
             try:
                 await page.keyboard.press("Shift+Home")
-                await asyncio.sleep(0.15)
-                await StealthExecutor._se3_set_font_size(obj, size_text)
+                await asyncio.sleep(0.12)
                 bold_on = await StealthExecutor._se3_bold_is_on(obj)
-                if want_bold and not bold_on:
+                if want_bold != bold_on:
                     await StealthExecutor._se3_click(obj, "bold")
-                elif (not want_bold) and bold_on:
-                    await StealthExecutor._se3_click(obj, "bold")
+                    await asyncio.sleep(0.1)
+                await page.keyboard.press("End")
+                await page.keyboard.press("Shift+Home")
+                await asyncio.sleep(0.12)
+                await StealthExecutor._se3_set_font_size(obj, size_text)
                 await page.keyboard.press("End")
                 await asyncio.sleep(0.1)
             except Exception:
                 pass
+
+        async def _reset_typing_format():
+            """선택 없이 '입력 서식'을 본문 기본(16/굵게 off)으로 — 다음 타이핑부터 적용.
+            줄바꿈(wrap)된 본문도 처음부터 정상 서식으로 입력되어 굵게/크기 번짐이 없다."""
+            try:
+                if await StealthExecutor._se3_bold_is_on(obj):
+                    await StealthExecutor._se3_click(obj, "bold")
+                    await asyncio.sleep(0.1)
+                await StealthExecutor._se3_set_font_size(obj, "16")
+                await asyncio.sleep(0.1)
+            except Exception:
+                pass
+
+        # 세그먼트 시작 시 본문 기본 서식으로 초기화 (이전 세그먼트 소제목 19/굵게가 새지 않도록)
+        await _reset_typing_format()
 
         for p_idx, paragraph in enumerate(paragraphs):
             # 소제목 줄 판별 — 마커 '[소제목]'(토큰) 또는 줄 맨 앞 헤딩 불릿(■ ▶ ◆ 등, 짧은 줄)
@@ -191,8 +262,8 @@ class StealthExecutor:
                 paragraph = stripped  # 불릿(■ 등)은 유지
                 is_sub = True
 
+            # 빈 줄(단락 경계) → 한 줄 띄움 (SE3가 빈 단락을 무시하지 않도록 공백 입력) — coco8go 동일
             if not paragraph:
-                # 에디터가 빈 줄을 무시하지 않도록 공백 입력 (need_reset 은 유지 → 다음 실제 본문 줄에서 원복)
                 await page.keyboard.type(" ")
                 await asyncio.sleep(0.1)
 
@@ -206,18 +277,16 @@ class StealthExecutor:
                 if char in [',', '.', '!', '?']: delay += random.uniform(0.4, 1.2) * speed_multiplier
                 await asyncio.sleep(max(0.01, delay))
 
-            # 소제목 줄 → 폰트 크게 + 굵게 (SE3 툴바: Ctrl+B 단축키가 불안정해 실제 버튼/드롭다운 사용)
+            # 소제목 줄 → (선택해서) 크게+굵게 적용 후, 다음 본문을 위해 입력서식을 16/일반으로 복귀
+            # 본문 줄은 이미 _reset_typing_format 상태로 입력되므로 별도 처리 불필요(굵게/크기 번짐 없음)
             if is_sub and paragraph:
                 await _style_current_line(HEADING_SIZE, want_bold=True)
-                need_reset = True
-            elif need_reset and paragraph:
-                # 소제목 다음 첫 본문 줄 → 16/굵게 해제로 원복 (서식 상속 방지)
-                await _style_current_line("16", want_bold=False)
-                need_reset = False
+                await _reset_typing_format()
 
+            # 줄바꿈: 모든 줄 끝에서 Enter (문장=새 줄, 빈 줄=한 줄 띄움) — coco8go 동일
             if p_idx < len(paragraphs) - 1:
                 await page.keyboard.press("Enter", delay=100)
-                await asyncio.sleep(random.uniform(1.5, 3.5) * speed_multiplier)
+                await asyncio.sleep(random.uniform(0.8, 1.8) * speed_multiplier)
 
     @staticmethod
     async def natural_scroll(obj):

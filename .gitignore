@@ -60,3 +60,32 @@ mbam_nextgen/profiles/
 # Generated/temp images
 mbam_nextgen/generated_images/
 mbam_nextgen/temp_images/
+temp_uploaded_images/
+
+# 디버그/임시 스크립트·로그 (커밋 제외)
+/test_*.py
+/alter_db.py
+/check_db.py
+/clear_cache.py
+/fix_syntax.py
+/inject_endpoint.py
+/list_gemini.py
+/list_models.py
+/parse_pagination.py
+crash_log.txt
+error_traceback.txt
+_fe.txt
+naver_classes.txt
+names.txt
+smartstore_keys.txt
+smartstore_state.txt
+*.txt
+!requirements.txt
+!설치안내.txt
+
+# 산출물/바이너리 (커밋 제외)
+*.xlsx
+*.csv
+~$*
+*.exe
+naver_place_crawler/Output/

@@ -118,26 +118,33 @@ function CafeAuthorityCards({ item }) {
 export default function CafeAnalysisPage() {
     const [mode, setMode] = useState('url'); // 'url' | 'content'
 
-    // ─ 본문 해부 분석 (기존) ────────────────────────────────────
+    // ─ 본문 해부 분석 (다중 URL, 최대 10) ───────────────────────
     const [keyword, setKeyword] = useState('');
-    const [content, setContent] = useState('');
+    const [cafeUrls, setCafeUrls] = useState('');
     const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState(null);
+    const [result, setResult] = useState(null);        // [{url, title, used_keyword, content_chars, data}]
+    const [analyzeErrors, setAnalyzeErrors] = useState([]);
     const [error, setError] = useState('');
 
     const handleAnalyze = async () => {
-        if (!keyword.trim()) { alert('키워드를 입력해주세요.'); return; }
-        if (!content.trim()) { alert('카페 글 본문을 입력해주세요.'); return; }
-        setLoading(true); setError(''); setResult(null);
+        const urls = cafeUrls.split(/\r?\n/).map(s => s.trim()).filter(s => s.startsWith('http'));
+        if (urls.length === 0) { alert('카페 글 URL을 1개 이상 입력해주세요. (한 줄에 한 개)'); return; }
+        if (urls.length > 10) { alert('한 번에 최대 10개까지 분석할 수 있습니다.'); return; }
+        setLoading(true); setError(''); setResult(null); setAnalyzeErrors([]);
         try {
             const res = await fetchWithAuth('/api/seo/analyze-cafe-post', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword, content })
+                body: JSON.stringify({ keyword, urls })
             });
             const data = await res.json();
-            if (data.success && data.data) setResult(data.data);
-            else setError(data.detail || '분석 중 오류가 발생했습니다.');
+            if (Array.isArray(data.items)) {
+                setResult(data.items);
+                setAnalyzeErrors(data.errors || []);
+                if (data.items.length === 0) setError('분석된 글이 없습니다. URL을 확인해주세요.');
+            } else {
+                setError(data.detail || '분석 중 오류가 발생했습니다.');
+            }
         } catch (err) {
             setError(err.message || '서버 연결에 실패했습니다.');
         } finally { setLoading(false); }
@@ -319,12 +326,13 @@ export default function CafeAnalysisPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', alignItems: 'start' }}>
                     <div className="glass-card" style={{ padding: '2rem' }}>
                         <div style={{ marginBottom: '1.5rem' }}>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>타겟 키워드</label>
-                            <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="예: 강남역 맛집" style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box' }} />
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>카페 글 URL <span style={{ fontWeight: 'normal', color: '#94a3b8', fontSize: '0.85rem' }}>(한 줄에 하나, 최대 10개)</span></label>
+                            <textarea value={cafeUrls} onChange={(e) => setCafeUrls(e.target.value)} placeholder={"https://cafe.naver.com/카페주소/글번호\nhttps://cafe.naver.com/카페주소/글번호2\n..."} rows={6} style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.6' }} />
+                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.83rem', color: '#94a3b8' }}>URL만 넣으면 서버가 각 글의 본문을 자동으로 가져와 해부 분석합니다. (현재 {cafeUrls.split(/\r?\n/).filter(s => s.trim().startsWith('http')).length}개)</p>
                         </div>
                         <div style={{ marginBottom: '1.5rem' }}>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>카페 글 본문 (복사해서 붙여넣기)</label>
-                            <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="분석하고 싶은 카페 글의 본문을 여기에 붙여넣으세요..." rows={15} style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.5' }} />
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>타겟 키워드 <span style={{ fontWeight: 'normal', color: '#94a3b8', fontSize: '0.85rem' }}>(선택 — 비우면 각 글 제목 기준)</span></label>
+                            <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()} placeholder="예: 강남역 맛집" style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box' }} />
                         </div>
                         <button onClick={handleAnalyze} disabled={loading} className="btn-primary" style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }}>
                             {loading ? <>분석 중입니다... (약 10~20초 소요)</> : <><Search size={20} />AI 해부 분석 시작</>}
@@ -335,7 +343,7 @@ export default function CafeAnalysisPage() {
                     {!result && !loading && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '400px', border: '2px dashed #cbd5e1', borderRadius: '16px', color: '#94a3b8' }}>
                             <Activity size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                            <p style={{ fontSize: '1.1rem', margin: 0 }}>키워드와 본문을 입력하고 분석을 시작해보세요.</p>
+                            <p style={{ fontSize: '1.1rem', margin: 0 }}>카페 글 URL을 입력하고 분석을 시작해보세요.</p>
                             <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>AI가 5가지 주요 알고리즘 지표를 통해 글을 해부합니다.</p>
                         </div>
                     )}
@@ -347,14 +355,31 @@ export default function CafeAnalysisPage() {
                         </div>
                     )}
                     {result && !loading && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                            {renderCard('author_power', result.author_power, <ShieldAlert color="#f59e0b" />)}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                {renderCard('rcon', result.rcon, <Search color="#3b82f6" />)}
-                                {renderCard('scqa', result.scqa, <FileText color="#10b981" />)}
-                                {renderCard('dia', result.dia, <CheckCircle2 color="#8b5cf6" />)}
-                                {renderCard('chain', result.chain, <Activity color="#ec4899" />)}
-                            </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                            {analyzeErrors.length > 0 && (
+                                <div style={{ padding: '0.8rem 1rem', background: '#fef2f2', color: '#b91c1c', borderRadius: '8px', border: '1px solid #fecaca', fontSize: '0.88rem' }}>
+                                    분석 실패 {analyzeErrors.length}건: {analyzeErrors.map(e => e.url).join(', ')}
+                                </div>
+                            )}
+                            {result.map((item, i) => {
+                                const d = item.data || {};
+                                return (
+                                    <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        <div style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b' }}>#{i + 1} {item.title || '제목 없음'}</div>
+                                            <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#2563eb', wordBreak: 'break-all' }}>{item.url}</a>
+                                            {item.used_keyword && <span style={{ marginLeft: '0.5rem', fontSize: '0.78rem', color: '#94a3b8' }}>키워드: {item.used_keyword} · {item.content_chars}자</span>}
+                                        </div>
+                                        {renderCard('author_power', d.author_power, <ShieldAlert color="#f59e0b" />)}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                            {renderCard('rcon', d.rcon, <Search color="#3b82f6" />)}
+                                            {renderCard('scqa', d.scqa, <FileText color="#10b981" />)}
+                                            {renderCard('dia', d.dia, <CheckCircle2 color="#8b5cf6" />)}
+                                            {renderCard('chain', d.chain, <Activity color="#ec4899" />)}
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

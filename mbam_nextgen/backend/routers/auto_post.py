@@ -1,12 +1,40 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
 from mbam_nextgen.orchestrator import WorkflowOrchestrator, task_logger
+from mbam_nextgen.backend.quota import consume_generation_quota
 from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
 
 router = APIRouter()
 seo_analyzer = SeoAnalyzer()
+
+
+@router.post("/describe-images", summary="첨부 이미지+키워드로 글감(원고 소스) 생성 — 글감수집 없이")
+async def describe_images(images: List[UploadFile] = File(...), keyword: str = Form("")):
+    """업로드 이미지를 비전(Gemini)으로 분석해 원고용 글감 텍스트를 만들고,
+    이미지는 폴더에 저장해 발행 시 글에 첨부할 수 있도록 폴더 경로를 반환한다."""
+    import os, uuid
+    folder = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
+    os.makedirs(folder, exist_ok=True)
+    paths = []
+    for f in images:
+        ext = os.path.splitext(f.filename or "img.jpg")[1].lower() or ".jpg"
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            ext = ".jpg"
+        p = os.path.join(folder, f"{uuid.uuid4().hex}{ext}")
+        with open(p, "wb") as out:
+            out.write(await f.read())
+        paths.append(p)
+    if not paths:
+        raise HTTPException(status_code=400, detail="이미지가 없습니다.")
+
+    from mbam_nextgen.services.soul import SoulRewriter
+    desc = await SoulRewriter().describe_image(paths, keyword)
+    if not desc:
+        return {"success": False, "detail": "이미지 분석에 실패했습니다. (Gemini 키 확인 또는 다른 이미지로 재시도)", "image_folder": folder}
+    source_data = f"[작성 주제 키워드] {keyword}\n[첨부 이미지에서 분석한 글감]\n{desc}"
+    return {"success": True, "description": desc, "source_data": source_data, "image_folder": folder, "count": len(paths)}
 
 class AutoPostRequest(BaseModel):
     # For multiple accounts
@@ -224,7 +252,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 naver_pw=req.naver_pw,
                 source_data=req.source_data,
                 prompt_category=req.prompt_category,
-                include_source_link=req.include_source_link
+                include_source_link=req.include_source_link,
+                image_folder_path=req.image_folder_path,
+                use_tethering=req.use_tethering
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
@@ -247,7 +277,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
 
 @router.post("")
 @router.post("/")
-async def trigger_auto_post(req: AutoPostRequest):
+async def trigger_auto_post(req: AutoPostRequest, _q: dict = Depends(consume_generation_quota)):
     import uuid
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_automation_task(task_id, req))
@@ -425,7 +455,7 @@ async def _generate_impl(req: AutoPostRequest):
 
 
 @router.post("/generate-content")
-async def generate_multiple_contents(req: AutoPostRequest):
+async def generate_multiple_contents(req: AutoPostRequest, _q: dict = Depends(consume_generation_quota)):
     """원고 생성은 30초 이상 걸릴 수 있어 백그라운드 작업으로 처리(프록시 30초 타임아웃 회피).
     프론트는 반환된 task_id 로 /status/{task_id} 폴링 후 result.generated_contents 를 사용한다."""
     import uuid

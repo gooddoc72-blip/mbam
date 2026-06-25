@@ -484,11 +484,63 @@ class SeoAnalyzer:
             "smart_blocks": smart_blocks,
             "kw_volumes": kw_volumes
         }
+    async def _fetch_blog_tab(self, keyword: str, limit: int = 20) -> list:
+        """네이버 통검 '블로그 탭'(ssc=tab.blog.all)에서 블로그 글을 순위 그대로 수집.
+        난독화 클래스 대신 'blog.naver.com/{id}/{logNo}' href 패턴으로 추출(클래스 변경에 강함).
+        반환: [{title, url, type:'블로그'}] (블로거당 1건, 제목 텍스트 우선)."""
+        import urllib.parse
+        url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={urllib.parse.quote(keyword)}"
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR",
+                )
+                page = await context.new_page()
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    await page.wait_for_timeout(1500)
+                    for _ in range(4):
+                        await page.evaluate("window.scrollBy(0, 3000)")
+                        await page.wait_for_timeout(700)
+                    items = await page.evaluate(r"""() => {
+                        const rx = /blog\.naver\.com\/([^\/?#]+)\/(\d+)/;
+                        const out = [];
+                        document.querySelectorAll('a[href]').forEach(a => {
+                            const m = a.href.match(rx);
+                            if (!m) return;
+                            const id = m[1];
+                            if (id.endsWith('.naver') || id.includes('.')) return;
+                            const txt = (a.innerText || '').trim().replace(/\s+/g, ' ');
+                            out.push({ id: id, logno: m[2], txt: txt });
+                        });
+                        // 제목 텍스트가 있는 링크 우선 → 블로거당 1건 dedup
+                        out.sort((a, b) => (b.txt.length > 5 ? 1 : 0) - (a.txt.length > 5 ? 1 : 0));
+                        const seen = new Set(); const res = [];
+                        for (const o of out) { if (seen.has(o.id)) continue; seen.add(o.id); res.push(o); }
+                        return res;
+                    }""")
+                finally:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+            return [{
+                "title": (it["txt"][:80] if it.get("txt") else it["id"]),
+                "url": f"https://blog.naver.com/{it['id']}/{it['logno']}",
+                "type": "블로그",
+            } for it in (items or [])[:limit]]
+        except Exception as e:
+            print(f"[SEO] 블로그 탭 수집 실패: {e}")
+            return []
+
     async def search_smart_blocks(self, keyword: str) -> dict:
         print(f"[SEO] '{keyword}' 스마트블록 탐색 시작...")
         vol_task = asyncio.create_task(self.fetch_keyword_volumes([keyword]))
         search_url = f"https://m.search.naver.com/search.naver?where=m&query={urllib.parse.quote(keyword)}"
-        
+        popular_links = []  # '인기글' 블록 전체(블로그+카페+인플) — href 패턴으로 완전 추출
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; SM-G981B)")
@@ -616,6 +668,42 @@ class SeoAnalyzer:
                     });
                     return { blocks: results, rel_kws: [...new Set(rel_kws)] };
                 }""")
+
+                # '인기글' 블록을 href 패턴으로 완전 추출(기존 블록 추출이 일부만 잡는 문제 보완)
+                try:
+                    popular_links = await page.evaluate(r"""() => {
+                        const decode = (href) => {
+                            try { if (href.includes('m.search.naver.com') && href.includes('url=')) { return decodeURIComponent(new URL(href).searchParams.get('url')); } } catch(e){}
+                            return href;
+                        };
+                        let sec = null;
+                        document.querySelectorAll('section, .api_subject_bx').forEach(s => {
+                            const h = s.querySelector('h2,h3,.api_title,[role=heading]');
+                            if (h && /인기글/.test(h.innerText)) sec = s;
+                        });
+                        if (!sec) return [];
+                        const byUrl = new Map();  // url → 제목(본문 아님)으로 dedup
+                        sec.querySelectorAll('a[href]').forEach(a => {
+                            let href = decode(a.href);
+                            const isBlog = /blog\.naver\.com\/[^\/?#]+\/\d+/.test(href);
+                            // 카페는 '글'만(클럽홈/프로필 제외): /클럽/숫자 또는 art=/articleid=
+                            const isCafe = /cafe\.naver\.com\/[^\/?#]+\/\d+/.test(href) || /[?&](art|articleid)=/.test(href);
+                            const isInf = href.includes('in.naver.com');
+                            if (!isBlog && !isCafe && !isInf) return;
+                            // 카드 anchor 는 '제목\n본문스니펫' 형태가 많음 → 첫 줄만 취해 제목 후보로.
+                            const firstLine = ((a.innerText || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || '').replace(/\s+/g, ' ').slice(0, 80);
+                            // 썸네일 숫자배지(예: '26')·초단문·메타는 제외
+                            if (!firstLine || firstLine.length < 4) return;
+                            if (/^[\d\s.,~%:+\-]+$/.test(firstLine)) return;
+                            const type = isCafe ? '카페' : (isInf ? '인플루언서' : '블로그');
+                            const prev = byUrl.get(href);
+                            // 제목은 보통 본문 스니펫보다 짧다 → 유효 후보 중 더 짧은 첫 줄을 제목으로 채택.
+                            if (!prev || firstLine.length < prev.title.length) byUrl.set(href, { title: firstLine, url: href, type: type });
+                        });
+                        return [...byUrl.values()];
+                    }""")
+                except Exception as _e:
+                    popular_links = []
             except Exception as e:
                 print(e)
                 blocks = {'blocks': [], 'rel_kws': []}
@@ -694,12 +782,28 @@ class SeoAnalyzer:
                     b['links'] = clean_links
                     filtered_blocks.append(b)
                     
+        # 블로그 탭(순위 그대로) 별도 수집 + 인기글 완전 추출을 앞에 배치
+        # → 사용자가 '블로그'와 '인기글'을 각각 체크 선택할 수 있게 두 블록을 상단 고정.
+        blog_tab_links = await self._fetch_blog_tab(keyword, limit=20)
+        final_blocks = []
+        if blog_tab_links:
+            final_blocks.append({"block_title": "블로그", "links": blog_tab_links})
+        if popular_links:
+            # 깨끗한 제목 우선 정렬 후 상위 30
+            final_blocks.append({"block_title": "인기글", "links": popular_links[:30]})
+        # 나머지(플레이스/클립/새로오픈 등)는 참고용으로 뒤에 — 단, 블로그/인기글 중복 제외
+        for b in filtered_blocks:
+            bt = b.get("block_title", "")
+            if bt == "블로그" or "인기글" in bt:
+                continue
+            final_blocks.append(b)
+
         return {
             "keyword": keyword,
             "pc_vol": pc_vol,
             "mo_vol": mo_vol,
             "related_keywords": related_keywords_data,
-            "blocks": filtered_blocks
+            "blocks": final_blocks
         }
 
     async def generate_winning_formula(self, keyword: str, metrics: list, top_keywords: list) -> str:
@@ -1040,6 +1144,7 @@ class SeoAnalyzer:
                         is_cafe = "cafe.naver.com" in url
                         is_blog = "blog.naver.com" in url
                         blog_id = "미상"
+                        cafe_author_info = {}
                         
                         raw_text = ""
                         html_source = ""
@@ -1140,6 +1245,57 @@ class SeoAnalyzer:
                                 member_key = article_data.get('writer', {}).get('memberKey')
                                 if member_key:
                                     blog_id = member_key
+
+                                # 작성자/카페 권위 데이터 추출 — API JSON에 모두 포함(Playwright 불필요).
+                                _res = api_data.get('result', {})
+                                _writer = article_data.get('writer', {})
+                                _cafe = _res.get('cafe', {})
+                                _icon = _writer.get('memberLevelIconUrl', '') or ''
+                                _tier_m = re.search(r'/levelicon/(\d+)/', _icon)
+                                _post_date = ''
+                                _wd = article_data.get('writeDate')
+                                if _wd:
+                                    try:
+                                        from datetime import datetime
+                                        _post_date = datetime.fromtimestamp(int(_wd) / 1000).strftime('%Y.%m.%d %H:%M')
+                                    except Exception:
+                                        _post_date = ''
+                                cafe_author_info = {
+                                    'nickname':      _writer.get('nick', ''),
+                                    'level_name':    _writer.get('memberLevelName', ''),
+                                    'level_tier':    int(_tier_m.group(1)) if _tier_m else None,
+                                    'is_popular':    bool(_writer.get('currentPopularMember')),
+                                    'member_hash':   member_key,
+                                    'view_count':    int(article_data.get('readCount', 0) or 0),
+                                    'like_count':    0,  # 카페 좋아요수는 별도 reaction API 필요(현재 미수집)
+                                    'comment_count': int(article_data.get('commentCount', 0) or 0),
+                                    'post_date':     _post_date,
+                                    'cafe_name':     _cafe.get('name', ''),
+                                    'cafe_desc':     _cafe.get('introduction', ''),
+                                    'cafe_member':   int(_cafe.get('memberCount', 0) or 0),
+                                    'club_id':       club_id,
+                                }
+
+                                # 좋아요수 — 네이버 통합 LikeIt(공감) API. article API엔 없어서 별도 호출.
+                                #   route-like.naver.com/v1/search/contents?q=CAFE[{club}_{cafeUrl}_{article}]&pool=cafe
+                                try:
+                                    _curl = _cafe.get('url', '')
+                                    if _curl and club_id and article_id:
+                                        import urllib.parse as _up
+                                        _q = _up.quote(f'CAFE[{club_id}_{_curl}_{article_id}]')
+                                        _like_url = (f'https://route-like.naver.com/v1/search/contents'
+                                                     f'?suppress_response_codes=true&q={_q}&pool=cafe')
+                                        async with session.get(_like_url) as _lr:
+                                            if _lr.status == 200:
+                                                _lt = await _lr.text()
+                                                _lm = re.search(r'^[^({]*\((.*)\)\s*;?\s*$', _lt.strip(), re.S)
+                                                _ld = json.loads(_lm.group(1) if _lm else _lt)
+                                                for _c in _ld.get('contents', []):
+                                                    for _rx in _c.get('reactions', []):
+                                                        if _rx.get('reactionType') == 'like':
+                                                            cafe_author_info['like_count'] = int(_rx.get('count', 0) or 0)
+                                except Exception as _le:
+                                    print(f"[SEO] 카페 좋아요수 수집 실패: {_le}")
                                     
                         else:
                             return raw_url, {"error": "지원되지 않는 URL 형식입니다. (네이버 블로그/카페만 지원)"}
@@ -1179,10 +1335,10 @@ class SeoAnalyzer:
                         if len(cleaned_text) < 50:
                             return raw_url, {"error": "본문이 너무 짧습니다."}
                             
-                        cafe_author_info = {}
-                        if is_cafe:
-                            cafe_author_info = {'club_id': club_id, 'member_hash': blog_id}
-                            
+                        # 카페 작성자/카페 권위 점수 병합 (닉네임이 추출된 경우만)
+                        if is_cafe and cafe_author_info.get('nickname'):
+                            cafe_author_info.update(self._calculate_authority_scores(cafe_author_info))
+
                         blog_info = {}
                         if blog_id and blog_id != "미상" and not is_cafe:
                             blog_info = await self.fetch_blog_stats_by_id(blog_id)

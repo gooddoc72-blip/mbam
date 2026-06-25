@@ -35,22 +35,29 @@ class SoulRewriter:
         self._init_clients()
 
     def _init_clients(self):
+        # BYOK: 요청 사용자(설치형 고객)의 키가 있으면 그 키, 없으면 서버 .env 키(웹/시스템).
+        try:
+            from mbam_nextgen.services.ai_keys import get_ai_keys
+            _uk = get_ai_keys()
+        except Exception:
+            _uk = {}
+
         # 1. Gemini Init (New SDK)
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
+        self.gemini_key = _uk.get("gemini_key") or os.getenv("GEMINI_API_KEY")
         if genai and self.gemini_key:
             self.gemini_client = genai.Client(api_key=self.gemini_key)
         else:
             self.gemini_client = None
 
         # 2. Claude Init
-        self.claude_key = os.getenv("ANTHROPIC_API_KEY")
+        self.claude_key = _uk.get("claude_key") or os.getenv("ANTHROPIC_API_KEY")
         if anthropic and self.claude_key:
             self.claude_client = anthropic.AsyncAnthropic(api_key=self.claude_key)
         else:
             self.claude_client = None
 
         # 3. OpenAI Init
-        self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.openai_key = _uk.get("openai_key") or os.getenv("OPENAI_API_KEY")
         if openai and self.openai_key:
             self.openai_client = openai.AsyncOpenAI(api_key=self.openai_key)
         else:
@@ -192,6 +199,76 @@ class SoulRewriter:
         
         첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요.
         """
+
+    async def describe_image(self, image_paths: list, keyword: str = "") -> str:
+        """첨부 이미지를 비전으로 분석해 원고 작성용 '글감(핵심 정보)'을 한국어로 정리.
+        Gemini 우선(재시도) → 실패 시 Claude 비전 폴백. 글감수집 없이 이미지+키워드로 원고 작성 시 사용."""
+        import os
+        valid = [p for p in (image_paths or [])[:4] if p and os.path.exists(p)]
+        if not valid:
+            return ""
+        kw = (keyword or "").strip()
+        instruction = (
+            f"다음 이미지를 보고 '{kw}' 주제의 네이버 블로그/카페 글을 쓰기 위한 핵심 정보를 한국어로 정리해줘.\n"
+            if kw else
+            "다음 이미지를 보고 네이버 블로그/카페 글을 쓰기 위한 핵심 정보를 한국어로 정리해줘.\n"
+        ) + "- 이미지에 실제로 보이는 사실만 객관적으로(상품/장면/특징/문구/숫자 등).\n- 추측·과장 금지. 보이지 않는 정보는 적지 말 것.\n- 글 작성에 바로 쓸 수 있게 항목별로 간결히."
+
+        # 1) Gemini 비전 (503/429 등 일시 오류 시 재시도)
+        if self.gemini_client:
+            try:
+                from PIL import Image
+                parts = [instruction]
+                for p in valid:
+                    try:
+                        parts.append(Image.open(p))
+                    except Exception:
+                        continue
+                if len(parts) > 1:
+                    for attempt in range(3):
+                        try:
+                            response = await asyncio.to_thread(
+                                self.gemini_client.models.generate_content,
+                                model="gemini-2.5-flash",
+                                contents=parts,
+                            )
+                            if response.text:
+                                return response.text
+                        except Exception as e:
+                            msg = str(e)
+                            print(f"[Soul] Gemini 비전 시도{attempt+1} 실패: {msg[:120]}")
+                            if any(k in msg for k in ("503", "429", "UNAVAILABLE", "high demand", "overloaded")) and attempt < 2:
+                                await asyncio.sleep(2.5 * (attempt + 1))
+                                continue
+                            break
+            except Exception as e:
+                print(f"[Soul] Gemini 비전 준비 실패: {e}")
+
+        # 2) Claude 비전 폴백
+        if self.claude_client:
+            try:
+                import base64
+                blocks = []
+                for p in valid:
+                    ext = os.path.splitext(p)[1].lower()
+                    media = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(ext, "image/jpeg")
+                    with open(p, "rb") as f:
+                        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+                blocks.append({"type": "text", "text": instruction})
+                resp = await self.claude_client.messages.create(
+                    model="claude-opus-4-8",
+                    max_tokens=1500,
+                    messages=[{"role": "user", "content": blocks}],
+                )
+                txt = resp.content[0].text if resp.content else ""
+                if txt:
+                    print("[Soul] Claude 비전 폴백 성공")
+                    return txt
+            except Exception as e:
+                print(f"[Soul] Claude 비전 폴백 실패: {e}")
+
+        return ""
 
     async def generate_content(self, prompt: str) -> str:
         """자유 형식의 프롬프트를 처리 (가용한 첫 번째 AI 사용)"""

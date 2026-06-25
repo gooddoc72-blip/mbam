@@ -36,6 +36,23 @@ def clean_and_tokenize(keyword: str) -> List[str]:
                 valid_tokens.append(word)
     return valid_tokens
 
+async def fetch_autocomplete_related(keyword: str) -> List[str]:
+    """네이버 자동완성(ac.search.naver.com)으로 실제 연관 검색어 수집. API 키 불필요(무료)."""
+    import urllib.parse
+    url = f"https://ac.search.naver.com/nx/ac?q={urllib.parse.quote(keyword)}&con=1&rev=4&q_enc=UTF-8&st=100"
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6.0)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("items", [])
+                if items:
+                    return [it[0] for it in items[0] if it][:15]
+    except Exception as e:
+        print("autocomplete error:", e)
+    return []
+
+
 async def fetch_top_10_shopping(keyword: str) -> List[str]:
     client_id = os.environ.get("NAVER_CLIENT_ID")
     client_secret = os.environ.get("NAVER_CLIENT_SECRET")

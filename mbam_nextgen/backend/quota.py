@@ -72,3 +72,28 @@ def increment_quota(user_email: str, role: str, db: Session):
     )
     if updated:
         db.commit()
+
+
+def consume_generation_quota(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """AI 생성 트리거 엔드포인트용 의존성.
+      · 관리자: 무제한(과금 X)
+      · BYOK(본인 AI 키 보유)=설치형 고객: 본인 키로 청구 → 쿼터 과금 X
+      · 키 없음(서버키 사용)=웹 고객: 쿼터 한도 확인 + 1회 차감
+    """
+    role = current_user.get("role")
+    if role == "admin":
+        return current_user
+
+    uid = current_user.get("sub")
+    try:
+        from .models import UserAIKey
+        rec = db.query(UserAIKey).filter(UserAIKey.user_id == uid).first()
+        if rec and (rec.claude_key or rec.gemini_key or rec.openai_key):
+            return current_user  # BYOK → 운영자 비용 0, 쿼터 차감 없음
+    except Exception:
+        pass
+
+    # 웹(서버키) 사용자: 한도 검사 후 1회 차감
+    checked = check_quota(current_user, db)
+    increment_quota(uid, role, db)
+    return checked

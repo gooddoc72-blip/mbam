@@ -7,7 +7,9 @@ import re
 from datetime import datetime
 
 def get_db_path():
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
+    # 이 파일은 mbam_nextgen/services/deep_crawler.py → 상위 2단계가 mbam_nextgen.
+    # (이전: dirname 3회 → 프로젝트 루트의 존재하지 않는 data/ranking.db 를 가리켜 'unable to open database file' 발생)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "ranking.db")
 
 async def _scrape_badges_for_keyword(keyword: str, max_scrolls: int = 20):
     """

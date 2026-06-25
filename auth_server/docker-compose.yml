@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  auth_server:
+    build: .
+    container_name: crawler_auth_server
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./hwid_auth.db:/app/hwid_auth.db
+    restart: always

@@ -64,7 +64,7 @@ const MENU_ITEMS = [
             { name: "쿠팡 순위 분석", path: "/coupang/rank", icon: TrendingUp }
         ]
     },
-    { name: "멀티 실행", path: "/multi-task", icon: Layers },
+    { name: "계정관리", path: "/multi-task", icon: Layers },
     { name: "설정", path: "/settings", icon: Settings },
     { name: "결제 및 플랜", path: "/billing", icon: CreditCard },
     { name: "로그", path: "/logs", icon: ScrollText },
@@ -80,6 +80,10 @@ export default function Sidebar() {
     const [userRole, setUserRole] = useState(null);
     const [userEmail, setUserEmail] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
+    const [drawerOpen, setDrawerOpen] = useState(false); // 모바일 사이드바 드로어
+
+    // 메뉴 이동 시 드로어 자동 닫기
+    useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
     const fetchActiveTasks = async () => {
         try {
@@ -122,10 +126,13 @@ export default function Sidebar() {
     };
 
     return (
-        <aside style={{
+        <>
+        <button className="sidebar-hamburger" onClick={() => setDrawerOpen(true)} aria-label="메뉴 열기">☰</button>
+        <div className={"sidebar-overlay" + (drawerOpen ? " open" : "")} onClick={() => setDrawerOpen(false)} />
+        <aside className={"app-sidebar" + (drawerOpen ? " open" : "")} style={{
             width: "260px",
             height: "100vh",
-            background: "rgba(255, 255, 255, 0.8)",
+            background: "rgba(255, 255, 255, 0.95)",
             backdropFilter: "blur(12px)",
             borderRight: "1px solid rgba(226, 232, 240, 0.8)",
             display: "flex",
@@ -313,5 +320,6 @@ export default function Sidebar() {
                 </div>
             </div>
         </aside>
+        </>
     );
 }

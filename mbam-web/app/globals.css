@@ -1,5 +1,20 @@
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+
 :root {
   --bg-color: #f8fafc;
+  /* 리디자인 디자인 토큰 (절제된 프로 SaaS) */
+  --ds-bg: #f6f7f9;
+  --ds-surface: #ffffff;
+  --ds-border: #e6e8eb;
+  --ds-text: #16181d;
+  --ds-text-sub: #6b7280;
+  --ds-text-muted: #9aa1ac;
+  --ds-accent: #3b82f6;
+  --ds-ink: #18181b;
+  --ds-radius: 12px;
+  --ds-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.03);
+  --ds-shadow-hover: 0 6px 16px rgba(16,24,40,0.08);
+  --ds-font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --text-main: #0f172a;
   --text-sub: #64748b;
   --primary: #10b981;
@@ -21,8 +36,21 @@ body {
     radial-gradient(at 100% 100%, hsla(210, 100%, 90%, 0.4) 0px, transparent 50%);
   background-attachment: fixed;
   color: var(--text-main);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+}
+
+/* ===== 리디자인 스코프(.ds): 이 클래스 안에서만 새 디자인 토큰/배경 적용 ===== */
+.ds {
+  --shadow-sm: var(--ds-shadow);
+}
+.ds-page {
+  background: var(--ds-bg);
+  min-height: 100%;
+  color: var(--ds-text);
+  letter-spacing: -0.01em;
 }
 
 /* Glassmorphism Card Base */
@@ -148,6 +176,51 @@ h1, h2, h3 {
 @media (max-width: 768px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .grid-6 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ===== 반응형 앱 셸 (사이드바 + 메인) ===== */
+.app-shell { display: flex; min-height: 100vh; }
+.app-main { flex: 1; padding: 2rem; height: 100vh; overflow-y: auto; min-width: 0; box-sizing: border-box; }
+.sidebar-hamburger { display: none; }
+.sidebar-overlay { display: none; }
+
+/* 태블릿/모바일: 사이드바를 오프캔버스 드로어로 전환 */
+@media (max-width: 900px) {
+  .app-sidebar {
+    position: fixed !important;
+    left: 0; top: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.18);
+    max-width: 84vw;
+  }
+  .app-sidebar.open { transform: translateX(0); }
+
+  .sidebar-hamburger {
+    display: flex; align-items: center; justify-content: center;
+    position: fixed; top: 10px; left: 10px; z-index: 1100;
+    width: 42px; height: 42px;
+    background: #0f172a; color: #fff; border: none; border-radius: 10px;
+    font-size: 1.4rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+  .sidebar-overlay.open {
+    display: block; position: fixed; inset: 0; z-index: 999;
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  /* 메인: 햄버거 자리 확보 + 패딩 축소 + 높이 자동(모바일 스크롤) */
+  .app-main { padding: 3.5rem 1rem 1.5rem 1rem; height: auto; min-height: 100vh; }
+
+  /* 표가 넘칠 때 가로 스크롤 허용 */
+  table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .app-main { padding: 3.4rem 0.6rem 1rem 0.6rem; }
+  .glass-card { padding: 1rem; }
+  h1 { font-size: 1.5rem !important; }
+  .btn-primary { padding: 0.8rem 1.2rem; font-size: 1rem; }
 }
 
 /* Utility */

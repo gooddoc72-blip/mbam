@@ -17,6 +17,33 @@ function BlogPostingContent() {
   const [useTethering, setUseTethering] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
 
+  // 계정관리(중앙 저장소)에서 선택 불러오기
+  const [showAcctPicker, setShowAcctPicker] = useState(false);
+  const [storeAccts, setStoreAccts] = useState([]);
+  const [pickedIds, setPickedIds] = useState([]);
+
+  const openAccountPicker = async () => {
+    try {
+      const res = await fetchWithAuth("/api/accounts");
+      if (!res.ok) return alert("계정 목록을 불러오지 못했습니다.");
+      const data = await res.json();
+      const list = data.accounts || [];
+      if (list.length === 0) return alert("계정 관리에 저장된 계정이 없습니다.\n(멀티 계정 실행 > 네이버 계정 관리에서 추가하세요)");
+      setStoreAccts(list);
+      setPickedIds(list.map((a) => a.naver_id)); // 기본 전체 선택
+      setShowAcctPicker(true);
+    } catch {
+      alert("서버 연결에 실패했습니다.");
+    }
+  };
+  const togglePick = (id) => setPickedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const applyPickedAccounts = () => {
+    const chosen = storeAccts.filter((a) => pickedIds.includes(a.naver_id));
+    if (chosen.length === 0) return alert("최소 1개 계정을 선택하세요.");
+    setAccounts(chosen.map((a) => ({ id: a.naver_id, pw: "", blogAddr: a.blog_addr || "", checked: true })));
+    setShowAcctPicker(false);
+  };
+
   const loadRegistered = async () => {
     try {
       const res = await fetchWithAuth("/api/auto_post/registered-accounts");
@@ -42,6 +69,7 @@ function BlogPostingContent() {
   const [targetKeyword, setTargetKeyword] = useState("");
   const [productUrl, setProductUrl] = useState("");
   const [extractUrlImages, setExtractUrlImages] = useState(false);
+  const [descImageFiles, setDescImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [aiProvider, setAiProvider] = useState("claude");
   const [postPurpose, setPostPurpose] = useState("review");
   const [promoType, setPromoType] = useState("product");
@@ -180,8 +208,10 @@ function BlogPostingContent() {
             if (data.status === "completed" || data.status === "failed" || data.status === "not_found") {
               setLoading(false);
               clearInterval(intervalId);
-              localStorage.removeItem("mbam_auto_post_task_id");
+              // 완료/실패 결과는 다른 메뉴 갔다 와도 보이도록 taskId 보관.
+              // 서버 재시작(not_found)으로 결과가 사라진 경우에만 정리.
               if (data.status === "not_found") {
+                localStorage.removeItem("mbam_auto_post_task_id");
                 setStatusLogs(["서버가 재시작되어 기존 작업을 찾을 수 없습니다."]);
               }
             }
@@ -277,6 +307,31 @@ function BlogPostingContent() {
     setGeneratedContents([...generatedContents, { title: manuscript.title, content: manuscript.content }]);
     alert("원고가 맨 아래 추가되었습니다.");
     setIsModalOpen(false);
+  };
+
+  // 글감수집 없이: 첨부 이미지 + 키워드 → AI 비전 분석으로 글감 생성
+  const handleDescribeImagesBlog = async () => {
+    if (!descImageFiles || descImageFiles.length === 0) return alert("먼저 이미지를 첨부하세요.");
+    setIsGenerating(true);
+    try {
+      const fd = new FormData();
+      Array.from(descImageFiles).forEach(f => fd.append("images", f));
+      fd.append("keyword", targetKeyword || "");
+      const res = await fetchWithAuth("/api/auto_post/describe-images", { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.success) {
+        setSourceData(data.source_data);
+        try { localStorage.setItem('autoWriteSourceData', data.source_data); } catch (e) {}
+        if (data.image_folder) { setImageUploadMode("folder"); setImageFolderPath(data.image_folder); }
+        alert("✅ 이미지 분석 글감 생성 완료! '원고 생성'을 누르면 이미지 내용에 맞춘 원고가 만들어집니다.");
+      } else {
+        alert(data.detail || "이미지 분석에 실패했습니다.");
+      }
+    } catch (e) {
+      alert("서버 오류: " + e.message);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleGenerateContent = async () => {
@@ -425,7 +480,16 @@ function BlogPostingContent() {
       alert("계정을 1개 이상 입력해주세요.");
       return;
     }
-    
+
+    // 사용 계정을 계정 관리(중앙 저장소)에 동기화 (best-effort)
+    validAccounts.forEach(a => {
+      fetchWithAuth("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ naver_id: a.id, naver_pw: a.pw || null, blog_addr: a.blogAddr || null }),
+      }).catch(() => {});
+    });
+
     // Check if generated contents exist
     if (generatedContents.length === 0) {
       alert("먼저 AI 원고를 생성해주세요.");
@@ -484,6 +548,12 @@ function BlogPostingContent() {
       const data = await res.json();
       if (data.success && data.task_id) {
         setTaskId(data.task_id);
+        // 계정 관리(중앙 저장소)에도 등록 (best-effort)
+        fetchWithAuth("/api/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ naver_id: acc.id, naver_pw: acc.pw || null, blog_addr: acc.blogAddr || null }),
+        }).catch(() => {});
       } else {
         alert("기기 인증 시작에 실패했습니다.");
         setLoading(false);
@@ -517,7 +587,39 @@ function BlogPostingContent() {
 
   return (
     <div style={{ padding: "2rem", display: "flex", flexDirection: "column", gap: "2rem", minHeight: "100vh", boxSizing: "border-box" }}>
-      
+
+      {/* 계정관리에서 선택 불러오기 모달 */}
+      {showAcctPicker && (
+        <div onClick={() => setShowAcctPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: "12px", padding: "1.5rem", width: "480px", maxHeight: "70vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.15rem", color: "#1e293b" }}>📥 계정관리에서 불러오기</h3>
+              <button onClick={() => setShowAcctPicker(false)} style={{ background: "none", border: "none", fontSize: "1.2rem", cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            <p style={{ margin: "0 0 0.8rem", fontSize: "0.85rem", color: "#64748b" }}>발행에 사용할 계정을 선택하세요.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {storeAccts.map((a) => (
+                <label key={a.id} style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.8rem", border: "1px solid #e2e8f0", borderRadius: "8px", cursor: "pointer", background: pickedIds.includes(a.naver_id) ? "#eff6ff" : "white" }}>
+                  <input type="checkbox" checked={pickedIds.includes(a.naver_id)} onChange={() => togglePick(a.naver_id)} style={{ width: "18px", height: "18px" }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: "bold", color: "#1e293b" }}>{a.naver_id}</div>
+                    <div style={{ fontSize: "0.78rem", color: "#94a3b8" }}>
+                      {a.blog_addr ? `블로그: ${a.blog_addr}` : "블로그: (아이디와 동일)"}
+                      {" · "}
+                      {a.registered ? "✅ 인증완료" : "⚠️ 미인증"}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1.2rem" }}>
+              <button onClick={() => setShowAcctPicker(false)} style={{ padding: "0.5rem 1rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", color: "#64748b" }}>취소</button>
+              <button onClick={applyPickedAccounts} style={{ padding: "0.5rem 1.2rem", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>선택 계정 불러오기 ({pickedIds.length})</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Section: Left Control Panel & Right Generated Contents */}
       <div style={{ display: "flex", gap: "2rem", flex: 1, minHeight: 0 }}>
         
@@ -533,9 +635,8 @@ function BlogPostingContent() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
             <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>1. 네이버 다중 계정 설정</h2>
             <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button onClick={loadAccounts} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>📥 불러오기</button>
-              <button onClick={saveAccounts} style={{ padding: "0.4rem 0.8rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>💾 계정 저장</button>
-              <button onClick={addAccount} style={{ padding: "0.4rem 0.8rem", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "4px", cursor: "pointer" }}>+ 계정 추가</button>
+              <button onClick={openAccountPicker} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>📥 계정관리에서 불러오기</button>
+              <button onClick={addAccount} style={{ padding: "0.4rem 0.8rem", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "4px", cursor: "pointer" }}>+ 직접 추가</button>
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
@@ -654,6 +755,15 @@ function BlogPostingContent() {
                   <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
                   ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
                 </label>
+
+                <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
+                  <input type="file" accept="image/*" multiple onChange={e => setDescImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
+                  <button type="button" onClick={handleDescribeImagesBlog} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
+                    {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
+                  </button>
+                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>타겟 키워드 + 첨부 이미지를 AI가 보고 글감을 만든 뒤, '원고 생성'으로 원고를 만듭니다. 첨부 이미지는 발행 글에도 함께 들어갑니다.</p>
+                </div>
               </div>
             </div>
 
