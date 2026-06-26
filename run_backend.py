@@ -28,6 +28,9 @@ if __name__ == "__main__":
         except Exception: pass
         try: conn.execute(text('ALTER TABLE cafe_schedules ADD COLUMN visit_interval_min INTEGER DEFAULT 30;'))
         except Exception: pass
+        # 블로그 매일발행: 카드뉴스 자동생성 토글
+        try: conn.execute(text('ALTER TABLE blog_schedules ADD COLUMN generate_card_news INTEGER DEFAULT 1;'))
+        except Exception: pass
         conn.commit()
 
     uvicorn.run("mbam_nextgen.backend.main:app", host="0.0.0.0", port=8000)

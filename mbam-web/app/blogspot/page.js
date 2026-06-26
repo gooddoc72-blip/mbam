@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { Loader2, Plus, Trash2, Send, LayoutDashboard, Search, KeyRound, TrendingUp } from 'lucide-react';
 
 export default function BlogspotDashboard() {
@@ -93,6 +95,7 @@ export default function BlogspotDashboard() {
       const data = await res.json();
       if(data.success) {
         setPostResult({ success: true, url: data.post_url });
+        try { addHistory("blogspot", { summary: `블로그스팟 발행 · ${keyword || ''}` }); } catch (e) {}
       } else {
         setPostResult({ success: false, error: JSON.stringify(data.error) });
       }
@@ -264,6 +267,7 @@ export default function BlogspotDashboard() {
         </div>
       )}
 
+      <WorkHistory menuKey="blogspot" />
     </div>
   );
 }

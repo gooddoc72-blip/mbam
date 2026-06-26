@@ -313,6 +313,23 @@ class SoulRewriter:
         )
         return response.choices[0].message.content
 
+    async def _dissect_ai_call(self, target_provider: str, prompt: str) -> str:
+        """본문 해부(카페/블로그) 공용 AI 호출: 지정 provider 우선, 없으면 가용한 첫 클라이언트로 폴백."""
+        if target_provider == "gemini" and self.gemini_client:
+            return await self._call_gemini_client(self.gemini_client, prompt)
+        if target_provider == "claude" and self.claude_client:
+            return await self._call_claude_client(self.claude_client, prompt)
+        if target_provider == "openai" and self.openai_client:
+            return await self._call_openai_client(self.openai_client, prompt)
+        # 지정 provider 클라이언트가 없으면 가용한 것으로 폴백
+        if self.gemini_client:
+            return await self._call_gemini_client(self.gemini_client, prompt)
+        if self.claude_client:
+            return await self._call_claude_client(self.claude_client, prompt)
+        if self.openai_client:
+            return await self._call_openai_client(self.openai_client, prompt)
+        raise RuntimeError("사용 가능한 AI 클라이언트가 없습니다 (API 키 확인)")
+
     async def generate_cafe_post(
         self,
         main_keyword: str,
@@ -393,15 +410,8 @@ class SoulRewriter:
 """
         
         try:
-            if target_provider == "gemini" and self.gemini_client:
-                result_text = await self._call_gemini(prompt)
-            elif target_provider == "claude" and self.claude_client:
-                result_text = await self._call_claude(prompt)
-            elif target_provider == "openai" and self.openai_client:
-                result_text = await self._call_openai(prompt)
-            else:
-                result_text = await self._call_gemini(prompt) # fallback
-            
+            result_text = await self._dissect_ai_call(target_provider, prompt)
+
             import json, re
             json_str = re.sub(r'```json\s*|```', '', result_text).strip()
             return json.loads(json_str)
@@ -413,6 +423,53 @@ class SoulRewriter:
                 "dia": {"score": 0, "title": "D.I.A+ 경험 데이터 지수", "analysis": "분석 실패"},
                 "chain": {"score": 0, "title": "커뮤니티 소통(Chain) 로직", "analysis": "분석 실패"},
                 "author_power": {"score": 0, "title": "작성자 영향력 (지수) 추정", "analysis": "분석 실패"}
+            }
+
+    async def analyze_blog_seo_keys(self, keyword: str, text: str, provider: str = None) -> dict:
+        """네이버 블로그 상위노출 글의 5대 로직 분석 (JSON 리턴 보장).
+        카페 분석과 동일한 5개 키(rcon/scqa/dia/chain/author_power)를 쓰되,
+        블로그(C-Rank·D.I.A+·이웃 상호작용) 관점으로 제목/분석을 채운다.
+        → 프론트 카드 렌더(data.title 사용)는 카페와 동일 컴포넌트로 처리된다."""
+        target_provider = (provider or self.provider).lower()
+
+        prompt = f"""당신은 네이버 블로그 검색 알고리즘(C-Rank, D.I.A+, 스마트블록)을 완벽하게 해부하는 국내 최고의 블로그 SEO 전문가입니다.
+사용자가 제공한 [타겟 키워드]와 [블로그 글 본문]을 바탕으로 아래 5가지 항목을 낱낱이 분석하여 **반드시 JSON 포맷**으로만 응답하세요. 마크다운 백틱(```json)이나 다른 설명은 절대 넣지 마세요.
+
+[입력 데이터]
+- 타겟 키워드: {keyword}
+- 블로그 글 본문:
+{text[:4000]} # 토큰 제한 방지
+
+[분석 기준 (5가지)]
+1. rcon (C-Rank·검색의도 정합성): 메인/서브 키워드가 제목과 서론에 자연스럽게 주입되었는지, 해당 키워드의 검색의도(정보형/후기형/구매형 스마트블록)에 본문 주제가 정확히 부합하는지.
+2. scqa (본문 구조·가독성): 서론 후킹이 있는지, 소제목/리스트/표/이미지가 구조적으로 배치되어 가독성과 체류시간을 높이는지.
+3. dia (D.I.A+ 경험·오리지널리티): 작성자의 실제 1차 경험(직접 촬영한 사진·실사용·방문)과 다른 글과 차별되는 오리지널리티, 체류시간을 높이는 휴먼 터치가 어떻게 배치되었는지.
+4. chain (이웃·공감·댓글 유도): 글이 이웃·공감·댓글 등 블로그 내 자연스러운 상호작용(질문 던지기, 공감 유도)을 일으키도록 기획되었는지.
+5. author_power (블로그 지수·작성자 신뢰도 추정): 이 글의 서술 방식, 전문성 깊이, 정보의 밀도를 볼 때 작성자의 블로그 지수 수준(예: '준최적화 생활 블로거', '해당 주제 전문 최적화 블로거', '협찬·홍보 위주 블로거' 등)과 주제 전문성을 추정.
+
+[출력 포맷 (반드시 아래 구조의 순수 JSON으로만 출력)]
+{{
+    "rcon": {{"score": 85, "title": "C-Rank·검색의도 정합성", "analysis": "분석내용..."}},
+    "scqa": {{"score": 90, "title": "본문 구조·가독성(체류시간)", "analysis": "분석내용..."}},
+    "dia": {{"score": 80, "title": "D.I.A+ 경험·오리지널리티", "analysis": "분석내용..."}},
+    "chain": {{"score": 75, "title": "이웃·공감·댓글 유도력", "analysis": "분석내용..."}},
+    "author_power": {{"score": 88, "title": "블로그 지수·작성자 신뢰도 추정", "analysis": "분석내용..."}}
+}}
+"""
+
+        try:
+            result_text = await self._dissect_ai_call(target_provider, prompt)
+
+            import json, re
+            json_str = re.sub(r'```json\s*|```', '', result_text).strip()
+            return json.loads(json_str)
+        except Exception as e:
+            return {
+                "rcon": {"score": 0, "title": "C-Rank·검색의도 정합성", "analysis": f"AI 분석 오류: {e}"},
+                "scqa": {"score": 0, "title": "본문 구조·가독성(체류시간)", "analysis": "분석 실패"},
+                "dia": {"score": 0, "title": "D.I.A+ 경험·오리지널리티", "analysis": "분석 실패"},
+                "chain": {"score": 0, "title": "이웃·공감·댓글 유도력", "analysis": "분석 실패"},
+                "author_power": {"score": 0, "title": "블로그 지수·작성자 신뢰도 추정", "analysis": "분석 실패"},
             }
 
     async def generate_place_news(self, place_name: str, reviews: list, theme: str = "🌟 고객 극찬 릴레이 (방문 후기형)") -> dict:

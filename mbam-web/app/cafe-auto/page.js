@@ -1,5 +1,7 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, useRef } from "react";
 import ManuscriptLoaderModal from "../components/ManuscriptLoaderModal";
 
@@ -289,6 +291,7 @@ export default function CafeAutoPage() {
           const arr = (st.result?.generated_contents || []).filter(g => g && g.content);
           if (arr.length > 0) {
             setCafeGenerated(arr);
+            try { addHistory("cafe-auto", { summary: `원고 생성 ${arr.length}건${targetKeyword ? ' · ' + targetKeyword : ''}` }); } catch (e) {}
             // 첫 원고를 단일 필드에도 채워 호환 유지
             setContent(arr[0].content);
             setTitle(prev => prev || arr[0].title || "");
@@ -1221,11 +1224,12 @@ export default function CafeAutoPage() {
         </div>
       </div>
 
-      <ManuscriptLoaderModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSelect={handleLoadManuscript} 
+      <ManuscriptLoaderModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSelect={handleLoadManuscript}
       />
+      <WorkHistory menuKey="cafe-auto" />
     </div>
   );
 }

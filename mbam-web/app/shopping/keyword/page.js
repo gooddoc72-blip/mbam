@@ -3,11 +3,14 @@ import { useState } from 'react';
 import { Search, Loader2, Key, Tag, Check, Copy } from 'lucide-react';
 
 import { fetchWithAuth } from '../../utils/api';
+import { usePersistentState } from '../../utils/persistentState';
+import { addHistory } from '../../utils/workHistory';
+import WorkHistory from '../../components/WorkHistory';
 
 export default function ShoppingKeyword() {
-    const [seedKeyword, setSeedKeyword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState(null);
+    const [seedKeyword, setSeedKeyword] = usePersistentState('shopping-keyword:seedKeyword', '');
+    const [loading, setLoading] = usePersistentState('shopping-keyword:loading', false);
+    const [result, setResult] = usePersistentState('shopping-keyword:result', null);
 
     // 클린 토큰 선택 상태(상품명 조립에 들어갈 토큰)
     const [selected, setSelected] = useState(() => new Set());
@@ -37,11 +40,19 @@ export default function ShoppingKeyword() {
             setSelectedRel(new Set());
             // 분석 직후 전체 토큰을 기본 선택(원하면 클릭으로 해제)
             setSelected(new Set(data.valid_tokens_pool || []));
+            addHistory('shopping-keyword', { summary: `키워드 분석 · ${seedKeyword}`, payload: { seedKeyword, result: data } });
         } catch (e) {
             alert('오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleRestore = (entry) => {
+        const p = (entry && entry.payload) || {};
+        if (p.seedKeyword !== undefined) setSeedKeyword(p.seedKeyword);
+        if (p.result) { setResult(p.result); setSelected(new Set(p.result.valid_tokens_pool || [])); }
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
     };
 
     const pool = result?.valid_tokens_pool || [];
@@ -309,6 +320,7 @@ export default function ShoppingKeyword() {
                     </div>
                 )}
             </div>
+            <WorkHistory menuKey="shopping-keyword" onRestore={handleRestore} />
         </div>
     );
 }

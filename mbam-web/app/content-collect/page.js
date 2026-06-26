@@ -1,5 +1,7 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect } from "react";
 
 export default function ContentCollectPage() {
@@ -126,6 +128,7 @@ export default function ContentCollectPage() {
 
         if (status.status === "done") {
           alert(`✅ ${status.count}건 수집 완료! 이어서 황금키워드를 자동 분석합니다.`);
+          try { addHistory("content-collect", { summary: `글감수집 ${status.count}건 · ${cat}` }); } catch (e) {}
           if (status.last_sync) setLastSync(status.last_sync);
           fetchItems(cat);
           // 수집 완료 후 황금키워드 자동 분석 (#자동 진행)
@@ -560,6 +563,9 @@ export default function ContentCollectPage() {
             </div>
           )}
         </div>
+      </div>
+      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "0 1rem" }}>
+        <WorkHistory menuKey="content-collect" />
       </div>
     </main>
   );

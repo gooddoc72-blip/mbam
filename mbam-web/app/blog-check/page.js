@@ -1,13 +1,16 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect } from "react";
 
 export default function BlogCheckPage() {
-  const [keywords, setKeywords] = useState([]);
-  const [blogId, setBlogId] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [keywords, setKeywords] = usePersistentState("blog-check:keywords", []);
+  const [blogId, setBlogId] = usePersistentState("blog-check:blogId", "");
+  const [keywordInput, setKeywordInput] = usePersistentState("blog-check:keywordInput", "");
+  const [loading, setLoading] = usePersistentState("blog-check:loading", false);
+  const [error, setError] = usePersistentState("blog-check:error", null);
 
   // 블로그 지수 진단
   const [idxInput, setIdxInput] = useState("");
@@ -70,6 +73,7 @@ export default function BlogCheckPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "진단 실패");
       setIdxResult(data);
+      try { addHistory("blog-check", { summary: `블로그 지수 진단 · ${idxInput || ''}` }); } catch (e) {}
     } catch (err) {
       setIdxError(err.message);
     } finally {
@@ -426,6 +430,7 @@ export default function BlogCheckPage() {
           )}
         </div>
       </div>
+      <WorkHistory menuKey="blog-check" />
     </main>
   );
 }

@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mbam_nextgen.backend.routers.place import run_place_analysis
-from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule
+from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule, BlogSchedule
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SchedulerService")
@@ -288,6 +288,120 @@ class SchedulerService:
         finally:
             db.close()
 
+    # ===================== 블로그 매일 자동발행 =====================
+    def load_blog_schedules(self):
+        """기동 시 DB의 활성 블로그 매일발행 예약을 스케줄러에 등록."""
+        try:
+            db = SessionLocal()
+            schedules = db.query(BlogSchedule).filter(BlogSchedule.is_active == 1).all()
+            for sch in schedules:
+                try:
+                    hour, minute = map(int, sch.schedule_time.split(":"))
+                    self.scheduler.add_job(
+                        self.run_blog_post_job, 'cron',
+                        hour=hour, minute=minute, args=[sch.id],
+                        id=f"blog_post_{sch.id}", replace_existing=True,
+                        misfire_grace_time=3600, coalesce=True,
+                    )
+                except ValueError:
+                    logger.error(f"Invalid blog schedule time for {sch.id}: {sch.schedule_time}")
+            db.close()
+            logger.info(f"Loaded {len(schedules)} blog post schedules.")
+        except Exception as e:
+            logger.error(f"Error loading blog schedules: {e}")
+
+    def add_blog_schedule_job(self, schedule_id, schedule_time):
+        """단건 블로그 매일발행 예약을 '실행 중인' 스케줄러에 즉시 등록 (UI 추가 즉시 반영)."""
+        try:
+            hour, minute = map(int, str(schedule_time).split(":"))
+            self.scheduler.add_job(
+                self.run_blog_post_job, 'cron',
+                hour=hour, minute=minute, args=[schedule_id],
+                id=f"blog_post_{schedule_id}", replace_existing=True,
+                misfire_grace_time=3600, coalesce=True,
+            )
+            logger.info(f"블로그 예약 즉시 등록: blog_post_{schedule_id} @ {hour:02d}:{minute:02d}")
+            return True
+        except Exception as e:
+            logger.error(f"블로그 예약 등록 실패({schedule_id}): {e}")
+            return False
+
+    def remove_blog_schedule_job(self, schedule_id):
+        """단건 블로그 매일발행 예약을 스케줄러에서 제거."""
+        try:
+            self.scheduler.remove_job(f"blog_post_{schedule_id}")
+            logger.info(f"블로그 예약 제거: blog_post_{schedule_id}")
+        except Exception:
+            pass
+
+    async def run_blog_post_job(self, schedule_id: str):
+        """매일 같은 시각: 글감수집 카테고리에서 글감을 뽑아 블로그에 자동 발행."""
+        db = SessionLocal()
+        try:
+            sch = db.query(BlogSchedule).filter(BlogSchedule.id == schedule_id).first()
+            if not sch or not sch.is_active:
+                return
+            acc = db.query(NaverAccount).filter(NaverAccount.id == sch.account_id).first()
+            if not acc:
+                logger.error(f"[BlogSchedule] 계정을 찾을 수 없음: {sch.account_id}")
+                return
+
+            # 하루 1회 중복 방지 (서버 재시작/보충 발화로 인한 중복 발행 차단)
+            today = datetime.now().strftime("%Y-%m-%d")
+            if sch.last_run_date == today:
+                logger.info(f"[BlogSchedule] {schedule_id} 오늘 이미 발행됨 — 스킵")
+                return
+
+            # 글감 선택 (글감수집 카테고리 캐시)
+            from mbam_nextgen.services.gov_data import GovDataCollector
+            collector = GovDataCollector()
+            items = collector.load_cache(sch.content_category) if sch.content_category else []
+            if not items:
+                logger.warning(f"[BlogSchedule] '{sch.content_category}' 글감이 없어 발행 보류 (글감수집 먼저 필요)")
+                return
+
+            qty = max(1, sch.post_count_per_day or 1)
+            start = (sch.last_index or 0) % len(items)  # 매일 다른 글감으로 회전
+
+            from mbam_nextgen.orchestrator import WorkflowOrchestrator
+            orchestrator = WorkflowOrchestrator()
+            logger.info(f"📝 [BlogSchedule] {acc.naver_id} 매일발행 시작 (카테고리: {sch.content_category}, {qty}개)")
+
+            published = 0
+            for i in range(qty):
+                item = items[(start + i) % len(items)]
+                title = item.get("title", "정보 제공")
+                source = f"[작성 주제] {title}\n[글감]\n{item.get('content', '')}"
+                try:
+                    result = await orchestrator.execute_blog_workflow(
+                        account_id=acc.naver_id,
+                        account_pw=acc.naver_pw,
+                        keyword=title,
+                        source_data=source,
+                        publish_mode="instant",
+                        ai_provider=sch.ai_provider or "claude",
+                        distribution_mode=sch.distribution_mode or "normal",
+                        generate_card_news=bool(getattr(sch, "generate_card_news", 1)),
+                        blog_id=acc.blog_addr or None,
+                    )
+                    if result and result.get("success"):
+                        published += 1
+                        logger.info(f"  -> [{i+1}/{qty}] 발행 성공: {title}")
+                    else:
+                        logger.warning(f"  -> [{i+1}/{qty}] 발행 실패: {(result or {}).get('error')}")
+                except Exception as e:
+                    logger.error(f"  -> [{i+1}/{qty}] 발행 예외: {e}")
+                await asyncio.sleep(5)  # 발행 간 텀
+
+            sch.last_index = (start + qty) % len(items)
+            sch.last_run_date = today
+            db.commit()
+            logger.info(f"[BlogSchedule] {schedule_id} 완료: {published}/{qty} 발행")
+        except Exception as e:
+            logger.error(f"[BlogSchedule] job 실패({schedule_id}): {e}")
+        finally:
+            db.close()
+
     async def run_content_sync_job(self):
         """매일 실행되는 글감 데이터 동기화 작업"""
         logger.info(f"[{datetime.now()}] Starting scheduled content data sync...")
@@ -506,7 +620,10 @@ class SchedulerService:
         
         # Load Cafe Nurturing Schedules
         self.load_cafe_schedules()
-        
+
+        # Load Blog Daily Post Schedules
+        self.load_blog_schedules()
+
         # Load Content Sync Schedule
         self.load_content_schedule()
         

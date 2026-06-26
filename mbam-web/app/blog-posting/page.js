@@ -1,5 +1,7 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -354,8 +356,8 @@ function BlogPostingContent() {
         product_url: productUrl,
         extract_url_images: extractUrlImages,
         ai_provider: aiProvider,
-        post_purpose: sourceData ? "info" : postPurpose,
-        promo_type: sourceData ? "info" : promoType,
+        post_purpose: postPurpose,
+        promo_type: promoType,
         distribution_mode: distributionMode,
 
         reference_data: referenceData,
@@ -399,6 +401,7 @@ function BlogPostingContent() {
           const data = st.result || {};
           if (data.success) {
             setGeneratedContents(data.generated_contents || []);
+            try { addHistory("blog-posting", { summary: `원고 생성 ${(data.generated_contents || []).length}건${targetKeyword ? ' · ' + targetKeyword : ''}` }); } catch (e) {}
             if (data.scraped_image_folder) {
               setImageUploadMode("folder");
               setImageFolderPath(data.scraped_image_folder);
@@ -776,19 +779,17 @@ function BlogPostingContent() {
                 </select>
               </div>
 
-            {sourceData ? (
-              <div style={{ marginBottom: "1rem", padding: "1.5rem", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                <h4 style={{ margin: "0 0 0.5rem 0", color: "#166534", fontSize: "1.1rem" }}>💡 블로그 지수 향상을 위한 1일 1포스팅 모드 작동 중</h4>
-                <p style={{ margin: 0, fontSize: "0.95rem", color: "#15803d", lineHeight: "1.5" }}>
-                  현재 수집된 글감 데이터가 존재하여 <strong>[정보성 포스팅]</strong> 모드로 자동 전환되었습니다.<br/>
-                  이 모드에서는 상업적인 리뷰나 홍보 목적이 아닌, 블로그 방문자 유입과 지수 상승을 위한 양질의 정보글을 작성하게 됩니다.
+            {sourceData && (
+              <div style={{ marginBottom: "1rem", padding: "1rem 1.2rem", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                <p style={{ margin: 0, fontSize: "0.9rem", color: "#15803d", lineHeight: "1.5" }}>
+                  💡 <strong>분석/글감 데이터가 반영됩니다.</strong> 아래에서 <strong>포스팅 목적</strong>(리뷰/홍보/정보성)과 <strong>유형</strong>(맛집·업체 등)을 골라 그 성격으로 작성하세요.
                 </p>
               </div>
-            ) : (
+            )}
               <>
                 <div>
                   <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>포스팅 목적</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
                     <div onClick={() => setPostPurpose("review")} style={{ padding: "1rem", border: postPurpose === "review" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "review" ? "#f0fdf4" : "white" }}>
                       <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📝</div>
                       <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>리뷰용</div>
@@ -798,6 +799,11 @@ function BlogPostingContent() {
                       <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📢</div>
                       <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>홍보용</div>
                       <div style={{ fontSize: "0.8rem", color: "#64748b" }}>방문 없이 매장·상품 소개</div>
+                    </div>
+                    <div onClick={() => setPostPurpose("info")} style={{ padding: "1rem", border: postPurpose === "info" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "info" ? "#f0fdf4" : "white" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📚</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>정보성</div>
+                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>지수용 정보글(비홍보)</div>
                     </div>
                   </div>
                 </div>
@@ -833,7 +839,6 @@ function BlogPostingContent() {
                   </div>
                 </div>
               </>
-            )}
 
             <div>
               <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>배포 방식</label>
@@ -1022,6 +1027,7 @@ function BlogPostingContent() {
         </div>
       )}
 
+      <WorkHistory menuKey="blog-posting" />
     </div>
   );
 }

@@ -1,15 +1,18 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function PlaceSeoDashboard() {
-  const [keyword, setKeyword] = useState("");
-  const [targetMid, setTargetMid] = useState("");
-  const [targetName, setTargetName] = useState("");
-  
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [keyword, setKeyword] = usePersistentState("place-seo:keyword", "");
+  const [targetMid, setTargetMid] = usePersistentState("place-seo:targetMid", "");
+  const [targetName, setTargetName] = usePersistentState("place-seo:targetName", "");
+
+  const [loading, setLoading] = usePersistentState("place-seo:loading", false);
+  const [result, setResult] = usePersistentState("place-seo:result", null);
   const [trackedPlaces, setTrackedPlaces] = useState([]);
   
   const [scheduleHour, setScheduleHour] = useState(10);
@@ -137,6 +140,10 @@ export default function PlaceSeoDashboard() {
       
       setResult(data);
       setActiveRightTab("ranking"); // 조회 후에는 순위 탭으로 전환
+      addHistory("place-seo", {
+        summary: `${keyword}${targetName ? ' · ' + targetName : ''}`,
+        payload: { keyword, targetMid, targetName, result: data }
+      });
     } catch (err) {
       if (err.name === 'AbortError') {
         alert("검색이 중지되었습니다.");
@@ -191,6 +198,15 @@ export default function PlaceSeoDashboard() {
     } catch (err) {
       console.error("히스토리 로드 실패:", err);
     }
+  };
+
+  const handleRestore = (entry) => {
+    const p = (entry && entry.payload) || {};
+    if (p.keyword !== undefined) setKeyword(p.keyword);
+    if (p.targetMid !== undefined) setTargetMid(p.targetMid);
+    if (p.targetName !== undefined) setTargetName(p.targetName);
+    if (p.result) { setResult(p.result); setActiveRightTab("ranking"); }
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
   };
 
   return (
@@ -482,6 +498,9 @@ export default function PlaceSeoDashboard() {
             </div>
           </div>
         </div>
+      </div>
+      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "0 1rem" }}>
+        <WorkHistory menuKey="place-seo" onRestore={handleRestore} />
       </div>
     </main>
   );

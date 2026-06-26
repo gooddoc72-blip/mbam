@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { Search, Loader2, Sparkles, Tags, AlertCircle, TrendingUp, CheckCircle, Copy } from 'lucide-react';
 
 import { fetchWithAuth } from '../../utils/api';
+import { addHistory } from '../../utils/workHistory';
+import WorkHistory from '../../components/WorkHistory';
 
 export default function ShoppingCombine() {
     const [brandName, setBrandName] = useState('');
@@ -39,6 +41,7 @@ export default function ShoppingCombine() {
             });
             const data = await res.json();
             setResult(data);
+            try { addHistory('shopping-combine', { summary: `상품명 조합 · ${seedKeyword}` }); } catch (e2) {}
         } catch (e) {
             alert('오류가 발생했습니다.');
         } finally {
@@ -230,6 +233,7 @@ export default function ShoppingCombine() {
                     )}
                 </div>
             </div>
+            <WorkHistory menuKey="shopping-combine" />
         </div>
     );
 }

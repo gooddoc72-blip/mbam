@@ -39,18 +39,21 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT,
                 account_id TEXT,
+                post_title TEXT,
                 target_keyword TEXT,
                 status TEXT,
                 result_url TEXT,
                 credit_used INTEGER
             )''')
-            
+
             # 2. 카페 포스팅 내역
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS history_cafe (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT,
+                account_id TEXT,
                 cafe_name TEXT,
+                post_title TEXT,
                 action_type TEXT,
                 status TEXT,
                 result_url TEXT
@@ -99,23 +102,35 @@ class DatabaseManager:
                 total_images INTEGER,
                 report_json TEXT
             )''')
-            
+
+            # --- 기존 DB 자동 보강 (대시보드 작업내역: 사용계정/포스팅 제목) ---
+            migrations = [
+                "ALTER TABLE history_blog ADD COLUMN post_title TEXT",
+                "ALTER TABLE history_cafe ADD COLUMN account_id TEXT",
+                "ALTER TABLE history_cafe ADD COLUMN post_title TEXT",
+            ]
+            for mig in migrations:
+                try:
+                    cursor.execute(mig)
+                except Exception:
+                    pass  # 이미 컬럼이 있으면 무시
+
             conn.commit()
 
     # --- Insert Methods ---
 
-    def log_blog(self, account_id, target_keyword, status, result_url, credit_used=10):
+    def log_blog(self, account_id, target_keyword, status, result_url, credit_used=10, post_title=""):
         with self._get_connection() as conn:
             conn.execute(
-                "INSERT INTO history_blog (created_at, account_id, target_keyword, status, result_url, credit_used) VALUES (?, ?, ?, ?, ?, ?)",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), account_id, target_keyword, status, result_url, credit_used)
+                "INSERT INTO history_blog (created_at, account_id, post_title, target_keyword, status, result_url, credit_used) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), account_id, post_title, target_keyword, status, result_url, credit_used)
             )
-            
-    def log_cafe(self, account_id, cafe_id, keyword, status, result_url=""):
+
+    def log_cafe(self, account_id, cafe_id, keyword, status, result_url="", post_title=""):
         with self._get_connection() as conn:
             conn.execute(
-                "INSERT INTO history_cafe (created_at, cafe_name, action_type, status, result_url) VALUES (?, ?, ?, ?, ?)",
-                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), cafe_id, keyword, status, result_url)
+                "INSERT INTO history_cafe (created_at, account_id, cafe_name, post_title, action_type, status, result_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), account_id, cafe_id, post_title, keyword, status, result_url)
             )
 
     def log_engagement(self, target_url, action_type, comment_text, status):

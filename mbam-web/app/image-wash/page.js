@@ -3,6 +3,8 @@ import { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { Plus, Check, Download, Info } from "lucide-react";
 
 export default function ImageWashPage() {
@@ -78,6 +80,7 @@ export default function ImageWashPage() {
         const data = await res.json();
         if (data.success) {
           setResults(data.results);
+          try { addHistory("image-wash", { summary: `이미지 세탁 ${(data.results || []).length}장` }); } catch (e) {}
         } else {
           alert("변환 실패: " + data.message);
         }
@@ -292,6 +295,7 @@ export default function ImageWashPage() {
         </div>
 
       </div>
+      <WorkHistory menuKey="image-wash" />
     </div>
   );
 }

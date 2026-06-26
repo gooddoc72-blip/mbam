@@ -1,15 +1,26 @@
 "use client";
 import { fetchWithAuth } from "../../utils/api";
+import { usePersistentState } from "../../utils/persistentState";
+import { addHistory } from "../../utils/workHistory";
+import WorkHistory from "../../components/WorkHistory";
 import { useState, useEffect, useRef } from "react";
 import { Search, Loader2, Star, ShoppingCart, Heart, Activity, Target, ShieldCheck, Trophy, Info, Zap, Trash2 } from 'lucide-react';
 
 export default function ShoppingRankDashboard() {
-  const [keyword, setKeyword] = useState("");
-  const [targetMid, setTargetMid] = useState("");
-  const [targetName, setTargetName] = useState("");
-  
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const handleRestore = (entry) => {
+    const p = (entry && entry.payload) || {};
+    if (p.keyword !== undefined) setKeyword(p.keyword);
+    if (p.targetMid !== undefined) setTargetMid(p.targetMid);
+    if (p.targetName !== undefined) setTargetName(p.targetName);
+    if (p.result) { setResult(p.result); setActiveRightTab("ranking"); }
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
+  };
+  const [keyword, setKeyword] = usePersistentState("shopping-rank:keyword", "");
+  const [targetMid, setTargetMid] = usePersistentState("shopping-rank:targetMid", "");
+  const [targetName, setTargetName] = usePersistentState("shopping-rank:targetName", "");
+
+  const [loading, setLoading] = usePersistentState("shopping-rank:loading", false);
+  const [result, setResult] = usePersistentState("shopping-rank:result", null);
   const [trackedPlaces, setTrackedPlaces] = useState([]);
   
   const [selectedPlaces, setSelectedPlaces] = useState([]);
@@ -257,7 +268,8 @@ export default function ShoppingRankDashboard() {
         
         setResult(data);
         setActiveRightTab("ranking");
-        
+        addHistory("shopping-rank", { summary: `${keyword}${targetName ? ' · ' + targetName : ''}`, payload: { keyword, targetMid, targetName, result: data } });
+
         // Auto-save target item to history
         if (data.places) {
           const target = data.places.find(p => p.is_target);
@@ -277,7 +289,8 @@ export default function ShoppingRankDashboard() {
         
         setResult(data);
         setActiveRightTab("ranking");
-        
+        addHistory("shopping-rank", { summary: `${keyword}${targetName ? ' · ' + targetName : ''}`, payload: { keyword, targetMid, targetName, result: data } });
+
         // Auto-save target item to history
         if (data.places) {
           const target = data.places.find(p => p.is_target);
@@ -787,6 +800,9 @@ export default function ShoppingRankDashboard() {
             </div>
           </div>
         </div>
+      </div>
+      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "0 1rem" }}>
+        <WorkHistory menuKey="shopping-rank" onRestore={handleRestore} />
       </div>
     </main>
   );

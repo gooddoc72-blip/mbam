@@ -65,19 +65,26 @@ export default function SaaS_Dashboard() {
   const th = { padding: "11px 20px", fontWeight: 600, fontSize: 12.5, color: t.textSub, textAlign: "left", whiteSpace: "nowrap" };
   const td = { padding: "13px 20px", fontSize: 13.5, color: t.text, verticalAlign: "middle" };
 
+  // 블로그/카페 탭은 사용계정·포스팅 제목 컬럼을 추가로 보여준다.
+  const isPostTab = activeTab === "history_blog" || activeTab === "history_cafe";
+  const colCount = isPostTab ? 6 : 4;
+
   const rows = () => {
     if (!data.length) return (
-      <tr><td colSpan="4" style={{ textAlign: "center", padding: "44px", color: t.textMuted, fontSize: 13.5 }}>최근 기록이 없습니다.</td></tr>
+      <tr><td colSpan={colCount} style={{ textAlign: "center", padding: "44px", color: t.textMuted, fontSize: 13.5 }}>최근 기록이 없습니다.</td></tr>
     );
     return data.slice(0, 10).map((row, i) => {
       const url = row.result_url || row.post_url || "";
       const ok = row.status?.includes('성공');
+      const keywordCell = row.target_keyword || row.action_type || row.cafe_name || row.place_name || row.keyword || "-";
       return (
         <tr key={i} style={{ borderTop: `1px solid ${t.border}` }}
           onMouseOver={e => e.currentTarget.style.background = t.surfaceAlt}
           onMouseOut={e => e.currentTarget.style.background = "transparent"}>
           <td style={{ ...td, color: t.textSub, whiteSpace: "nowrap" }}>{row.created_at}</td>
-          <td style={{ ...td, fontWeight: 600 }}>{row.target_keyword || row.cafe_name || row.place_name || row.keyword || row.account_id || "-"}</td>
+          {isPostTab && <td style={{ ...td, fontWeight: 600 }}>{row.account_id || "-"}</td>}
+          {isPostTab && <td style={td} title={row.post_title || ""}>{row.post_title || "-"}</td>}
+          <td style={{ ...td, fontWeight: isPostTab ? 400 : 600 }}>{keywordCell}</td>
           <td style={td}><Badge t={ok ? 'success' : 'info'}>{row.status || '완료'}</Badge></td>
           <td style={td}>
             {url
@@ -174,11 +181,15 @@ export default function SaaS_Dashboard() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr style={{ background: t.surfaceAlt, borderTop: `1px solid ${t.border}` }}>
-                <th style={th}>일시</th><th style={th}>대상 키워드 / 상호명</th><th style={th}>상태</th><th style={th}>결과</th>
+                <th style={th}>일시</th>
+                {isPostTab && <th style={th}>사용계정</th>}
+                {isPostTab && <th style={th}>포스팅 제목</th>}
+                <th style={th}>{isPostTab ? "대상 키워드" : "대상 키워드 / 상호명"}</th>
+                <th style={th}>상태</th><th style={th}>결과</th>
               </tr></thead>
               <tbody>
                 {loading
-                  ? <tr><td colSpan="4" style={{ textAlign: "center", padding: "44px", color: t.textMuted, fontSize: 13.5 }}>불러오는 중…</td></tr>
+                  ? <tr><td colSpan={colCount} style={{ textAlign: "center", padding: "44px", color: t.textMuted, fontSize: 13.5 }}>불러오는 중…</td></tr>
                   : rows()}
               </tbody>
             </table>

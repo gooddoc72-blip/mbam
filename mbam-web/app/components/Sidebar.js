@@ -18,7 +18,8 @@ import {
     ChevronRight,
     Search,
     MessageSquare,
-    CreditCard
+    CreditCard,
+    CalendarClock
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
 
@@ -41,6 +42,7 @@ const MENU_ITEMS = [
         submenus: [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
             { name: "블로그 자동 포스팅", path: "/blog-posting", icon: PenTool },
+            { name: "블로그 매일 자동발행", path: "/blog-schedule", icon: CalendarClock },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: PenTool }
         ]
@@ -50,7 +52,7 @@ const MENU_ITEMS = [
         name: "카페 분석 및 자동화", 
         icon: Coffee,
         submenus: [
-            { name: "카페글 분석", path: "/cafe-analysis", icon: Search },
+            { name: "카페글·블로그글 분석", path: "/cafe-analysis", icon: Search },
             { name: "카페 포스팅 및 육성 자동화", path: "/cafe-auto", icon: PenTool }
         ]
     },

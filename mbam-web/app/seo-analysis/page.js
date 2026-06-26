@@ -1,20 +1,23 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect } from "react";
 import Skeleton from "../../components/Skeleton";
 import SeoResults from "../../components/SeoResults";
 import HistorySidebar from "../../components/HistorySidebar";
 
 export default function Home() {
-  const [keyword, setKeyword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  
+  const [keyword, setKeyword] = usePersistentState("seo-analysis:keyword", "");
+  const [loading, setLoading] = usePersistentState("seo-analysis:loading", false);
+  const [data, setData] = usePersistentState("seo-analysis:data", null);
+  const [error, setError] = usePersistentState("seo-analysis:error", null);
+
   // 2-Step States
-  const [searchPhase, setSearchPhase] = useState("idle"); // 'idle' | 'searching' | 'selecting' | 'analyzing' | 'done'
-  const [blockList, setBlockList] = useState([]);
-  const [selectedUrls, setSelectedUrls] = useState([]);
+  const [searchPhase, setSearchPhase] = usePersistentState("seo-analysis:searchPhase", "idle"); // 'idle' | 'searching' | 'selecting' | 'analyzing' | 'done'
+  const [blockList, setBlockList] = usePersistentState("seo-analysis:blockList", []);
+  const [selectedUrls, setSelectedUrls] = usePersistentState("seo-analysis:selectedUrls", []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -119,6 +122,7 @@ export default function Home() {
       const result = await res.json();
       setData(result);
       setSearchPhase("done");
+      try { addHistory("seo-analysis", { summary: `SEO 분석 · ${keyword || ''}` }); } catch (e) {}
     } catch (err) {
       setError(err.message);
       setSearchPhase("selecting");
@@ -283,6 +287,7 @@ export default function Home() {
             )}
           </div>
         </section>
+        <WorkHistory menuKey="seo-analysis" />
       </div>
     </main>
   );

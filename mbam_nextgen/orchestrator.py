@@ -617,7 +617,8 @@ class WorkflowOrchestrator:
                 result_url = cur_url if ("PostWriteForm" not in cur_url and "editor" not in cur_url) else ""
                 logger.info(f"📌 [Orchestrator] {account_id} 발행 결과: {'성공' if publish_result else '발행 미완료'} | URL: {result_url or '(편집화면 유지)'}")
                 self.db.log_blog(account_id=account_id, target_keyword=keyword,
-                                 status="성공" if publish_result else "발행 미완료", result_url=result_url)
+                                 status="성공" if publish_result else "발행 미완료", result_url=result_url,
+                                 post_title=(blog_title or ""))
             except Exception:
                 pass
 
@@ -1053,7 +1054,7 @@ class WorkflowOrchestrator:
                         logger.info("🏁 [Orchestrator] 수동 등록 모드: 직접 [등록] 버튼을 눌러주세요.")
                         submit_result = True
                     logger.info("\n✅ [Orchestrator] 카페 태스크 완료.")
-                    self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status="성공" if submit_result else "실패")
+                    self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status="성공" if submit_result else "실패", post_title=(post_title or ""))
                     
                     return {
                         "account_id": account_id,

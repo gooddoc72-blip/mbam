@@ -263,9 +263,16 @@ async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest):
 
     base_keyword = (request.keyword or "").strip()
 
-    async def _dissect(content: str, kw: str):
+    def _is_cafe(u: str, detail: dict = None) -> bool:
+        if detail and "카페" in (detail.get("text_type") or ""):
+            return True
+        return "cafe.naver.com" in (u or "")
+
+    async def _dissect(content: str, kw: str, is_cafe: bool = True):
         soul = SoulRewriter()
-        return await soul.analyze_cafe_cheat_keys(kw or "카페글 분석", content)
+        if is_cafe:
+            return await soul.analyze_cafe_cheat_keys(kw or "카페글 분석", content)
+        return await soul.analyze_blog_seo_keys(kw or "블로그글 분석", content)
 
     # ── 다중 URL 모드 ──────────────────────────────────────────
     if request.urls:
@@ -287,12 +294,14 @@ async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest):
             if not content:
                 return {"_error": {"url": u, "error": "본문이 비어 있습니다."}}
             kw = base_keyword or (detail.get("title") or "").strip()
+            is_cafe = _is_cafe(u, detail)
             async with sem:
                 try:
-                    data = await _dissect(content, kw)
+                    data = await _dissect(content, kw, is_cafe=is_cafe)
                 except Exception as e:
                     return {"_error": {"url": u, "error": f"분석 오류: {e}"}}
             return {"url": u, "title": detail.get("title", ""), "used_keyword": kw,
+                    "text_type": detail.get("text_type", "네이버 카페" if is_cafe else "네이버 블로그"),
                     "content_chars": len(content), "data": data}
 
         results = await asyncio.gather(*[_one(u) for u in url_list])
@@ -304,21 +313,25 @@ async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest):
     content = (request.content or "").strip()
     url = (request.url or "").strip()
     keyword = base_keyword
+    detail_single = None
     if url and not content:
         try:
             results = await analyzer.analyze_multiple_urls([url])
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"본문 추출 실패: {e}")
-        detail = results.get(url) or next(iter(results.values()), None)
-        if not detail or "error" in (detail or {}):
-            raise HTTPException(status_code=400, detail=(detail or {}).get("error", "본문을 가져올 수 없습니다."))
-        content = (detail.get("full_text") or detail.get("text_sample") or "").strip()
+        detail_single = results.get(url) or next(iter(results.values()), None)
+        if not detail_single or "error" in (detail_single or {}):
+            raise HTTPException(status_code=400, detail=(detail_single or {}).get("error", "본문을 가져올 수 없습니다."))
+        content = (detail_single.get("full_text") or detail_single.get("text_sample") or "").strip()
         if not keyword:
-            keyword = (detail.get("title") or "").strip()
+            keyword = (detail_single.get("title") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="분석할 본문이 없습니다. URL 또는 본문을 입력해주세요.")
+    is_cafe = _is_cafe(url, detail_single) if url else True
     try:
-        result = await _dissect(content, keyword)
-        return {"success": True, "data": result, "used_keyword": keyword or "카페글 분석", "content_chars": len(content)}
+        result = await _dissect(content, keyword, is_cafe=is_cafe)
+        return {"success": True, "data": result, "used_keyword": keyword or ("카페글 분석" if is_cafe else "블로그글 분석"),
+                "text_type": (detail_single or {}).get("text_type", "네이버 카페" if is_cafe else "네이버 블로그"),
+                "content_chars": len(content)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"카페글 분석 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"본문 해부 분석 오류: {str(e)}")

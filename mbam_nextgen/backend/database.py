@@ -117,6 +117,24 @@ class CafeSchedule(Base):
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class BlogSchedule(Base):
+    """블로그 매일 자동발행 예약: 글감수집 카테고리에서 매일 같은 시각에 글감을 뽑아 자동 포스팅."""
+    __tablename__ = "blog_schedules"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    account_id = Column(String, ForeignKey("naver_accounts.id", ondelete="CASCADE"))
+    schedule_time = Column(String)  # "HH:MM" — 매일 발행 시각
+    content_category = Column(String, nullable=True)  # 글감수집 카테고리
+    post_count_per_day = Column(Integer, default=1)   # 1일 발행 개수
+    ai_provider = Column(String, default="claude")
+    distribution_mode = Column(String, default="normal")  # normal | quick
+    generate_card_news = Column(Integer, default=1)   # 첨부 이미지 없을 때 AI 카드뉴스 5장 자동 생성
+    is_active = Column(Integer, default=1)
+    last_run_date = Column(String, nullable=True)  # "YYYY-MM-DD" — 하루 1회 중복 방지
+    last_index = Column(Integer, default=0)         # 글감 회전 인덱스(매일 다른 글감)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CafeManuscript(Base):
     """카페 일괄 발행용 저장 원고: 계정별로 (원고 + 타겟 카페/게시판)을 각각 저장 → 일괄 발행."""
     __tablename__ = "cafe_manuscripts"

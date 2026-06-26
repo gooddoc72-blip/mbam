@@ -1,5 +1,7 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 
 import { useState, useEffect } from "react";
 
@@ -201,6 +203,7 @@ export default function CommunicationPage() {
       const data = await res.json();
       if (data.success && data.task_id) {
         setTaskId(data.task_id);
+        try { addHistory("communication", { summary: `소통·이웃 자동화 시작` }); } catch (e) {}
       } else {
         alert("자동화 시작에 실패했습니다.");
         setLoading(false);
@@ -416,6 +419,7 @@ export default function CommunicationPage() {
           )}
         </div>
       </div>
+      <WorkHistory menuKey="communication" />
     </div>
   );
 }

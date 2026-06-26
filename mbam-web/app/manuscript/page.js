@@ -1,6 +1,8 @@
 "use client";
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, UploadCloud, FileText, CheckCircle, Search, Edit3, ScrollText } from 'lucide-react';
+import { addHistory } from '../utils/workHistory';
+import WorkHistory from '../components/WorkHistory';
 
 export default function ManuscriptPage() {
     const [manuscripts, setManuscripts] = useState([]);
@@ -39,6 +41,7 @@ export default function ManuscriptPage() {
                 body: JSON.stringify(form)
             });
             if (res.ok) {
+                try { addHistory("manuscript", { summary: `원고 저장 · ${form.title || ''}` }); } catch (e) {}
                 setForm({ title: '', content: '' });
                 fetchManuscripts();
                 alert("원고가 성공적으로 저장되었습니다.");
@@ -209,6 +212,7 @@ export default function ManuscriptPage() {
                     </div>
                 </div>
             </div>
+            <WorkHistory menuKey="manuscript" />
         </div>
     );
 }

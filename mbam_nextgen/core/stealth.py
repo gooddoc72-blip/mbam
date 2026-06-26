@@ -141,6 +141,17 @@ class StealthExecutor:
                     cur = ''
             if cur:
                 lines.append(cur)
+            # 짧은 꼬리 줄 방지: 마지막 줄이 너무 짧으면(외톨이 단어/어절) 앞 줄의
+            # 끝 단어를 한 개씩 내려 균형을 맞춘다. (예: "...있다는" / "거였어요." →
+            # "...제도가" / "있다는 거였어요.") 가운데 정렬 테마에서 글자 한두 개가
+            # 홀로 줄바꿈되어 떠 보이는 문제를 없앤다.
+            MIN_TAIL = 12
+            while len(lines) >= 2 and len(lines[-1]) < MIN_TAIL:
+                prev_words = lines[-2].split(' ')
+                if len(prev_words) <= 1:
+                    break
+                lines[-2] = ' '.join(prev_words[:-1])
+                lines[-1] = prev_words[-1] + ' ' + lines[-1]
             return lines if lines else [sent]
 
         out_lines = []

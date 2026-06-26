@@ -1,6 +1,8 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
+import { addHistory } from "../utils/workHistory";
+import WorkHistory from "../components/WorkHistory";
 import { PenTool, Video, Calendar, Clock, Image as ImageIcon, Search, CheckCircle2 } from "lucide-react";
 
 export default function PlaceNewsPage() {
@@ -142,6 +144,7 @@ export default function PlaceNewsPage() {
             const data = await res.json();
             if (data.success) {
                 alert("원고 및 영상이 성공적으로 제작되었습니다!");
+                try { addHistory("place-news", { summary: `소식·영상 제작 완료` }); } catch (e) {}
                 setStep(1); // 초기화
                 fetchData();
             } else {
@@ -439,6 +442,7 @@ export default function PlaceNewsPage() {
                     </div>
                 </div>
             </div>
+            <WorkHistory menuKey="place-news" />
         </main>
     );
 }
