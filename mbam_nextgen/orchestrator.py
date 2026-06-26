@@ -601,6 +601,15 @@ class WorkflowOrchestrator:
                 speed_mode=speed_mode, speed_multiplier=speed_multiplier
             )
 
+            # 6.5 지도(장소) 삽입 — 본문 작성 후 글 하단에 추가
+            _insert_map = kwargs.get("insert_map")
+            _map_query = (kwargs.get("map_query") or "").strip()
+            if _insert_map and _map_query:
+                try:
+                    await self.blog.insert_place_map(editor_frame, _map_query)
+                except Exception as _e:
+                    logger.error(f"[Orchestrator] 지도 삽입 중 오류(무시): {_e}")
+
             # 7. 발행 처리
             publish_result = False
             if publish_mode in ["now", "instant"]:

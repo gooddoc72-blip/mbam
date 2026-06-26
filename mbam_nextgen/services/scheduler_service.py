@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mbam_nextgen.backend.routers.place import run_place_analysis
-from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule, BlogSchedule
+from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule, BlogSchedule, BlogReservation
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SchedulerService")
@@ -402,6 +402,91 @@ class SchedulerService:
         finally:
             db.close()
 
+    # ===================== 블로그 예약 포스팅 (1회) =====================
+    async def run_blog_reservation_job(self, reservation_id: str):
+        db = SessionLocal()
+        try:
+            r = db.query(BlogReservation).filter(BlogReservation.id == reservation_id).first()
+            if not r or r.status != "pending":
+                return
+            acc = db.query(NaverAccount).filter(NaverAccount.id == r.account_id).first()
+            if not acc:
+                r.status = "failed"; db.commit(); return
+            from mbam_nextgen.orchestrator import WorkflowOrchestrator
+            orchestrator = WorkflowOrchestrator()
+            logger.info(f"📅 [BlogReservation] {acc.naver_id} 예약 발행 시작: {r.keyword} @ {r.run_at}")
+            try:
+                result = await orchestrator.execute_blog_workflow(
+                    account_id=acc.naver_id,
+                    account_pw=acc.naver_pw,
+                    keyword=r.keyword or "정보",
+                    source_data=r.source_data or "",
+                    publish_mode="instant",
+                    ai_provider=r.ai_provider or "claude",
+                    distribution_mode=r.distribution_mode or "normal",
+                    generate_card_news=bool(getattr(r, "generate_card_news", 1)),
+                    image_folder_path=(r.image_folder or None),
+                    blog_id=acc.blog_addr or None,
+                )
+                if result and result.get("success"):
+                    r.status = "done"; r.result_url = result.get("result_url") or ""
+                    logger.info(f"📅 [BlogReservation] 발행 성공: {r.keyword}")
+                else:
+                    r.status = "failed"
+                    logger.warning(f"📅 [BlogReservation] 발행 실패: {(result or {}).get('error')}")
+            except Exception as e:
+                r.status = "failed"
+                logger.error(f"📅 [BlogReservation] 예외: {e}")
+            db.commit()
+        except Exception as e:
+            logger.error(f"[BlogReservation] job 실패({reservation_id}): {e}")
+        finally:
+            db.close()
+
+    def add_blog_reservation_job(self, reservation_id, run_at):
+        """run_at: 'YYYY-MM-DD HH:MM' → date 트리거로 1회 발화 (즉시 등록)."""
+        try:
+            dt = datetime.strptime(run_at, "%Y-%m-%d %H:%M")
+            self.scheduler.add_job(
+                self.run_blog_reservation_job, 'date', run_date=dt,
+                args=[reservation_id], id=f"blog_resv_{reservation_id}",
+                replace_existing=True, misfire_grace_time=3600,
+            )
+            logger.info(f"블로그 예약 등록: blog_resv_{reservation_id} @ {run_at}")
+            return True
+        except Exception as e:
+            logger.error(f"블로그 예약 등록 실패({reservation_id}): {e}")
+            return False
+
+    def remove_blog_reservation_job(self, reservation_id):
+        try:
+            self.scheduler.remove_job(f"blog_resv_{reservation_id}")
+        except Exception:
+            pass
+
+    def load_blog_reservations(self):
+        """기동 시 pending 예약을 스케줄러에 등록. 이미 지난 건은 30초 뒤 보충 발화."""
+        try:
+            from datetime import timedelta
+            db = SessionLocal()
+            rows = db.query(BlogReservation).filter(BlogReservation.status == "pending").all()
+            now = datetime.now()
+            for r in rows:
+                try:
+                    dt = datetime.strptime(r.run_at, "%Y-%m-%d %H:%M")
+                    run_date = dt if dt > now else now + timedelta(seconds=30)
+                    self.scheduler.add_job(
+                        self.run_blog_reservation_job, 'date', run_date=run_date,
+                        args=[r.id], id=f"blog_resv_{r.id}", replace_existing=True,
+                        misfire_grace_time=3600,
+                    )
+                except Exception as e:
+                    logger.error(f"예약 로드 실패({r.id}): {e}")
+            db.close()
+            logger.info(f"Loaded {len(rows)} blog reservations.")
+        except Exception as e:
+            logger.error(f"Error loading blog reservations: {e}")
+
     async def run_content_sync_job(self):
         """매일 실행되는 글감 데이터 동기화 작업"""
         logger.info(f"[{datetime.now()}] Starting scheduled content data sync...")
@@ -623,6 +708,9 @@ class SchedulerService:
 
         # Load Blog Daily Post Schedules
         self.load_blog_schedules()
+
+        # Load Blog Reservations (1회 예약)
+        self.load_blog_reservations()
 
         # Load Content Sync Schedule
         self.load_content_schedule()

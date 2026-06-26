@@ -53,6 +53,8 @@ class AutoPostRequest(BaseModel):
     post_mode: str = "ai_generate" # "manual_text" | "ai_generate"
     target_keyword: Optional[str] = None
     sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 최대 5개 — 본문에 자연스럽게 녹임
+    insert_map: Optional[bool] = False        # 블로그 글에 네이버 장소(지도) 삽입
+    map_query: Optional[str] = None           # 삽입할 장소명/주소
 
     title: Optional[str] = None
     content: Optional[str] = None
@@ -215,6 +217,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     source_data=req.source_data,
                     generate_card_news=req.generate_card_news,
                     use_tethering=req.use_tethering,
+                    insert_map=req.insert_map,
+                    map_query=req.map_query,
                     log_callback=log
                 )
             else:
@@ -230,7 +234,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     reference_data=req.reference_data,
                     post_purpose=req.post_purpose,
                     promo_type=req.promo_type,
-                    distribution_mode=req.distribution_mode
+                    distribution_mode=req.distribution_mode,
+                    insert_map=req.insert_map,
+                    map_query=req.map_query
                 )
             if result.get("success"):
                 log("✅ 블로그 포스팅이 성공적으로 완료되었습니다!")

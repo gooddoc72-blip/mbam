@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from ..database import get_db, NaverAccount, BlogSchedule
+from ..database import get_db, NaverAccount, BlogSchedule, BlogReservation
 from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/blog-schedule", tags=["blog_schedule"])
@@ -107,6 +107,88 @@ async def delete_blog_schedule(
         try:
             from mbam_nextgen.services.scheduler_service import scheduler_service
             scheduler_service.remove_blog_schedule_job(schedule_id)
+        except Exception:
+            pass
+    return {"message": "예약이 삭제되었습니다."}
+
+
+# ===================== 예약 포스팅 (1회) =====================
+class BlogReservationCreate(BaseModel):
+    account_id: str
+    run_at: str                       # "YYYY-MM-DD HH:MM"
+    keyword: str
+    source_data: Optional[str] = None
+    image_folder: Optional[str] = None
+    ai_provider: Optional[str] = "claude"
+    distribution_mode: Optional[str] = "normal"
+    generate_card_news: Optional[bool] = True
+
+
+@router.post("/reservations", summary="블로그 예약 포스팅 추가 (1회)")
+async def add_reservation(req: BlogReservationCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user_id = get_user_id(current_user)
+    acc = db.query(NaverAccount).filter(NaverAccount.id == req.account_id, NaverAccount.user_id == user_id).first()
+    if not acc:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    if not (req.keyword or "").strip():
+        raise HTTPException(status_code=400, detail="타겟 키워드를 입력하세요.")
+    # run_at 형식 검증
+    import datetime as _dt
+    try:
+        _dt.datetime.strptime(req.run_at, "%Y-%m-%d %H:%M")
+    except Exception:
+        raise HTTPException(status_code=400, detail="예약 일시 형식이 올바르지 않습니다. (YYYY-MM-DD HH:MM)")
+
+    r = BlogReservation(
+        user_id=user_id,
+        account_id=req.account_id,
+        run_at=req.run_at,
+        keyword=req.keyword,
+        source_data=req.source_data,
+        image_folder=req.image_folder,
+        ai_provider=req.ai_provider or "claude",
+        distribution_mode=req.distribution_mode or "normal",
+        generate_card_news=1 if req.generate_card_news else 0,
+        status="pending",
+    )
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    try:
+        from mbam_nextgen.services.scheduler_service import scheduler_service
+        scheduler_service.add_blog_reservation_job(r.id, r.run_at)
+    except Exception as e:
+        print(f"[blog_reservation] 스케줄러 등록 실패: {e}")
+    return {"message": "예약 포스팅이 등록되었습니다.", "id": r.id}
+
+
+@router.get("/reservations", summary="블로그 예약 포스팅 목록")
+async def get_reservations(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user_id = get_user_id(current_user)
+    rows = db.query(BlogReservation).filter(BlogReservation.user_id == user_id).order_by(BlogReservation.run_at).all()
+    result = []
+    for r in rows:
+        acc = db.query(NaverAccount).filter(NaverAccount.id == r.account_id).first()
+        result.append({
+            "id": r.id, "account_id": r.account_id, "naver_id": acc.naver_id if acc else "(삭제됨)",
+            "run_at": r.run_at, "keyword": r.keyword,
+            "has_source": bool(r.source_data), "has_image": bool(r.image_folder),
+            "ai_provider": r.ai_provider, "distribution_mode": r.distribution_mode,
+            "status": r.status, "result_url": r.result_url,
+        })
+    return result
+
+
+@router.delete("/reservations/{reservation_id}", summary="블로그 예약 포스팅 삭제")
+async def delete_reservation(reservation_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user_id = get_user_id(current_user)
+    r = db.query(BlogReservation).filter(BlogReservation.id == reservation_id, BlogReservation.user_id == user_id).first()
+    if r:
+        db.delete(r)
+        db.commit()
+        try:
+            from mbam_nextgen.services.scheduler_service import scheduler_service
+            scheduler_service.remove_blog_reservation_job(reservation_id)
         except Exception:
             pass
     return {"message": "예약이 삭제되었습니다."}

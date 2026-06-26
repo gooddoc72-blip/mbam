@@ -4,6 +4,7 @@ import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 function BlogPostingContent() {
 
@@ -100,6 +101,8 @@ function BlogPostingContent() {
   const [imageUploadMode, setImageUploadMode] = useState("folder"); // "folder" or "direct"
   const [imageFolderPath, setImageFolderPath] = useState("");
   const [directImages, setDirectImages] = useState("");
+  const [insertMap, setInsertMap] = useState(false);   // 네이버 장소(지도) 삽입
+  const [mapQuery, setMapQuery] = useState("");         // 삽입할 장소명/주소
 
   // 이미지 보관함에서 가져오기 (기본 전체 선택 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
@@ -563,7 +566,9 @@ function BlogPostingContent() {
         accounts: validAccounts,
         interval_mins: parseInt(intervalMins) || 0,
         wash_images: washImages,
-        image_folder_path: imageUploadMode === "folder" ? imageFolderPath : null,
+        image_folder_path: imageFolderPath || null,
+        insert_map: insertMap,
+        map_query: mapQuery,
         images: imageUploadMode === "direct" ? directImages.split("\n").filter(p => p.trim()) : [],
         post_mode: "manual_text", // We always send generated contents as manual_text now
         generated_contents: generatedContents.map((gc, idx) => ({ ...gc, account_id: validAccounts[idx]?.id })),
@@ -647,8 +652,8 @@ function BlogPostingContent() {
 
       {/* 발행 모드 탭 */}
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", marginBottom: "-1rem" }}>
-        <a href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</a>
-        <a href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>🗓️ 매일 자동발행</a>
+        <Link href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</Link>
+        <Link href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>🗓️ 매일 자동 포스팅</Link>
       </div>
 
       {/* 이미지 보관함 선택 모달 */}
@@ -782,32 +787,19 @@ function BlogPostingContent() {
                ✨ 이미지 자동 세탁 적용 (메타데이터 제거 및 노이즈 추가)
              </label>
           </div>
-          <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-              <input type="radio" checked={imageUploadMode === "folder"} onChange={() => setImageUploadMode("folder")} />
-              <span>로컬 PC 폴더 연동 (추천)</span>
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-              <input type="radio" checked={imageUploadMode === "direct"} onChange={() => setImageUploadMode("direct")} />
-              <span>이미지 절대 경로 직접 입력</span>
-            </label>
-          </div>
-          {imageUploadMode === "folder" ? (
-            <div>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <input type="text" value={imageFolderPath} onChange={e => setImageFolderPath(e.target.value)} placeholder="예: C:\Users\Images\Cafe (서버 PC 기준 폴더 경로)" style={{ flex: 1, padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                <button type="button" onClick={handleSelectFolder} style={{ padding: "0 1rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
-                  🔍 폴더 찾기
-                </button>
-                <button type="button" onClick={openLibPicker} style={{ padding: "0 1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
-                  🗂️ 보관함에서 가져오기
-                </button>
-              </div>
-              <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.5rem 0 0 0" }}>* 봇이 해당 폴더에서 이미지를 랜덤하게(최대 3장) 골라 업로드합니다. 이미지 세탁소 보관함에서 골라 넣을 수도 있습니다.</p>
+          <div>
+            <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem", color: "#334155" }}>발행에 넣을 이미지</label>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input type="text" value={imageFolderPath} onChange={e => setImageFolderPath(e.target.value)} placeholder="‘폴더 찾기’ 또는 ‘보관함에서 가져오기’로 이미지를 등록하세요" style={{ flex: 1, padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+              <button type="button" onClick={handleSelectFolder} style={{ padding: "0 1rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                🔍 폴더 찾기
+              </button>
+              <button type="button" onClick={openLibPicker} style={{ padding: "0 1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                🗂️ 보관함에서 가져오기
+              </button>
             </div>
-          ) : (
-            <textarea value={directImages} onChange={e => setDirectImages(e.target.value)} placeholder="C:\images\img1.jpg (엔터로 구분)" style={{ width: "100%", height: "80px", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box", resize: "vertical" }} />
-          )}
+            <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.5rem 0 0 0" }}>* 등록한 이미지를 <b>계정마다 자동 세탁(서로 다른 버전)</b>해서 발행합니다. (계정당 최대 3장 사용)</p>
+          </div>
 
           <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#ecfdf5", borderRadius: "8px", border: "1px solid #a7f3d0" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: "#065f46" }}>
@@ -815,6 +807,20 @@ function BlogPostingContent() {
               🎨 업로드할 이미지가 없을 경우 AI 카드뉴스 자동 생성
             </label>
             <p style={{ margin: "0.5rem 0 0 1.5rem", fontSize: "0.85rem", color: "#047857" }}>* 백엔드의 AI 이미지 생성기를 호출하여 원고 내용에 맞는 정보성 카드뉴스를 생성한 후 포스팅에 첨부합니다.</p>
+          </div>
+
+          {/* 지도(장소) 삽입 */}
+          <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: insertMap ? "#1d4ed8" : "#334155" }}>
+              <input type="checkbox" checked={insertMap} onChange={e => setInsertMap(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+              🗺️ 글 하단에 네이버 지도(장소) 삽입
+            </label>
+            {insertMap && (
+              <div style={{ marginTop: "0.7rem" }}>
+                <input type="text" value={mapQuery} onChange={e => setMapQuery(e.target.value)} placeholder="삽입할 장소명 또는 주소 (예: 스타벅스 서면전포역점)" style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                <p style={{ margin: "0.4rem 0 0", fontSize: "0.82rem", color: "#3b82f6" }}>* 발행 시 에디터에서 해당 장소를 검색해 <b>첫 번째 결과</b>의 지도를 글 맨 아래에 자동 삽입합니다. (매장 위치 안내·지역 SEO에 유용)</p>
+              </div>
+            )}
           </div>
 
           {sourceData && sourceData.includes("[링크] http") && (
