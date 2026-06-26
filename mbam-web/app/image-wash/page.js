@@ -22,6 +22,43 @@ export default function ImageWashPage() {
   const [useWatermark, setUseWatermark] = useState(false);
   const [useRotation, setUseRotation] = useState(false);
 
+  // 이미지 보관함 (세탁 후 저장 → 발행 재사용)
+  const [library, setLibrary] = useState([]);
+  const [libMeta, setLibMeta] = useState({ max_files: 30, ttl_days: 14 });
+  const [savingLib, setSavingLib] = useState(false);
+
+  const loadLibrary = async () => {
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library");
+      if (res.ok) { const d = await res.json(); setLibrary(d.items || []); setLibMeta({ max_files: d.max_files || 30, ttl_days: d.ttl_days || 14 }); }
+    } catch (e) {}
+  };
+  useEffect(() => { loadLibrary(); }, []);
+
+  const saveToLibrary = async () => {
+    if (!results.length) { alert("먼저 이미지를 세탁해주세요."); return; }
+    setSavingLib(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: results.map(r => r.base64_data) })
+      });
+      const d = await res.json();
+      if (res.ok && d.success) { alert(`✅ ${d.saved}장을 보관함에 저장했습니다.`); loadLibrary(); }
+      else alert("저장에 실패했습니다.");
+    } catch (e) { alert("저장 중 오류: " + e.message); }
+    finally { setSavingLib(false); }
+  };
+
+  const deleteFromLibrary = async (filename) => {
+    if (!confirm("이 이미지를 보관함에서 삭제할까요?")) return;
+    try {
+      const res = await fetchWithAuth(`/api/settings/wash-library/${encodeURIComponent(filename)}`, { method: "DELETE" });
+      if (res.ok) loadLibrary();
+    } catch (e) {}
+  };
+
   const handleDragOver = (e) => {
     e.preventDefault();
   };
@@ -165,7 +202,10 @@ export default function ImageWashPage() {
               선택 저장
             </button>
             <button onClick={handleDownloadAll} style={{ padding: "0.8rem", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: "pointer" }}>
-              전체 저장 ({results.length}장)
+              ⬇️ 내 PC로 다운로드 ({results.length}장)
+            </button>
+            <button onClick={saveToLibrary} disabled={savingLib || results.length === 0} style={{ padding: "0.8rem", backgroundColor: savingLib ? "#a78bfa" : "#7c3aed", color: "white", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: savingLib ? "wait" : "pointer" }}>
+              {savingLib ? "저장 중..." : `💾 보관함에 저장 (${results.length}장)`}
             </button>
             {results.length > 0 && <div style={{ textAlign: "center", fontSize: "0.85rem", color: "#16a34a", fontWeight: "bold" }}>{results.length}장 생성 완료</div>}
           </div>
@@ -295,6 +335,30 @@ export default function ImageWashPage() {
         </div>
 
       </div>
+
+      {/* 내 이미지 보관함 */}
+      <div style={{ marginTop: "2rem", padding: "1.5rem", background: "white", border: "1px solid #e2e8f0", borderRadius: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.1rem", color: "#0f172a" }}>🗂️ 내 이미지 보관함 <span style={{ color: "#94a3b8", fontWeight: "normal", fontSize: "0.9rem" }}>({library.length}/{libMeta.max_files}장)</span></h2>
+          <button onClick={loadLibrary} style={{ fontSize: "0.85rem", padding: "0.4rem 0.9rem", background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>새로고침</button>
+        </div>
+        <p style={{ margin: "0 0 1rem", fontSize: "0.85rem", color: "#64748b" }}>세탁한 이미지를 저장해두면, 블로그·카페 발행 때 가져다 쓸 수 있습니다. 서버 용량 보호를 위해 <b>계정당 최대 {libMeta.max_files}장 · {libMeta.ttl_days}일 후 자동 삭제 · 저장 시 자동 압축</b>됩니다.</p>
+        {library.length === 0 ? (
+          <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "8px" }}>
+            아직 저장된 이미지가 없습니다. 세탁 후 <b>💾 보관함에 저장</b>을 눌러보세요.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "0.8rem" }}>
+            {library.map((img) => (
+              <div key={img.filename} style={{ position: "relative", border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", background: "#f8fafc" }}>
+                <img src={img.base64_data} alt={img.filename} style={{ width: "100%", height: "110px", objectFit: "cover", display: "block" }} />
+                <button onClick={() => deleteFromLibrary(img.filename)} title="삭제" style={{ position: "absolute", top: "4px", right: "4px", width: "24px", height: "24px", borderRadius: "50%", background: "rgba(239,68,68,0.9)", color: "white", border: "none", cursor: "pointer", fontWeight: "bold", lineHeight: 1 }}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <WorkHistory menuKey="image-wash" />
     </div>
   );

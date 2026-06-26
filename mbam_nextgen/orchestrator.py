@@ -251,7 +251,7 @@ class WorkflowOrchestrator:
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
         post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None,
-        prompt_category: str = None, include_source_link: bool = False
+        prompt_category: str = None, include_source_link: bool = False, sub_keywords: list = None
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -272,7 +272,16 @@ class WorkflowOrchestrator:
         # For prototype, we just pass the keyword but now we can add the ref_text to keyword context
         source_text = f"\n\n[수집된 원문 데이터]\n{source_data}" if source_data else ""
         enhanced_keyword = f"{keyword}{source_text}\n\n[참고 데이터]\n{ref_text}\n\n[상위노출 공식]\n{formula}" if (reference_data or source_data) else keyword
-        
+
+        # 서브(연관) 키워드 — 본문에 자연스럽게 녹여 SEO 강화
+        sub_list = [k.strip() for k in (sub_keywords or []) if k and k.strip()][:5]
+        if sub_list:
+            enhanced_keyword = (
+                f"{enhanced_keyword}\n\n[서브 키워드(연관 키워드)] 다음 키워드를 본문에 "
+                f"각각 1~2회씩 문맥에 어울리게 자연스럽게 포함해 검색 노출을 강화하세요(키워드 나열 금지): "
+                f"{', '.join(sub_list)}"
+            )
+
         for attempt in range(1, max_attempts + 1):
             try:
                 content = await asyncio.wait_for(

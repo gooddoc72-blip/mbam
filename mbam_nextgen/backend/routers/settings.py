@@ -387,3 +387,132 @@ async def wash_upload_endpoint(
         "success": True,
         "results": results
     }
+
+
+# ===================== 이미지 보관함 (세탁 후 저장 → 발행 재사용) =====================
+from fastapi import Depends
+import glob as _glob
+from ..auth import get_current_user
+
+SAVED_IMAGES_ROOT = os.path.join(os.getcwd(), "saved_images")
+
+
+def _user_lib_dir(current_user: dict) -> str:
+    uid = (current_user or {}).get("sub") or "anon"
+    safe = "".join(c for c in str(uid) if c.isalnum() or c in "._-@") or "anon"
+    d = os.path.join(SAVED_IMAGES_ROOT, safe)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+# 보관함 용량 가드레일
+LIB_MAX_FILES = 30      # 계정당 최대 보관 장수 (초과 시 오래된 것부터 삭제)
+LIB_TTL_DAYS = 14       # 저장 후 N일 지나면 자동 삭제
+LIB_MAX_DIM = 1280      # 저장 시 긴 변 최대 px (이보다 크면 리사이즈)
+LIB_QUALITY = 80        # 저장 JPEG 품질
+
+
+def _compress_jpeg(raw_bytes: bytes) -> bytes:
+    """저장 용량 절감: 긴 변 LIB_MAX_DIM 이하로 리사이즈 + 품질 LIB_QUALITY로 재인코딩."""
+    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    img.thumbnail((LIB_MAX_DIM, LIB_MAX_DIM), Image.LANCZOS)  # 더 클 때만 축소(비율 유지)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=LIB_QUALITY, optimize=True)
+    return buf.getvalue()
+
+
+def _cleanup_lib(d: str):
+    """14일 경과분 삭제 + 30장 상한 유지(오래된 것부터)."""
+    import time
+    try:
+        now = time.time()
+        for p in _glob.glob(os.path.join(d, "*.jpg")):
+            try:
+                if now - os.path.getmtime(p) > LIB_TTL_DAYS * 86400:
+                    os.remove(p)
+            except Exception:
+                pass
+        files = sorted(_glob.glob(os.path.join(d, "*.jpg")), key=os.path.getmtime)
+        if len(files) > LIB_MAX_FILES:
+            for p in files[:len(files) - LIB_MAX_FILES]:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+class WashSaveRequest(BaseModel):
+    images: list  # base64 data URL 목록 (세탁 결과)
+
+
+@router.post("/wash-library/save", summary="세탁한 이미지를 내 보관함에 저장")
+async def wash_library_save(req: WashSaveRequest, current_user: dict = Depends(get_current_user)):
+    d = _user_lib_dir(current_user)
+    saved = 0
+    for data_url in (req.images or []):
+        try:
+            b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
+            raw = base64.b64decode(b64)
+            raw = _compress_jpeg(raw)  # 용량 절감(리사이즈+품질↓)
+            fn = f"lib_{uuid.uuid4().hex[:10]}.jpg"
+            with open(os.path.join(d, fn), "wb") as f:
+                f.write(raw)
+            saved += 1
+        except Exception as e:
+            print(f"[wash-library] 저장 실패: {e}")
+    _cleanup_lib(d)  # 30장 상한 + 14일 만료 유지
+    return {"success": True, "saved": saved, "folder": d, "max_files": LIB_MAX_FILES, "ttl_days": LIB_TTL_DAYS}
+
+
+@router.get("/wash-library", summary="내 이미지 보관함 목록")
+async def wash_library_list(current_user: dict = Depends(get_current_user)):
+    d = _user_lib_dir(current_user)
+    _cleanup_lib(d)  # 조회 시점에도 만료/상한 정리
+    items = []
+    for p in sorted(_glob.glob(os.path.join(d, "*.jpg")), key=os.path.getmtime, reverse=True):
+        try:
+            with open(p, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            items.append({"filename": os.path.basename(p), "base64_data": f"data:image/jpeg;base64,{b64}"})
+        except Exception:
+            pass
+    return {"success": True, "folder": d, "items": items, "max_files": LIB_MAX_FILES, "ttl_days": LIB_TTL_DAYS}
+
+
+@router.delete("/wash-library/{filename}", summary="보관함 이미지 삭제")
+async def wash_library_delete(filename: str, current_user: dict = Depends(get_current_user)):
+    d = _user_lib_dir(current_user)
+    safe = os.path.basename(filename)  # path traversal 방지
+    p = os.path.abspath(os.path.join(d, safe))
+    if os.path.exists(p) and os.path.commonpath([os.path.abspath(d), p]) == os.path.abspath(d):
+        try:
+            os.remove(p)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+    return {"success": False, "message": "파일을 찾을 수 없습니다."}
+
+
+class WashStageRequest(BaseModel):
+    filenames: list  # 발행에 사용할 보관함 파일명 목록
+
+
+@router.post("/wash-library/stage", summary="선택한 보관함 이미지를 발행용 임시 폴더로 복사")
+async def wash_library_stage(req: WashStageRequest, current_user: dict = Depends(get_current_user)):
+    import shutil
+    src_dir = _user_lib_dir(current_user)
+    dst_dir = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
+    os.makedirs(dst_dir, exist_ok=True)
+    copied = 0
+    for fn in (req.filenames or []):
+        safe = os.path.basename(fn)  # path traversal 방지
+        sp = os.path.abspath(os.path.join(src_dir, safe))
+        if os.path.exists(sp) and os.path.commonpath([os.path.abspath(src_dir), sp]) == os.path.abspath(src_dir):
+            try:
+                shutil.copy2(sp, os.path.join(dst_dir, safe))
+                copied += 1
+            except Exception as e:
+                print(f"[wash-stage] 복사 실패: {e}")
+    return {"success": True, "folder": dst_dir, "count": copied}

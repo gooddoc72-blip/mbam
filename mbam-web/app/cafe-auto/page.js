@@ -69,6 +69,44 @@ export default function CafeAutoPage() {
   const [imageFiles, setImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [imageFolder, setImageFolder] = useState(""); // 업로드된 이미지 폴더(발행 시 첨부)
   const [useTethering, setUseTethering] = useState(false); // USB 테더링 IP 우회
+
+  // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
+  const [showLibPicker, setShowLibPicker] = useState(false);
+  const [libImages, setLibImages] = useState([]);
+  const [libSelected, setLibSelected] = useState(() => new Set());
+  const [libStaging, setLibStaging] = useState(false);
+
+  const openLibPicker = async () => {
+    setShowLibPicker(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library");
+      if (res.ok) {
+        const d = await res.json();
+        const items = d.items || [];
+        setLibImages(items);
+        setLibSelected(new Set(items.map(i => i.filename)));
+      }
+    } catch (e) {}
+  };
+  const toggleLibImage = (fn) => setLibSelected(prev => { const n = new Set(prev); n.has(fn) ? n.delete(fn) : n.add(fn); return n; });
+  const useLibImages = async () => {
+    const picked = Array.from(libSelected);
+    if (picked.length === 0) { alert("사용할 이미지를 1장 이상 선택하세요."); return; }
+    setLibStaging(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library/stage", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filenames: picked })
+      });
+      const d = await res.json();
+      if (res.ok && d.success && d.folder) {
+        setImageFolder(d.folder);
+        setShowLibPicker(false);
+        alert(`✅ 보관함에서 ${d.count}장을 발행 이미지로 지정했습니다.`);
+      } else alert("이미지 지정에 실패했습니다.");
+    } catch (e) { alert("오류: " + e.message); }
+    finally { setLibStaging(false); }
+  };
   const [accountDelay, setAccountDelay] = useState(5); // 계정 간 발행 텀(분)
   const [accountTargets, setAccountTargets] = useState({}); // 계정별 타겟 {accId: {cafe_url, board_name}}
   const [savedManuscripts, setSavedManuscripts] = useState([]); // 저장된 일괄 원고
@@ -702,6 +740,42 @@ export default function CafeAutoPage() {
 
   return (
     <div style={{ padding: "2rem", display: "flex", flexDirection: "column", gap: "1.5rem", boxSizing: "border-box" }}>
+      {/* 이미지 보관함 선택 모달 */}
+      {showLibPicker && (
+        <div onClick={() => setShowLibPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: "12px", padding: "1.5rem", width: "640px", maxWidth: "92vw", maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.15rem", color: "#1e293b" }}>🗂️ 보관함에서 이미지 선택 <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: "normal" }}>(선택 {libSelected.size}/{libImages.length})</span></h3>
+              <button onClick={() => setShowLibPicker(false)} style={{ background: "none", border: "none", fontSize: "1.2rem", cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.8rem" }}>
+              <button onClick={() => setLibSelected(new Set(libImages.map(i => i.filename)))} style={{ fontSize: "0.82rem", padding: "0.35rem 0.8rem", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>전체 선택</button>
+              <button onClick={() => setLibSelected(new Set())} style={{ fontSize: "0.82rem", padding: "0.35rem 0.8rem", background: "#f8fafc", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>전체 해제</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "0.8rem" }}>
+              {libImages.length === 0 ? (
+                <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>보관함이 비어 있습니다. 이미지 세탁소에서 세탁 후 “💾 보관함에 저장”을 먼저 해주세요.</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: "0.6rem" }}>
+                  {libImages.map((img) => {
+                    const sel = libSelected.has(img.filename);
+                    return (
+                      <div key={img.filename} onClick={() => toggleLibImage(img.filename)} style={{ position: "relative", border: sel ? "3px solid #7c3aed" : "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", cursor: "pointer", boxSizing: "border-box" }}>
+                        <img src={img.base64_data} alt={img.filename} style={{ width: "100%", height: "90px", objectFit: "cover", display: "block", opacity: sel ? 1 : 0.55 }} />
+                        {sel && <span style={{ position: "absolute", top: "4px", right: "4px", width: "20px", height: "20px", borderRadius: "50%", background: "#7c3aed", color: "white", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <button onClick={useLibImages} disabled={libStaging || libSelected.size === 0} style={{ marginTop: "1rem", padding: "0.9rem", background: (libStaging || libSelected.size === 0) ? "#cbd5e1" : "#7c3aed", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", fontSize: "1rem", cursor: (libStaging || libSelected.size === 0) ? "not-allowed" : "pointer" }}>
+              {libStaging ? "지정 중..." : `선택한 ${libSelected.size}장 발행에 사용`}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         
         {/* Header Tabs */}
@@ -878,6 +952,9 @@ export default function CafeAutoPage() {
                     <input type="file" accept="image/*" multiple onChange={e => setImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
                     <button onClick={handleDescribeImages} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
                       {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
+                    </button>
+                    <button type="button" onClick={openLibPicker} style={{ marginTop: "0.5rem", padding: "0.5rem 1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", width: "100%" }}>
+                      🗂️ 이미지 보관함에서 가져오기
                     </button>
                     {imageFolder && <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#16a34a" }}>✅ 첨부 이미지가 발행 글에도 함께 들어갑니다.</p>}
                     <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>키워드(위 '타겟 키워드') + 첨부 이미지를 AI가 보고 글감을 만든 뒤, 아래 'AI 원고 생성'으로 원고를 만듭니다.</p>

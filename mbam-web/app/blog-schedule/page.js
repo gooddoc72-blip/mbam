@@ -86,6 +86,11 @@ export default function BlogSchedulePage() {
 
   return (
     <div style={{ maxWidth: "920px", margin: "0 auto", padding: "2rem 1rem" }}>
+      {/* 발행 모드 탭 */}
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "2px solid #e2e8f0" }}>
+        <a href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</a>
+        <a href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>🗓️ 매일 자동발행</a>
+      </div>
       <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.3rem" }}>🗓️ 블로그 매일 자동발행</h1>
       <p style={{ color: "#64748b", margin: "0 0 1.5rem" }}>
         글감 수집 카테고리에서 매일 같은 시각에 글감을 자동으로 뽑아 블로그에 발행합니다.

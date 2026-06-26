@@ -19,51 +19,69 @@ import {
     Search,
     MessageSquare,
     CreditCard,
-    CalendarClock
+    CalendarClock,
+    BarChart3,
+    KeyRound,
+    Image,
+    Folder
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
 
 const MENU_ITEMS = [
     { name: "홈", path: "/dashboard", icon: LayoutDashboard },
-    { name: "원고 관리", path: "/manuscript", icon: ScrollText },
-    { name: "글감 수집", path: "/content-collect", icon: FileText },
-    { name: "SEO 분석", path: "/seo-analysis", icon: TrendingUp },
-    { 
-        name: "플레이스 자동화", 
-        icon: MapPin,
-        submenus: [
-            { name: "플레이스 진단", path: "/place-seo", icon: MapPin },
-            { name: "소식 & 영상 자동화", path: "/place-news", icon: PenTool }
-        ]
-    },
-    { 
-        name: "블로그 분석 및 자동화", 
+    {
+        name: "블로그",
         icon: PenTool,
         submenus: [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
-            { name: "블로그 자동 포스팅", path: "/blog-posting", icon: PenTool },
-            { name: "블로그 매일 자동발행", path: "/blog-schedule", icon: CalendarClock },
+            { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
+            { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
-            { name: "이미지 세탁소", path: "/image-wash", icon: PenTool }
+            { name: "이미지 세탁소", path: "/image-wash", icon: Image },
+            { name: "구글 블로그스팟", path: "/blogspot", icon: FileText }
         ]
     },
-    { name: "구글 블로그스팟 자동화", path: "/blogspot", icon: PenTool },
-    { 
-        name: "카페 분석 및 자동화", 
+    {
+        name: "네이버 카페",
         icon: Coffee,
         submenus: [
-            { name: "카페글·블로그글 분석", path: "/cafe-analysis", icon: Search },
-            { name: "카페 포스팅 및 육성 자동화", path: "/cafe-auto", icon: PenTool }
+            { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
+            { name: "카페 포스팅", path: "/cafe-auto", icon: PenTool },
+            { name: "이미지 세탁소", path: "/image-wash", icon: Image }
         ]
     },
-    { 
-        name: "쇼핑 분석 및 자동화", 
-        icon: Search,
+    {
+        name: "플레이스 마케팅",
+        icon: MapPin,
         submenus: [
-            { name: "네이버 쇼핑 순위 검색", path: "/shopping/rank", icon: TrendingUp },
-            { name: "키워드 분석", path: "/shopping/keyword", icon: Search },
-            { name: "상품명 키워드 조합", path: "/shopping/combine", icon: FileText },
-            { name: "쿠팡 순위 분석", path: "/coupang/rank", icon: TrendingUp }
+            { name: "플레이스 진단", path: "/place-seo", icon: MapPin },
+            { name: "플레이스 자동화", path: "/place-news", icon: PenTool }
+        ]
+    },
+    {
+        name: "순위 추적",
+        icon: TrendingUp,
+        submenus: [
+            { name: "네이버 쇼핑", path: "/shopping/rank", icon: TrendingUp },
+            { name: "쿠팡 순위", path: "/coupang/rank", icon: TrendingUp }
+        ]
+    },
+    {
+        name: "키워드 분석",
+        icon: KeyRound,
+        submenus: [
+            { name: "SEO 통검분석", path: "/seo-analysis", icon: BarChart3 },
+            { name: "쇼핑 키워드 분석", path: "/shopping/keyword", icon: Search },
+            { name: "상품명 키워드 조합", path: "/shopping/combine", icon: FileText }
+        ]
+    },
+    {
+        name: "마케팅 컨텐츠",
+        icon: Folder,
+        submenus: [
+            { name: "글감수집", path: "/content-collect", icon: FileText },
+            { name: "원고관리", path: "/manuscript", icon: ScrollText },
+            { name: "이미지 세탁소", path: "/image-wash", icon: Image }
         ]
     },
     { name: "계정관리", path: "/multi-task", icon: Layers },
@@ -76,7 +94,7 @@ const MENU_ITEMS = [
 export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
-    const [openMenus, setOpenMenus] = useState({"블로그 분석 및 자동화": true, "카페 분석 및 자동화": true, "쇼핑 분석 및 자동화": true});
+    const [openMenus, setOpenMenus] = useState({"블로그": true, "네이버 카페": true, "플레이스 마케팅": true, "순위 추적": true, "키워드 분석": true, "마케팅 컨텐츠": true});
     const [mounted, setMounted] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [userRole, setUserRole] = useState(null);
@@ -222,11 +240,11 @@ export default function Sidebar() {
                                         transition: "all 0.2s ease"
                                     }}
                                 >
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <Icon size={20} strokeWidth={isAnySubActive ? 2.5 : 2} />
-                                        <span style={{ fontSize: "0.95rem" }}>{item.name}</span>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
+                                        <Icon size={20} strokeWidth={isAnySubActive ? 2.5 : 2} style={{ flexShrink: 0 }} />
+                                        <span style={{ fontSize: "0.95rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</span>
                                     </div>
-                                    {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                    <span style={{ flexShrink: 0, display: "inline-flex" }}>{isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
                                 </div>
                                 {isOpen && (
                                     <div style={{ paddingLeft: "2.5rem", display: "flex", flexDirection: "column", gap: "2px" }}>
@@ -242,10 +260,11 @@ export default function Sidebar() {
                                                         color: isSubActive ? "#3b82f6" : "#64748b",
                                                         fontWeight: isSubActive ? "600" : "400",
                                                         fontSize: "0.9rem",
-                                                        transition: "all 0.2s ease"
+                                                        transition: "all 0.2s ease",
+                                                        minWidth: 0
                                                     }}>
-                                                        <SubIcon size={16} />
-                                                        {sub.name}
+                                                        <SubIcon size={16} style={{ flexShrink: 0 }} />
+                                                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub.name}</span>
                                                     </div>
                                                 </Link>
                                             )

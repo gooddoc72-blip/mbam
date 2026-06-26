@@ -69,7 +69,19 @@ function BlogPostingContent() {
 
   // 2. Content Settings
   const [targetKeyword, setTargetKeyword] = useState("");
+  const [subKeywords, setSubKeywords] = useState([]);   // 서브(연관) 키워드 최대 5개
+  const [subKwInput, setSubKwInput] = useState("");
   const [productUrl, setProductUrl] = useState("");
+
+  const addSubKeyword = () => {
+    const v = (subKwInput || "").trim().replace(/,$/, "").trim();
+    if (!v) return;
+    if (subKeywords.length >= 5) { alert("서브 키워드는 최대 5개까지 추가할 수 있습니다."); return; }
+    if (subKeywords.includes(v)) { setSubKwInput(""); return; }
+    setSubKeywords([...subKeywords, v]);
+    setSubKwInput("");
+  };
+  const removeSubKeyword = (kw) => setSubKeywords(subKeywords.filter(k => k !== kw));
   const [extractUrlImages, setExtractUrlImages] = useState(false);
   const [descImageFiles, setDescImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [aiProvider, setAiProvider] = useState("claude");
@@ -88,6 +100,47 @@ function BlogPostingContent() {
   const [imageUploadMode, setImageUploadMode] = useState("folder"); // "folder" or "direct"
   const [imageFolderPath, setImageFolderPath] = useState("");
   const [directImages, setDirectImages] = useState("");
+
+  // 이미지 보관함에서 가져오기 (기본 전체 선택 + 골라담기)
+  const [showLibPicker, setShowLibPicker] = useState(false);
+  const [libImages, setLibImages] = useState([]);
+  const [libSelected, setLibSelected] = useState(() => new Set());
+  const [libStaging, setLibStaging] = useState(false);
+
+  const openLibPicker = async () => {
+    setShowLibPicker(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library");
+      if (res.ok) {
+        const d = await res.json();
+        const items = d.items || [];
+        setLibImages(items);
+        setLibSelected(new Set(items.map(i => i.filename))); // 기본 전체 선택
+      }
+    } catch (e) {}
+  };
+  const toggleLibImage = (fn) => {
+    setLibSelected(prev => { const n = new Set(prev); n.has(fn) ? n.delete(fn) : n.add(fn); return n; });
+  };
+  const useLibImages = async () => {
+    const picked = Array.from(libSelected);
+    if (picked.length === 0) { alert("사용할 이미지를 1장 이상 선택하세요."); return; }
+    setLibStaging(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/wash-library/stage", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filenames: picked })
+      });
+      const d = await res.json();
+      if (res.ok && d.success && d.folder) {
+        setImageUploadMode("folder");
+        setImageFolderPath(d.folder);
+        setShowLibPicker(false);
+        alert(`✅ 보관함에서 ${d.count}장을 발행 이미지로 지정했습니다.`);
+      } else alert("이미지 지정에 실패했습니다.");
+    } catch (e) { alert("오류: " + e.message); }
+    finally { setLibStaging(false); }
+  };
 
   // 4. Publish Settings
   const [publishMode, setPublishMode] = useState("instant");
@@ -353,6 +406,7 @@ function BlogPostingContent() {
       const payload = {
         accounts: validAccounts,
         target_keyword: targetKeyword,
+        sub_keywords: subKeywords,
         product_url: productUrl,
         extract_url_images: extractUrlImages,
         ai_provider: aiProvider,
@@ -591,6 +645,48 @@ function BlogPostingContent() {
   return (
     <div style={{ padding: "2rem", display: "flex", flexDirection: "column", gap: "2rem", minHeight: "100vh", boxSizing: "border-box" }}>
 
+      {/* 발행 모드 탭 */}
+      <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", marginBottom: "-1rem" }}>
+        <a href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</a>
+        <a href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>🗓️ 매일 자동발행</a>
+      </div>
+
+      {/* 이미지 보관함 선택 모달 */}
+      {showLibPicker && (
+        <div onClick={() => setShowLibPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: "12px", padding: "1.5rem", width: "640px", maxWidth: "92vw", maxHeight: "82vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+              <h3 style={{ margin: 0, fontSize: "1.15rem", color: "#1e293b" }}>🗂️ 보관함에서 이미지 선택 <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: "normal" }}>(선택 {libSelected.size}/{libImages.length})</span></h3>
+              <button onClick={() => setShowLibPicker(false)} style={{ background: "none", border: "none", fontSize: "1.2rem", cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.8rem" }}>
+              <button onClick={() => setLibSelected(new Set(libImages.map(i => i.filename)))} style={{ fontSize: "0.82rem", padding: "0.35rem 0.8rem", background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>전체 선택</button>
+              <button onClick={() => setLibSelected(new Set())} style={{ fontSize: "0.82rem", padding: "0.35rem 0.8rem", background: "#f8fafc", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>전체 해제</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "0.8rem" }}>
+              {libImages.length === 0 ? (
+                <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>보관함이 비어 있습니다. 이미지 세탁소에서 세탁 후 “💾 보관함에 저장”을 먼저 해주세요.</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: "0.6rem" }}>
+                  {libImages.map((img) => {
+                    const sel = libSelected.has(img.filename);
+                    return (
+                      <div key={img.filename} onClick={() => toggleLibImage(img.filename)} style={{ position: "relative", border: sel ? "3px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", cursor: "pointer", boxSizing: "border-box" }}>
+                        <img src={img.base64_data} alt={img.filename} style={{ width: "100%", height: "90px", objectFit: "cover", display: "block", opacity: sel ? 1 : 0.55 }} />
+                        {sel && <span style={{ position: "absolute", top: "4px", right: "4px", width: "20px", height: "20px", borderRadius: "50%", background: "#2563eb", color: "white", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <button onClick={useLibImages} disabled={libStaging || libSelected.size === 0} style={{ marginTop: "1rem", padding: "0.9rem", background: (libStaging || libSelected.size === 0) ? "#cbd5e1" : "#2563eb", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", fontSize: "1rem", cursor: (libStaging || libSelected.size === 0) ? "not-allowed" : "pointer" }}>
+              {libStaging ? "지정 중..." : `선택한 ${libSelected.size}장 발행에 사용`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 계정관리에서 선택 불러오기 모달 */}
       {showAcctPicker && (
         <div onClick={() => setShowAcctPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -703,8 +799,11 @@ function BlogPostingContent() {
                 <button type="button" onClick={handleSelectFolder} style={{ padding: "0 1rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
                   🔍 폴더 찾기
                 </button>
+                <button type="button" onClick={openLibPicker} style={{ padding: "0 1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                  🗂️ 보관함에서 가져오기
+                </button>
               </div>
-              <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.5rem 0 0 0" }}>* 봇이 해당 폴더에서 이미지를 랜덤하게(최대 3장) 골라 업로드합니다.</p>
+              <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.5rem 0 0 0" }}>* 봇이 해당 폴더에서 이미지를 랜덤하게(최대 3장) 골라 업로드합니다. 이미지 세탁소 보관함에서 골라 넣을 수도 있습니다.</p>
             </div>
           ) : (
             <textarea value={directImages} onChange={e => setDirectImages(e.target.value)} placeholder="C:\images\img1.jpg (엔터로 구분)" style={{ width: "100%", height: "80px", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box", resize: "vertical" }} />
@@ -750,6 +849,22 @@ function BlogPostingContent() {
               <div style={{ flex: 1 }}>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 키워드 (필수)</label>
                 <input type="text" placeholder="예: 강남역 맛집, 서울 카페 추천" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+
+                <div style={{ marginTop: "0.8rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                    <label style={{ fontSize: "0.9rem", fontWeight: "bold" }}>서브 키워드 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(선택 · 최대 5개)</span></label>
+                    <button type="button" onClick={addSubKeyword} disabled={subKeywords.length >= 5} style={{ padding: "0.35rem 0.8rem", background: subKeywords.length >= 5 ? "#cbd5e1" : "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", fontSize: "0.82rem", cursor: subKeywords.length >= 5 ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>+ 추가</button>
+                  </div>
+                  <input type="text" value={subKwInput} onChange={e => setSubKwInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSubKeyword(); } }} disabled={subKeywords.length >= 5} placeholder={subKeywords.length >= 5 ? "최대 5개까지 추가됨" : "예: 분위기 좋은 카페 (입력 후 Enter)"} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                  {subKeywords.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.6rem" }}>
+                      {subKeywords.map((kw, i) => (
+                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.7rem", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "999px", fontSize: "0.85rem", fontWeight: "bold" }}>{kw}<span onClick={() => removeSubKeyword(kw)} style={{ cursor: "pointer", color: "#60a5fa", fontWeight: "bold" }}>×</span></span>
+                      ))}
+                      <span style={{ alignSelf: "center", fontSize: "0.78rem", color: "#94a3b8" }}>{subKeywords.length}/5</span>
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (선택)</label>

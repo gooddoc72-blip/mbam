@@ -52,7 +52,8 @@ class AutoPostRequest(BaseModel):
     
     post_mode: str = "ai_generate" # "manual_text" | "ai_generate"
     target_keyword: Optional[str] = None
-    
+    sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 최대 5개 — 본문에 자연스럽게 녹임
+
     title: Optional[str] = None
     content: Optional[str] = None
     images: Optional[List[str]] = []
@@ -409,7 +410,8 @@ async def _generate_impl(req: AutoPostRequest):
                 source_data=final_source_data,
                 api_key=req.api_key,
                 prompt_category=req.prompt_category,
-                include_source_link=req.include_source_link
+                include_source_link=req.include_source_link,
+                sub_keywords=req.sub_keywords
             )
             
             if content_text:

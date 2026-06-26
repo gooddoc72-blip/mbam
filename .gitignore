@@ -61,6 +61,8 @@ mbam_nextgen/profiles/
 mbam_nextgen/generated_images/
 mbam_nextgen/temp_images/
 temp_uploaded_images/
+temp_scraped_images/
+saved_images/
 
 # 디버그/임시 스크립트·로그 (커밋 제외)
 /test_*.py
