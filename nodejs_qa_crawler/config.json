@@ -1,0 +1,22 @@
+{
+  "browserSettings": {
+    "headless": false,
+    "slowMo": 50,
+    "emulateDevice": "iPhone 12"
+  },
+  "testCases": [
+    {
+      "url": "https://www.google.com",
+      "searchInputSelector": "input[name='q']",
+      "keyword": "Playwright Automation",
+      "expectedText": "Playwright",
+      "typingDelay": {
+        "min": 100,
+        "max": 300
+      }
+    }
+  ],
+  "output": {
+    "excelFileName": "QA_Result.xlsx"
+  }
+}
