@@ -1,0 +1,13 @@
+{
+  "name": "nodejs-qa-crawler",
+  "version": "1.0.0",
+  "description": "E2E QA testing automation with Playwright and ExcelJS",
+  "main": "qa_test.js",
+  "scripts": {
+    "start": "node qa_test.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "playwright": "^1.42.0"
+  }
+}
