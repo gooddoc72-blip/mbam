@@ -1,0 +1,28 @@
+# MBAM 라이선스 서버 - Fly.io 배포 설정
+# app 이름은 전세계에서 고유해야 합니다. 아래 값을 본인 것으로 바꾸세요.
+app = "mbam-license-CHANGE-ME"
+primary_region = "nrt"          # nrt = 도쿄(한국에서 가장 가까움)
+
+[build]
+  # 같은 폴더의 Dockerfile 사용
+
+[env]
+  PORT = "8005"
+  # SQLite DB 를 영구 볼륨(/data)에 저장 → 재배포해도 인증코드 보존
+  LICENSE_DB_URL = "sqlite:////data/license.db"
+
+[http_service]
+  internal_port = 8005
+  force_https = true
+  # 라이선스 검증은 즉시 응답해야 하므로 항상 켜둠 (잠들지 않게)
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "mbam_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

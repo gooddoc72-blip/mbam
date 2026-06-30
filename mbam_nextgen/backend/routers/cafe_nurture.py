@@ -70,7 +70,14 @@ async def add_account(req: AccountCreate, db: Session = Depends(get_db), current
     existing = db.query(NaverAccount).filter(NaverAccount.user_id == user_id, NaverAccount.naver_id == req.naver_id).first()
     if existing:
         raise HTTPException(status_code=400, detail="이미 등록된 계정입니다.")
-        
+
+    # 플랜별 네이버 계정 수 제한 (관리자 페이지에서 설정한 값)
+    from ..limits import check_account_limit
+    adv = db.query(Advertiser).filter(Advertiser.email == user_id).first()
+    if adv:
+        current_count = db.query(NaverAccount).filter(NaverAccount.user_id == user_id).count()
+        check_account_limit(db, adv, current_count)
+
     new_acc = NaverAccount(
         user_id=user_id,
         naver_id=req.naver_id,

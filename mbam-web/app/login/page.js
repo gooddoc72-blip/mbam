@@ -67,7 +67,7 @@ function LoginContent() {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc" }}>
       <div style={{ width: "100%", maxWidth: "400px", padding: "2.5rem", backgroundColor: "white", borderRadius: "16px", boxShadow: "0 10px 25px rgba(0,0,0,0.05)" }}>
         <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-          <h1 style={{ fontSize: "1.8rem", fontWeight: "800", color: "#1e293b", marginBottom: "0.5rem" }}>MBAM NextGen</h1>
+          <h1 style={{ fontSize: "1.8rem", fontWeight: "800", color: "#1e293b", marginBottom: "0.5rem" }}>마케팅 연구소</h1>
           <p style={{ color: "#64748b", fontSize: "0.95rem" }}>로그인하고 자동화 서비스를 시작하세요</p>
         </div>
 

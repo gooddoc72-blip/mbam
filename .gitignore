@@ -91,3 +91,8 @@ smartstore_state.txt
 ~$*
 *.exe
 naver_place_crawler/Output/
+
+# 웹 배포에 필요한 설정/의존성 (위 *.txt / *.json 무시의 예외)
+!requirements.cloud.txt
+!mbam_nextgen/backend/config/plans.json
+!mbam_nextgen/prompts.json

@@ -103,3 +103,40 @@ async def update_plans(plans: List[Dict[str, Any]], admin: dict = Depends(verify
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(plans, f, ensure_ascii=False, indent=2)
     return {"message": "요금제 설정이 성공적으로 저장되었습니다."}
+
+
+# ── 사용자별 한도(계정수/일일한도) 개별 지정 + 오늘 사용량 조회 ──────────────
+class LimitsOverrideRequest(BaseModel):
+    # null 이면 해당 항목은 플랜 기본값을 따름
+    max_naver_accounts: Optional[int] = None
+    daily_limits: Optional[Dict[str, int]] = None
+
+
+@router.get("/users/{user_id}/limits", summary="사용자 적용 한도 + 오늘 사용량 조회")
+async def get_user_limits_view(user_id: str, db: Session = Depends(get_db), admin: dict = Depends(verify_admin)):
+    from ..limits import get_user_limits, get_daily_count, ACTION_TYPES
+    user = db.query(Advertiser).filter(Advertiser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    effective = get_user_limits(user)
+    today_usage = {a: get_daily_count(db, user.id, a) for a in ACTION_TYPES}
+    override = None
+    if getattr(user, "custom_limits", None):
+        try:
+            override = json.loads(user.custom_limits)
+        except Exception:
+            override = None
+    return {"plan_type": user.plan_type, "effective": effective,
+            "override": override, "today_usage": today_usage}
+
+
+@router.put("/users/{user_id}/limits", summary="사용자 한도 개별 지정(override)")
+async def set_user_limits(user_id: str, req: LimitsOverrideRequest,
+                          db: Session = Depends(get_db), admin: dict = Depends(verify_admin)):
+    user = db.query(Advertiser).filter(Advertiser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    payload = {k: v for k, v in req.dict().items() if v is not None}
+    user.custom_limits = json.dumps(payload, ensure_ascii=False) if payload else None
+    db.commit()
+    return {"message": "사용자 한도가 저장되었습니다.", "override": payload or None}

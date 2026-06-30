@@ -256,9 +256,9 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label style={{ display: "block", fontSize: "0.9rem", color: "#64748b", marginBottom: "0.3rem" }}>기본 제공 쿼터 (횟수)</label>
-                <input 
-                  type="number" 
-                  value={plan.max_usage} 
+                <input
+                  type="number"
+                  value={plan.max_usage}
                   onChange={e => {
                     const newPlans = [...plans];
                     newPlans[idx].max_usage = parseInt(e.target.value) || 0;
@@ -266,6 +266,40 @@ export default function AdminDashboard() {
                   }}
                   style={{ width: "100%", padding: "0.8rem", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
                 />
+              </div>
+              <div style={{ marginTop: "1rem" }}>
+                <label style={{ display: "block", fontSize: "0.9rem", color: "#64748b", marginBottom: "0.3rem" }}>네이버 계정 수 (최대)</label>
+                <input
+                  type="number"
+                  value={plan.max_naver_accounts ?? 0}
+                  onChange={e => {
+                    const newPlans = [...plans];
+                    newPlans[idx].max_naver_accounts = parseInt(e.target.value) || 0;
+                    setPlans(newPlans);
+                  }}
+                  style={{ width: "100%", padding: "0.8rem", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                />
+              </div>
+              <div style={{ marginTop: "1rem" }}>
+                <label style={{ display: "block", fontSize: "0.9rem", color: "#64748b", marginBottom: "0.5rem" }}>일일 자동화 한도 (계정당)</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.6rem" }}>
+                  {[["blog_post","블로그 발행"],["cafe_post","카페 글"],["cafe_comment","카페 댓글"],["boost","부스트(방문)"],["place_news","플레이스 소식"]].map(([key, label]) => (
+                    <div key={key}>
+                      <label style={{ display: "block", fontSize: "0.8rem", color: "#94a3b8", marginBottom: "0.2rem" }}>{label}</label>
+                      <input
+                        type="number"
+                        value={(plan.daily_limits && plan.daily_limits[key]) ?? 0}
+                        onChange={e => {
+                          const newPlans = [...plans];
+                          newPlans[idx].daily_limits = { ...(newPlans[idx].daily_limits || {}) };
+                          newPlans[idx].daily_limits[key] = parseInt(e.target.value) || 0;
+                          setPlans(newPlans);
+                        }}
+                        style={{ width: "100%", padding: "0.5rem", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ))}

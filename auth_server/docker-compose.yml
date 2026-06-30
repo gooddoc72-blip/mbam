@@ -1,11 +1,13 @@
-version: '3.8'
-
 services:
-  auth_server:
+  license_server:
     build: .
-    container_name: crawler_auth_server
+    container_name: mbam_license_server
     ports:
       - "8005:8005"
+    environment:
+      # 반드시 본인만 아는 값으로 바꾸세요. 코드 발급/관리에 쓰입니다.
+      - ADMIN_TOKEN=change-this-admin-token
+      - PORT=8005
     volumes:
-      - ./hwid_auth.db:/app/hwid_auth.db
+      - ./license.db:/app/license.db
     restart: always

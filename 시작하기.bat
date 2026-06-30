@@ -14,6 +14,15 @@ if not exist "venv\Scripts\python.exe" (
   exit /b 1
 )
 
+REM ── 인증코드 확인 (PC 1대당) ────────────────────────
+echo [인증] 인증코드 확인 중...
+venv\Scripts\python -c "from mbam_auth_gate import run_auth_gate; import sys; sys.exit(0 if run_auth_gate() else 1)"
+if errorlevel 1 (
+  echo [인증 실패] 인증되지 않아 프로그램을 종료합니다.
+  pause
+  exit /b 1
+)
+
 REM ── 기존 서버 포트 정리 (8000=백엔드, 3000=화면) ──
 echo [시스템] 기존 서버 정리 중...
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1

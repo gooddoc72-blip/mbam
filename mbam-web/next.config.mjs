@@ -7,10 +7,14 @@ const nextConfig = {
     proxyTimeout: 120000,
   },
   async rewrites() {
+    // 배포(Vercel): 환경변수 BACKEND_URL 을 Railway 백엔드 주소로 설정 → /api/* 를 그쪽으로 프록시.
+    // 프론트와 같은 출처처럼 보이게 해 쿠키/CORS 문제를 없앤다.
+    // 로컬 개발: 기본값 http://127.0.0.1:8000
+    const backend = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:8000/api/:path*',
+        destination: `${backend}/api/:path*`,
       },
     ];
   },

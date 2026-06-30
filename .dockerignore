@@ -1,0 +1,41 @@
+# Docker 빌드 컨텍스트 축소 — 백엔드에 불필요한 것 제외
+mbam-web/
+node_modules/
+venv/
+.git/
+auth_server/
+licensing/
+nodejs_qa_crawler/
+naver_place_crawler/
+chrome_extension/
+db_backup_*/
+saved_images/
+temp_uploaded_images/
+temp_images/
+temp_clips/
+generated_images/
+sessions/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# 대용량 덤프/로그/DB (클라우드는 Postgres 사용)
+*.db
+*.sqlite
+*.log
+*.html
+*.png
+*.jpg
+*.zip
+crash*.txt
+cli_test.json
+crawler_test_*.json
+graphql_responses.json
+
+# 설치형/패키징 관련
+installer/
+mbam_launcher.py
+mbam_auth_gate.py
+setup_secrets.py
+requirements.txt
+test_*.py

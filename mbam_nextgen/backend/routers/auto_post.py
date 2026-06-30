@@ -2,9 +2,42 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File,
 from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
+from sqlalchemy.orm import Session
 from mbam_nextgen.orchestrator import WorkflowOrchestrator, task_logger
 from mbam_nextgen.backend.quota import consume_generation_quota
+from mbam_nextgen.backend.database import get_db, Advertiser
+from mbam_nextgen.backend.limits import check_daily_limit, consume_daily
 from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
+
+
+def _action_type_for(req) -> str:
+    if getattr(req, "target_type", "blog") == "cafe":
+        return "cafe_comment" if getattr(req, "cafe_action_type", "post") == "comment" else "cafe_post"
+    return "blog_post"
+
+
+def _target_account_keys(req) -> list:
+    keys = []
+    if getattr(req, "accounts", None):
+        for a in req.accounts:
+            if isinstance(a, dict):
+                keys.append(a.get("naver_id") or a.get("id") or a.get("account_id"))
+    elif getattr(req, "naver_id", None):
+        keys.append(req.naver_id)
+    return [k for k in keys if k] or [None]
+
+
+def enforce_daily_for_request(db: Session, user: dict, req):
+    """발행/댓글 트리거 시 대상 계정별 일일 한도 검사 후 소비. 관리자/비광고주는 통과."""
+    adv = db.query(Advertiser).filter(Advertiser.email == user.get("sub")).first()
+    if not adv:
+        return
+    action = _action_type_for(req)
+    keys = _target_account_keys(req)
+    for k in keys:
+        check_daily_limit(db, adv, action, k)   # 초과 시 403
+    for k in keys:
+        consume_daily(db, adv.id, action, k)
 
 router = APIRouter()
 seo_analyzer = SeoAnalyzer()
@@ -284,8 +317,10 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
 
 @router.post("")
 @router.post("/")
-async def trigger_auto_post(req: AutoPostRequest, _q: dict = Depends(consume_generation_quota)):
+async def trigger_auto_post(req: AutoPostRequest, _q: dict = Depends(consume_generation_quota), db: Session = Depends(get_db)):
     import uuid
+    # 일일 자동화 한도(관리자 설정값) 집행 — 초과 시 403
+    enforce_daily_for_request(db, _q, req)
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_automation_task(task_id, req))
     active_tasks[task_id] = task

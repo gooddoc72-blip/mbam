@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -7,8 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# FastAPI 포트 노출
 EXPOSE 8005
 
-# 서버 실행 (uvicorn)
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8005"]
+# server.py 안의 uvicorn.run 이 PORT 환경변수를 사용
+CMD ["python", "server.py"]

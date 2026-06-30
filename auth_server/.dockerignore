@@ -1,0 +1,6 @@
+*.db
+__pycache__/
+*.pyc
+.cache/
+README_DEPLOY.md
+test_*.db

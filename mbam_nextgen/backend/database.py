@@ -35,6 +35,9 @@ class Advertiser(Base):
     trial_ends_at = Column(DateTime, nullable=True)
     usage_count = Column(Integer, default=0)
     max_usage = Column(Integer, default=10)
+    # 사용자별 한도 개별 지정(JSON 문자열). 있으면 플랜 한도를 덮어씀. 예:
+    # {"max_naver_accounts": 15, "daily_limits": {"blog_post": 3}}
+    custom_limits = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Agency(Base):
@@ -285,6 +288,18 @@ class CoupangHistory(Base):
     n1 = Column(Integer, default=0) # 검색 적합도 임의 배점
     n5 = Column(Integer, default=0) # 총점 임의 배점
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class DailyUsage(Base):
+    """사용자 × 네이버계정 × 작업종류 × 날짜 별 일일 사용 횟수 카운터."""
+    __tablename__ = "daily_usage"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    naver_account_id = Column(String, index=True, nullable=True)  # 계정 무관 작업은 None
+    action_type = Column(String, index=True)   # blog_post | cafe_post | cafe_comment | boost | place_news
+    date_str = Column(String, index=True)       # "YYYY-MM-DD" (서버 로컬 날짜)
+    count = Column(Integer, default=0)
+
 
 def get_db():
     db = SessionLocal()

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "basic",
+    "name": "Basic",
+    "price": 49000,
+    "max_usage": 50,
+    "max_naver_accounts": 5,
+    "daily_limits": {
+      "blog_post": 1,
+      "cafe_post": 2,
+      "cafe_comment": 10,
+      "boost": 20,
+      "place_news": 1
+    },
+    "desc": "소상공인 및 개인 블로거를 위한 필수 플랜",
+    "features": [
+      "월 50회 분석 쿼터 제공",
+      "네이버 계정 5개",
+      "블로그 1일 1건 / 카페 1일 2건",
+      "기본 SEO 정밀 분석",
+      "이메일 고객 지원"
+    ],
+    "color": "blue"
+  },
+  {
+    "id": "pro",
+    "name": "Pro",
+    "price": 149000,
+    "max_usage": 500,
+    "max_naver_accounts": 10,
+    "daily_limits": {
+      "blog_post": 2,
+      "cafe_post": 3,
+      "cafe_comment": 15,
+      "boost": 30,
+      "place_news": 2
+    },
+    "desc": "전문 마케터 및 대행사를 위한 강력한 솔루션",
+    "features": [
+      "월 500회 분석 쿼터 제공",
+      "네이버 계정 10개",
+      "블로그 1일 2건 / 카페 1일 3건",
+      "D.I.A+ 역엔지니어링 리포트",
+      "멀티태스킹 봇 실행 지원",
+      "우선 기술 지원"
+    ],
+    "color": "purple"
+  },
+  {
+    "id": "enterprise",
+    "name": "Enterprise",
+    "price": 499000,
+    "max_usage": 9999,
+    "max_naver_accounts": 30,
+    "daily_limits": {
+      "blog_post": 3,
+      "cafe_post": 5,
+      "cafe_comment": 30,
+      "boost": 60,
+      "place_news": 3
+    },
+    "desc": "대규모 비즈니스를 위한 무제한 엔터프라이즈",
+    "features": [
+      "분석 쿼터 무제한 제공 (9999+)",
+      "네이버 계정 30개",
+      "상향된 일일 자동화 한도",
+      "모든 기능 및 API 무제한 접근",
+      "전담 엔지니어 1:1 지원"
+    ],
+    "color": "emerald"
+  }
+]
