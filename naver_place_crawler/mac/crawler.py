@@ -94,7 +94,9 @@ class CrawlerEngine:
                         continue
                         
                     # 아이템 리스트 찾기
-                    items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL")
+                    items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL, li.hYhmy")
+                    if not items:
+                        items = self.driver.find_elements(By.XPATH, "//li[descendant::*[contains(@class, 'place_bluelink') or contains(@class, 'TYaxT') or contains(@class, 'title')]]")
                     count = len(items)
                     
                     if count == 0:
@@ -124,14 +126,18 @@ class CrawlerEngine:
                             return
                             
                         # 아이템 다시 찾기 (Stale Element 방지)
-                        items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL, li.UEzoS")
+                        items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL, li.hYhmy")
+                        if not items:
+                            items = self.driver.find_elements(By.XPATH, "//li[descendant::*[contains(@class, 'place_bluelink') or contains(@class, 'TYaxT') or contains(@class, 'title')]]")
                         
                         if i >= len(items):
                             # 아이템이 모자라면 스크롤을 내려서 추가 로드 시도
                             if items:
                                 self.driver.execute_script("arguments[0].scrollIntoView(true);", items[-1])
                                 time.sleep(1.5)
-                                new_items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL, li.UEzoS")
+                                new_items = self.driver.find_elements(By.CSS_SELECTOR, "li.VLTHu, li.tzwk0, li.UEzoS, li.YwYLL, li.hYhmy")
+                                if not new_items:
+                                    new_items = self.driver.find_elements(By.XPATH, "//li[descendant::*[contains(@class, 'place_bluelink') or contains(@class, 'TYaxT') or contains(@class, 'title')]]")
                                 if len(new_items) == len(items):
                                     break # 더 이상 로드 안됨
                                 items = new_items
@@ -144,22 +150,35 @@ class CrawlerEngine:
                         # 리스트에서 가게 클릭
                         try:
                             try:
-                                # 아이템 내부에서 확실한 제목 텍스트나 링크를 찾음
-                                click_target = item.find_element(By.CSS_SELECTOR, ".place_bluelink, .TYaxT, .YwYbM, span[class^='title'], div[class^='title']")
+                                # 아이템 내부에서 확실한 제목 텍스트나 링크를 찾음 (의원/병원용 클래스 추가)
+                                click_target = item.find_element(By.CSS_SELECTOR, ".place_bluelink, .TYaxT, .YwYLL, .YwYbM, span[class^='title'], div[class^='title']")
                             except:
-                                click_target = item # 못 찾으면 전체 item을 클릭
+                                try:
+                                    click_target = item.find_element(By.CSS_SELECTOR, "a")
+                                except:
+                                    click_target = item # 못 찾으면 전체 item을 클릭
                                 
                             place_name = click_target.text.strip()
+                            if not place_name:
+                                place_name = "Unknown"
                             unique_id = f"naver_place_{keyword}_{place_name}"
                             
                             # 중복 스킵 로직
                             if self.history_manager.is_collected(unique_id):
                                 continue
                                 
-                            # 스크롤해서 보이게 하기
-                            self.driver.execute_script("arguments[0].scrollIntoView(true);", click_target)
-                            time.sleep(0.5)
-                            self.driver.execute_script("arguments[0].click();", click_target)
+                            # 스크롤해서 화면 중앙에 오게 하기
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", click_target)
+                            time.sleep(1.0)
+                            
+                            # 일반적인 클릭 우선 시도 (React 이벤트 정상 트리거용), 실패시 JS 클릭
+                            try:
+                                click_target.click()
+                            except:
+                                self.driver.execute_script("arguments[0].click();", click_target)
+                                
+                            # 상세 프레임이 열릴 때까지 여유있게 대기
+                            time.sleep(1.5)
                         except Exception as e:
                             self.log(f"[{i}번째] 클릭 오류: {e}")
                             continue
@@ -183,7 +202,6 @@ class CrawlerEngine:
                         except:
                             pass
 
-                        # 데이터 초기화 (요청된 모든 컬럼 순서대로 지정)
                         data = {
                             "키워드": keyword, 
                             "수집시간": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -192,7 +210,9 @@ class CrawlerEngine:
                             "업종": "N/A",
                             "업체 주소": "N/A",
                             "안심번호": "N/A",
+                            "홈페이지": "N/A",
                             "SNS": "N/A",
+                            "이메일": "N/A",
                             "방문자리뷰수": "N/A",
                             "블로그 리뷰수": "N/A",
                             "고유번호": "N/A",
@@ -288,13 +308,24 @@ class CrawlerEngine:
                                             if isinstance(etc, dict) and etc.get("url"): all_urls.append(etc.get("url"))
                                         
                                     sns_list = []
+                                    homepage_list = []
                                     for u in all_urls:
                                         u_str = str(u)
                                         if any(sns in u_str for sns in ["instagram.com", "facebook.com", "twitter.com", "youtube.com", "blog.naver.com"]):
                                             sns_list.append(u_str)
+                                        elif u_str.startswith("http") and "m.place.naver.com" not in u_str:
+                                            homepage_list.append(u_str)
                                             
                                     if sns_list:
                                         data["SNS"] = ", ".join(list(set(sns_list)))
+                                    if homepage_list:
+                                        data["홈페이지"] = ", ".join(list(set(homepage_list)))
+                                        
+                                    if desc:
+                                        import re
+                                        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', desc)
+                                        if emails:
+                                            data["이메일"] = ", ".join(list(set(emails)))
                                         
                         except Exception as e:
                             self.log(f"Apollo 데이터 파싱 오류: {e}")
@@ -315,6 +346,11 @@ class CrawlerEngine:
                                     addr_match = re.search(r'((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)\s+[가-힣]+(?:시|군|구)\s+[가-힣0-9]+(?:로|길|동)\s*\d*(?:번길)?\s*\d*(?:\s+\d+층)?)', clean_text_compact)
                                     if addr_match:
                                         data["업체 주소"] = addr_match.group(1).strip()
+                                        
+                                if data["이메일"] == "N/A":
+                                    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', clean_text)
+                                    if emails:
+                                        data["이메일"] = ", ".join(list(set(emails)))
                                         
                                 if data["상호명"] in ["N/A", "네이버지도", "네이버 지도"]:
                                     try:
@@ -362,6 +398,13 @@ class CrawlerEngine:
                         
                         self.results.append(data)
                         collected += 1
+                        
+                        if collected >= 50:
+                            from checkpoint_manager import CheckpointManager
+                            self.log(f"[{keyword}] 50개 수집 완료. 봇 탐지 방지를 위해 여기서 일시 정지하며, 현재 위치({collected}개)를 메모리에 저장합니다.")
+                            CheckpointManager.save_checkpoint("place", keywords, idx, position=collected, results=self.results)
+                            return
+                            
                         # 다시 searchIframe으로 돌아가기 위해 메인으로 먼저 빠져나옴
                         self.driver.switch_to.default_content()
                         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "searchIframe")))
@@ -372,11 +415,7 @@ class CrawlerEngine:
                     
                 self.driver.switch_to.default_content()
                 
-            # 모든 루프 완료 시 체크포인트 제거
-            if self.is_running:
-                from checkpoint_manager import CheckpointManager
-                CheckpointManager.clear_checkpoint()
-                
+            # 체크포인트 지우지 않음 (무한 이어하기 지원)
         except Exception as e:
             self.log(f"크롤러 엔진 실행 중 치명적 오류: {e}")
         finally:
@@ -685,13 +724,16 @@ class CrawlerEngine:
                             self.history_manager.add_collected(prod["상품URL"])
                             self.results.append(prod)
                         
+                    if len(products) >= 50:
+                        from checkpoint_manager import CheckpointManager
+                        self.log(f"[{keyword}] 50개 수집 완료. 봇 탐지 방지를 위해 여기서 일시 정지하며, 현재 위치({page}페이지)를 메모리에 저장합니다.")
+                        CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
+                        return
+                        
                 except Exception as ex:
                     self.log(f"[{keyword}] 수집 중 에러: {ex}")
 
-            # 모든 루프 완료 시 체크포인트 제거
-            if self.is_running:
-                from checkpoint_manager import CheckpointManager
-                CheckpointManager.clear_checkpoint()
+            # 체크포인트 지우지 않음 (무한 이어하기 지원)
 
             self.log("모든 쿠팡 크롤링이 완료되었습니다.")
             if self.results:
