@@ -3,6 +3,31 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+// 브라우저 기기지문 — 같은 기기로 여러 이메일 반복가입(무료체험 어뷰징) 차단용
+async function getFingerprint() {
+  try {
+    let id = localStorage.getItem("mbam_device_id");
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+      localStorage.setItem("mbam_device_id", id);
+    }
+    const parts = [
+      id,
+      navigator.userAgent,
+      navigator.language,
+      screen.width + "x" + screen.height,
+      screen.colorDepth,
+      new Date().getTimezoneOffset(),
+      navigator.hardwareConcurrency || "",
+      navigator.platform || "",
+    ].join("|");
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) {
+    return localStorage.getItem("mbam_device_id") || "";
+  }
+}
+
 export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -23,12 +48,13 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
+      const fingerprint = await getFingerprint();
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, fingerprint }),
       });
 
       if (res.ok) {

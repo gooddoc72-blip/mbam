@@ -289,6 +289,18 @@ class CoupangHistory(Base):
     n5 = Column(Integer, default=0) # 총점 임의 배점
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class SignupAudit(Base):
+    """가입 어뷰징 방지용 이력 — 기기지문/IP 로 중복 무료체험 차단."""
+    __tablename__ = "signup_audit"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, index=True)
+    fingerprint = Column(String, index=True, nullable=True)   # 브라우저 기기지문
+    ip = Column(String, index=True, nullable=True)
+    user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyUsage(Base):
     """사용자 × 네이버계정 × 작업종류 × 날짜 별 일일 사용 횟수 카운터."""
     __tablename__ = "daily_usage"

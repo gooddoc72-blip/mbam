@@ -307,24 +307,61 @@ async def social_callback(provider: str, request: Request, code: str, state: str
 class SignupRequest(BaseModel):
     email: str
     password: str
+    fingerprint: str = ""   # 브라우저 기기지문(중복 무료체험 방지)
+
+
+# 어뷰징 방지 한도 (같은 IP 는 공유될 수 있어 넉넉히, 기기지문은 엄격히)
+SIGNUP_IP_LIMIT = 5          # 같은 IP 에서 허용할 총 가입 수
+SIGNUP_IP_WINDOW_DAYS = 30   # 최근 N일 기준
+
+
+def _client_ip(req: Request) -> str:
+    xff = req.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()   # 프록시(Vercel/Railway) 뒤의 실제 클라이언트
+    return req.client.host if req.client else ""
+
 
 @router.post("/signup", summary="자체 회원가입 (무료 체험 5일 제공)")
-async def signup(request: SignupRequest, db: Session = Depends(get_db)):
-    # 1. 중복 확인
-    existing_user = db.query(Advertiser).filter(Advertiser.email == request.email).first()
-    if existing_user:
+async def signup(payload: SignupRequest, http_request: Request, db: Session = Depends(get_db)):
+    from ..database import SignupAudit
+
+    email = (payload.email or "").strip().lower()
+    fp = (payload.fingerprint or "").strip()
+    ip = _client_ip(http_request)
+    ua = http_request.headers.get("user-agent", "")[:300]
+
+    # 1. 이메일 중복
+    if db.query(Advertiser).filter(Advertiser.email == email).first():
         raise HTTPException(status_code=400, detail="이미 가입된 이메일입니다.")
-        
-    existing_agency = db.query(Agency).filter(Agency.login_id == request.email).first()
-    if existing_agency:
+    if db.query(Agency).filter(Agency.login_id == email).first():
         raise HTTPException(status_code=400, detail="이미 가입된 이메일입니다.")
-        
-    # 2. 신규 사용자 생성 (기본 활성, 5일 체험, 10회 제한)
+
+    # 2. 기기지문 중복 → 같은 기기로 다른 이메일 재가입 차단 (핵심)
+    if fp and db.query(SignupAudit).filter(SignupAudit.fingerprint == fp).first():
+        raise HTTPException(
+            status_code=403,
+            detail="이미 이 기기에서 무료 체험에 가입한 이력이 있습니다. 정식 이용을 원하시면 문의해 주세요.",
+        )
+
+    # 3. 같은 IP 과다 가입 차단 (공유 IP 고려해 넉넉한 한도)
+    if ip:
+        since = datetime.utcnow() - timedelta(days=SIGNUP_IP_WINDOW_DAYS)
+        ip_count = db.query(SignupAudit).filter(
+            SignupAudit.ip == ip, SignupAudit.created_at >= since
+        ).count()
+        if ip_count >= SIGNUP_IP_LIMIT:
+            raise HTTPException(
+                status_code=403,
+                detail="이 네트워크에서 가입 한도를 초과했습니다. 잠시 후 다시 시도하거나 문의해 주세요.",
+            )
+
+    # 4. 신규 사용자 생성 (기본 활성, 5일 체험, 10회 제한)
     import uuid
     new_user = Advertiser(
         id=str(uuid.uuid4()),
-        email=request.email,
-        password=get_password_hash(request.password),
+        email=email,
+        password=get_password_hash(payload.password),
         social_provider="local",
         business_name="신규 가입자",
         status="active",
@@ -333,9 +370,10 @@ async def signup(request: SignupRequest, db: Session = Depends(get_db)):
         usage_count=0,
         max_usage=10
     )
-    
     db.add(new_user)
+    # 5. 가입 이력 기록 (다음 어뷰징 판단용)
+    db.add(SignupAudit(email=email, fingerprint=fp or None, ip=ip or None, user_agent=ua))
     db.commit()
     db.refresh(new_user)
-    
+
     return {"message": "회원가입이 완료되었습니다."}
