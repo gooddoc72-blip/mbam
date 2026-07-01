@@ -99,6 +99,8 @@ export default function Sidebar() {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [userRole, setUserRole] = useState(null);
     const [userEmail, setUserEmail] = useState("");
+    const [planType, setPlanType] = useState(null);
+    const [trialDaysLeft, setTrialDaysLeft] = useState(null);
     const [activeTasks, setActiveTasks] = useState([]);
     const [drawerOpen, setDrawerOpen] = useState(false); // 모바일 사이드바 드로어
 
@@ -131,6 +133,18 @@ export default function Sidebar() {
             } catch (e) {
                 console.error("Token parsing error");
             }
+            // 무료 체험 남은 일수 조회
+            fetchWithAuth("/api/auth/me").then(async (res) => {
+                if (res && res.ok) {
+                    const me = await res.json();
+                    setPlanType(me.plan_type || null);
+                    if (me.trial_ends_at) {
+                        const end = new Date(me.trial_ends_at.endsWith("Z") ? me.trial_ends_at : me.trial_ends_at + "Z");
+                        const days = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
+                        setTrialDaysLeft(days);
+                    }
+                }
+            }).catch(() => {});
             fetchActiveTasks();
             const interval = setInterval(fetchActiveTasks, 5000);
             return () => clearInterval(interval);
@@ -183,6 +197,16 @@ export default function Sidebar() {
                                 <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
                                     {userRole === "admin" ? "마스터 관리자" : "회원"}
                                 </div>
+                                {userRole !== "admin" && planType === "trial" && trialDaysLeft !== null && (
+                                    <div style={{ fontSize: "0.72rem", fontWeight: 700, marginTop: "2px", color: trialDaysLeft <= 1 ? "#ef4444" : "#f59e0b" }}>
+                                        {trialDaysLeft > 0 ? `무료 체험 ${trialDaysLeft}일 남음` : "무료 체험 종료"}
+                                    </div>
+                                )}
+                                {userRole !== "admin" && planType === "paid" && (
+                                    <div style={{ fontSize: "0.72rem", fontWeight: 700, marginTop: "2px", color: "#10b981" }}>
+                                        정식 이용 중
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <button 
