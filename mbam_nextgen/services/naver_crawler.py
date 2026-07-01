@@ -10,7 +10,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 def fetch_place_by_mid(mid):
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = browser.new_page(user_agent=USER_AGENT)
             page.goto(f"https://pcmap.place.naver.com/restaurant/{mid}/home", wait_until="networkidle")
             
@@ -70,7 +70,7 @@ def fetch_place_coords(mid):
     kinds = ["restaurant", "place", "hospital", "hairshop", "beauty", "attraction"]
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = browser.new_page(user_agent=USER_AGENT)
             try:
                 for kind in kinds:

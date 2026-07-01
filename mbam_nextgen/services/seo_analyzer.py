@@ -52,7 +52,7 @@ class SeoAnalyzer:
             search_url = f"https://search.naver.com/search.naver?where=view&query={keyword}"
             
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
                 context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 page = await self._setup_stealth_page(context)
                 
@@ -492,7 +492,7 @@ class SeoAnalyzer:
         url = f"https://search.naver.com/search.naver?ssc=tab.blog.all&query={urllib.parse.quote(keyword)}"
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     locale="ko-KR",
@@ -542,7 +542,7 @@ class SeoAnalyzer:
         popular_links = []  # '인기글' 블록 전체(블로그+카페+인플) — href 패턴으로 완전 추출
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; SM-G981B)")
             page = await self._setup_stealth_page(context)
             
@@ -1391,7 +1391,7 @@ class SeoAnalyzer:
         search_url = f"https://search.naver.com/search.naver?where=view&query={keyword}"
         
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             
             try:
@@ -1423,7 +1423,7 @@ class SeoAnalyzer:
         """네이버 검색 결과(SERP)의 구조 분석 (광고, 클립, 블로그, 인플루언서 등 순서 및 내용)"""
         url = f"https://m.search.naver.com/search.naver?where=m&query={keyword}"
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; SM-G981B)")
             page = await context.new_page()
             
@@ -1490,7 +1490,7 @@ class SeoAnalyzer:
         url = f"https://blog.naver.com/PostList.naver?blogId={blog_id}&categoryNo=0&from=postList"
         posts = []
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page()
             try:
                 await page.goto(url, wait_until="domcontentloaded")
@@ -1527,7 +1527,7 @@ class SeoAnalyzer:
         
         async with async_playwright() as p:
             # 리소스 차단 적용하여 속도 향상
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; SM-G981B)")
             page = await context.new_page()
             

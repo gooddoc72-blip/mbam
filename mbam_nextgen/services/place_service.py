@@ -18,7 +18,7 @@ class PlaceService:
         print(f"📍 [PlaceService] 플레이스 순위 추적 시작: '{place_name}' (키워드: {keyword})")
         
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True) # 순위 추적은 백그라운드 구동 가능
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]) # 순위 추적은 백그라운드 구동 가능
             context = await browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"

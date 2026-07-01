@@ -29,7 +29,7 @@ class SeoAnalyzerV2:
         search_url = f"https://m.search.naver.com/search.naver?where=m_blog&query={keyword}"
         
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; SM-G981B)")
             page = await context.new_page()
             
