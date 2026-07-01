@@ -1,6 +1,7 @@
 # MBAM 백엔드(분석/계정/관리) - Railway 배포용
 # Playwright 공식 이미지(브라우저 + 시스템 의존성 포함, playwright==1.59.0 매칭)
-FROM mcr.microsoft.com/playwright/python:v1.59.0-jammy
+# noble(Ubuntu 24.04) = Python 3.12 → 2025년대 패키지 휠 호환성이 가장 넓음
+FROM mcr.microsoft.com/playwright/python:v1.59.0-noble
 
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
