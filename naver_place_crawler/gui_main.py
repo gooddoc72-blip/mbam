@@ -62,6 +62,14 @@ class CrawlerApp(ctk.CTk):
         self.entry_keyword = ctk.CTkEntry(self.main_frame, placeholder_text="예: 강남역 맛집, 홍대 카페", width=400)
         self.entry_keyword.pack(pady=5, padx=10, anchor="w")
 
+        # 네이버 플레이스 수집 페이지 수 설정
+        self.lbl_pages = ctk.CTkLabel(self.main_frame, text="네이버 수집할 페이지 수 (1페이지=약 50개):")
+        self.lbl_pages.pack(pady=(10, 0), anchor="w", padx=10)
+        
+        self.entry_pages = ctk.CTkEntry(self.main_frame, width=100)
+        self.entry_pages.pack(pady=5, padx=10, anchor="w")
+        self.entry_pages.insert(0, "1")
+
         # 버튼 컨테이너
         self.btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.btn_frame.pack(pady=10, padx=10, anchor="w")
@@ -99,7 +107,7 @@ class CrawlerApp(ctk.CTk):
         hwid = auth.get_hwid()
         self.lbl_hwid.configure(text=f"기기 번호(HWID): {hwid}")
         
-        success, msg, _ = auth.verify_pc_online()
+        success, msg, _, status = auth.verify_pc_online()
         if success:
             self.lbl_auth_status.configure(text="인증 완료 ✅", text_color="green")
             self.btn_start.configure(state="normal")
@@ -108,7 +116,46 @@ class CrawlerApp(ctk.CTk):
         else:
             self.lbl_auth_status.configure(text="미인증 기기 ❌", text_color="red")
             self.log(f"라이선스 인증 실패: {msg}")
-            self.log(f"관리자에게 위의 [기기 번호]를 전달하여 사용 승인을 요청하세요.")
+            if status == "unregistered":
+                self.log(f"신규 기기입니다. [승인 요청] 팝업에서 관리자에게 승인을 요청해 주세요.")
+                self.after(500, lambda: self.show_approval_popup(hwid))
+            elif status == "pending":
+                self.log(f"현재 관리자 승인을 대기 중입니다.")
+            elif status == "blocked":
+                self.log(f"이 기기는 차단되었습니다.")
+            else:
+                self.log(f"관리자에게 위의 [기기 번호]를 전달하여 사용 승인을 요청하세요.")
+
+    def show_approval_popup(self, hwid):
+        import auth
+        popup = ctk.CTkToplevel(self)
+        popup.title("관리자 승인 요청")
+        popup.geometry("350x200")
+        popup.transient(self)
+        popup.grab_set()
+
+        lbl = ctk.CTkLabel(popup, text="최초 실행 기기입니다.\n관리자가 식별할 수 있도록 이름/소속을 입력해 주세요.")
+        lbl.pack(pady=15)
+
+        entry_name = ctk.CTkEntry(popup, placeholder_text="예: 마케팅팀 홍길동", width=250)
+        entry_name.pack(pady=10)
+
+        def submit():
+            name = entry_name.get().strip()
+            if not name:
+                self.log("이름/소속을 입력해 주세요.")
+                return
+            btn_submit.configure(state="disabled", text="요청 중...")
+            success, msg = auth.request_approval(hwid, name)
+            if success:
+                self.log("승인 요청이 완료되었습니다. 관리자 승인 후 프로그램을 다시 실행해 주세요.")
+                popup.destroy()
+            else:
+                self.log(f"승인 요청 실패: {msg}")
+                btn_submit.configure(state="normal", text="승인 요청하기")
+
+        btn_submit = ctk.CTkButton(popup, text="승인 요청하기", command=submit)
+        btn_submit.pack(pady=15)
 
     def log(self, message):
         """텍스트 박스에 로그 추가"""
@@ -191,7 +238,11 @@ class CrawlerApp(ctk.CTk):
             keywords = [k.strip() for k in keyword.split(",")]
             
             if target == "place":
-                self.crawler_engine.crawl_naver_place(keywords, use_ip_change)
+                try:
+                    max_pages = int(self.entry_pages.get().strip())
+                except:
+                    max_pages = 1
+                self.crawler_engine.crawl_naver_place(keywords, use_ip_change, max_pages=max_pages)
             elif target == "shopping":
                 self.crawler_engine.crawl_naver_shopping(keywords, use_ip_change)
             elif target == "coupang":

@@ -8,7 +8,8 @@ import platform
 
 # 인증 서버의 주소입니다. (실제 서버 도메인이나 IP로 변경해야 합니다)
 # 예: http://your-server.com/api/verify_hwid
-AUTH_SERVER_URL = "http://127.0.0.1:8005/verify"
+AUTH_SERVER_BASE = "http://127.0.0.1:8005"
+AUTH_SERVER_URL = f"{AUTH_SERVER_BASE}/verify"
 
 def get_hwid():
     """
@@ -63,19 +64,37 @@ def verify_pc_online():
         
         if response.status_code == 200:
             data = response.json()
+            status = data.get("status", "unknown")
             if data.get("authorized", False):
-                return True, "인증 성공", hwid
+                return True, "인증 성공", hwid, status
             else:
-                return False, "등록되지 않은 기기입니다. 관리자에게 승인을 요청하세요.", hwid
+                return False, data.get("message", "등록되지 않은 기기입니다."), hwid, status
         else:
             # 테스트/로컬 환경에서 서버가 꺼져있을 경우 우회를 원한다면 이 부분을 수정하세요.
-            return False, f"서버 통신 오류 (상태코드: {response.status_code})", hwid
+            return False, f"서버 통신 오류 (상태코드: {response.status_code})", hwid, "error"
             
     except requests.exceptions.RequestException as e:
-        return False, "인증 서버에 연결할 수 없습니다. 인터넷 연결을 확인하세요.", hwid
+        return False, "인증 서버에 연결할 수 없습니다. 인터넷 연결을 확인하세요.", hwid, "error"
+
+def request_approval(hwid, name):
+    """
+    미승인 기기에서 관리자에게 승인을 요청합니다.
+    """
+    try:
+        response = requests.post(
+            f"{AUTH_SERVER_BASE}/request_approval", 
+            json={"hwid": hwid, "name": name},
+            timeout=5
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("success", False), data.get("message", "요청 완료")
+        return False, f"서버 오류 ({response.status_code})"
+    except requests.exceptions.RequestException:
+        return False, "서버에 연결할 수 없습니다."
 
 if __name__ == "__main__":
     # 단독 실행 시 테스트
-    success, msg, hwid = verify_pc_online()
+    success, msg, hwid, status = verify_pc_online()
     print(f"내 PC 기기 번호(HWID): {hwid}")
-    print(f"인증 결과: {success} ({msg})")
+    print(f"인증 결과: {success} ({msg}) - 상태: {status}")

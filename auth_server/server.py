@@ -72,6 +72,14 @@ class License(Base):
     activated_at = Column(DateTime, nullable=True)
     last_seen = Column(DateTime, nullable=True)
 
+class Device(Base):
+    __tablename__ = "devices"
+    hwid = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    status = Column(String, default="pending") # pending, approved, blocked
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 
 class User(Base):
     __tablename__ = "users"
@@ -137,6 +145,12 @@ class VerifyRequest(BaseModel):
     code: str
     hwid: str
 
+class DeviceVerify(BaseModel):
+    hwid: str
+
+class ApprovalRequest(BaseModel):
+    hwid: str
+    name: str
 
 @app.post("/activate")
 def activate(req: ActivateRequest, db: Session = Depends(get_db)):
@@ -175,8 +189,8 @@ def activate(req: ActivateRequest, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/verify")
-def verify(req: VerifyRequest, db: Session = Depends(get_db)):
+@app.post("/verify_license")
+def verify_license(req: VerifyRequest, db: Session = Depends(get_db)):
     """실행 시마다 검증: 코드가 살아있고 이 PC 에 묶여 있는지 확인."""
     code = (req.code or "").strip().upper().replace(" ", "")
     lic = db.query(License).filter(License.code == code).first()
@@ -196,6 +210,33 @@ def verify(req: VerifyRequest, db: Session = Depends(get_db)):
     return {"authorized": True, "message": "정상 인증",
             "expires_at": lic.expires_at.isoformat() if lic.expires_at else None}
 
+@app.post("/verify")
+def verify_device(req: DeviceVerify, db: Session = Depends(get_db)):
+    """단순 HWID 기반 검증 (클라이언트 앱 전용)"""
+    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    if not dev:
+        return {"authorized": False, "message": "등록되지 않은 기기입니다.", "status": "unregistered"}
+    if dev.status == "approved":
+        return {"authorized": True, "message": "인증 성공", "status": "approved"}
+    elif dev.status == "pending":
+        return {"authorized": False, "message": "승인 대기 중입니다.", "status": "pending"}
+    else:
+        return {"authorized": False, "message": "차단된 기기입니다.", "status": "blocked"}
+
+@app.post("/request_approval")
+def request_approval(req: ApprovalRequest, db: Session = Depends(get_db)):
+    """클라이언트 앱에서 관리자에게 승인 요청"""
+    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    if not dev:
+        dev = Device(hwid=req.hwid, name=req.name, status="pending")
+        db.add(dev)
+    else:
+        dev.name = req.name
+        if dev.status == "blocked":
+            return {"success": False, "message": "차단된 기기는 재요청할 수 없습니다."}
+        dev.status = "pending"
+    db.commit()
+    return {"success": True, "message": "승인 요청이 완료되었습니다."}
 
 # ──────────────────────────────────────────────────────────────────────────
 # 관리자 엔드포인트 (x-admin-token 헤더 필요)
@@ -274,6 +315,30 @@ def admin_reset(req: CodeRequest, _: bool = Depends(require_admin), db: Session 
 def admin_list(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
     return [_public(l) for l in db.query(License).order_by(License.created_at.desc()).all()]
 
+class DeviceApproveRequest(BaseModel):
+    hwid: str
+    status: str # approved, blocked, pending
+
+@app.post("/admin/device/status")
+def admin_device_status(req: DeviceApproveRequest, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+    dev.status = req.status
+    db.commit()
+    return {"success": True, "message": f"기기 상태가 {req.status}로 변경되었습니다."}
+
+@app.get("/admin/devices")
+def admin_devices_list(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    out = []
+    for d in db.query(Device).order_by(Device.created_at.desc()).all():
+        out.append({
+            "hwid": d.hwid,
+            "name": d.name,
+            "status": d.status,
+            "created_at": d.created_at.isoformat() if d.created_at else None
+        })
+    return out
 
 @app.get("/health")
 def health():

@@ -20,6 +20,13 @@ def run_adb_command(command):
         return None
 
 def toggle_airplane_mode():
+    import platform
+    if platform.system() == "Darwin":
+        print("Mac 환경에서는 자동 IP 변경을 지원하지 않습니다. 수동으로 IP를 변경해주세요.")
+        import time
+        time.sleep(5)
+        return
+
     print("비행기 모드 활성화 중 (IP 변경 시작)...")
     # 비행기 모드 켜기 (1)
     run_adb_command(["settings", "put", "global", "airplane_mode_on", "1"])
