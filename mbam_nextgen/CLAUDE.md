@@ -1,5 +1,44 @@
 # MBAM NextGen — SEO 분석 버그 분석 및 수정 기록
 
+---
+
+# 📅 2026-07-03 완료 — 카페 권위 지수 v2 (등급/대표카페/스크랩) + 배포
+
+## 배경
+- 이전 세션의 미완 **2단계(카페 랭킹/활성도)** / **3단계(작성자 작성글수/가입일)** 를 재조사.
+- ⚠ 중요 변화: 카페 추출이 Playwright DOM → **네이버 카페 article API JSON** 기반으로 이미 전환됨
+  (`apis.naver.com/cafe-web/cafe-articleapi/v2.1/...`, [seo_analyzer.py:1230](services/seo_analyzer.py#L1230)).
+  `fetch_cafe_author_info`(Playwright)는 사실상 레거시.
+
+## 실측 조사 결론 (스코프 현실화)
+| 원래 계획 | 실제 |
+|---|---|
+| 카페 랭킹 BIG/PREMIUM/RISING | ❌ 미존재 → ✅ **네이버 실제 등급 씨앗~숲(6단계) + 대표카페 마크** (카페 홈 HTML 공개) |
+| 카페 일일 활성도 | ❌ 비공개 |
+| 작성자 작성글수/가입일 | ❌ 멤버 프로필 API 전부 051(없음)·로그인 필요 → **불가 확정** |
+| (신규 발견) | ✅ `scrapCount`(스크랩수) — article API 포함 |
+
+## 구현 (전부 완료·라이브 검증)
+| # | 위치 | 내용 |
+|---|------|------|
+| 1 | [seo_analyzer.py](services/seo_analyzer.py) `fetch_cafe_grade_info` 신규 | 카페 홈 HTML에서 `ico_rank rankNN`+`<em>등급명</em>` → `cafe_grade_name`/`cafe_grade_tier(1~6)`, `대표카페`/`popular_40x32` → `is_official_cafe` |
+| 2 | 카페 분기 `cafe_author_info` | `scrap_count`(=scrapCount) 추가 + `fetch_cafe_grade_info` 호출 병합 |
+| 3 | `_calculate_authority_scores` **v2** | Cafe = 회원수(0~55)+카페등급(0~30)+대표카페(0/15). Author 호응도에 스크랩(0~7) 추가(조회15/좋아요12/댓글11/스크랩7) |
+| 4 | **버그 수정** level_tier | 아이콘 URL `/levelicon/1/13_120.gif` 에서 정규식이 테마id `1`을 잡던 것 → 파일명 `13_120`의 **13**(실제 등급) 추출로 수정 |
+| 5 | [SeoResults.jsx](../mbam-web/components/SeoResults.jsx) / [cafe-analysis/page.js](../mbam-web/app/cafe-analysis/page.js) | 카페 카드에 🌳등급명 + ✔대표카페 칩, 호응도 4열(+🔖스크랩), 배지 tooltip·등급기준 문구 갱신 |
+
+## 라이브 검증값 (샘플 2개, v2)
+| | tier | Author | Cafe | 비고 |
+|---|---|---|---|---|
+| ungsangjang (성실멤버 t1, 조회912/좋20/댓11, 97K 숲, 대표X) | 1 | **33.7 / C** | **73.5 / A** | |
+| mindy7857 (베나자고수 t13, 조회1159/좋1/댓2, 1.29M 숲, 대표O) | 13 | **54.9 / B** | **98.3 / S** | 대표카페 +15로 S 분리 |
+
+## 남은 한계
+- 작성자 가입일·작성글수, 카페 일일활성도는 **로그인/비공개 벽**으로 수집 불가 (재시도 무의미).
+- 카페 좋아요수는 별도 route-like API로 수집(기존), 스크랩수는 article API 직접 포함.
+
+---
+
 ## 프로젝트 구조
 
 | 경로 | 역할 |

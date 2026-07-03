@@ -214,12 +214,24 @@ export default function SeoResults({ data }) {
                                   <GradeBadge
                                     grade={m.cafe_author_info.cafe_grade}
                                     score={m.cafe_author_info.cafe_score}
-                                    title={`회원수 ${m.cafe_author_info.score_breakdown?.cafe_member_pts ?? 0}pt (랭킹/활성도 미수집)`}
+                                    title={`회원수 ${m.cafe_author_info.score_breakdown?.cafe_member_pts ?? 0}pt + 카페등급 ${m.cafe_author_info.score_breakdown?.cafe_grade_pts ?? 0}pt + 대표카페 ${m.cafe_author_info.score_breakdown?.cafe_official_pts ?? 0}pt`}
                                   />
                                 )}
                               </div>
                               <div style={{ fontSize: "1rem", fontWeight: "bold", color: "#0f172a", marginBottom: "0.5rem", lineHeight: "1.35", maxHeight: "2.7em", overflow: "hidden" }}>
                                 {m.cafe_author_info.cafe_name || "-"}
+                              </div>
+                              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", marginBottom: "0.4rem" }}>
+                                {m.cafe_author_info.cafe_grade_name && (
+                                  <span style={{ fontSize: "0.7rem", fontWeight: "bold", color: "#166534", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "10px" }}>
+                                    🌳 {m.cafe_author_info.cafe_grade_name}
+                                  </span>
+                                )}
+                                {m.cafe_author_info.is_official_cafe && (
+                                  <span style={{ fontSize: "0.7rem", fontWeight: "bold", color: "#1d4ed8", backgroundColor: "#dbeafe", padding: "2px 8px", borderRadius: "10px" }}>
+                                    ✔ 대표카페
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: "0.9rem", color: "#475569", marginBottom: "0.3rem" }}>
                                 👥 멤버 <span style={{ fontWeight: "bold" }}>{(m.cafe_author_info.cafe_member || 0).toLocaleString()}</span>명
@@ -232,18 +244,22 @@ export default function SeoResults({ data }) {
                             {/* 3) 글 호응도 카드 */}
                             <div style={{ flex: "1 1 260px", border: "1px solid #e2e8f0", backgroundColor: "white", borderRadius: "10px", padding: "1.2rem" }}>
                               <div style={{ fontSize: "0.8rem", color: "#10b981", fontWeight: "bold", marginBottom: "0.6rem", letterSpacing: "0.02em" }}>📊 글 호응도</div>
-                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.6rem" }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "0.5rem" }}>
                                 <div style={{ textAlign: "center" }}>
                                   <div style={{ fontSize: "0.75rem", color: "#64748b" }}>👁 조회</div>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#0f172a" }}>{(m.cafe_author_info.view_count || 0).toLocaleString()}</div>
+                                  <div style={{ fontSize: "1.15rem", fontWeight: "bold", color: "#0f172a" }}>{(m.cafe_author_info.view_count || 0).toLocaleString()}</div>
                                 </div>
                                 <div style={{ textAlign: "center" }}>
                                   <div style={{ fontSize: "0.75rem", color: "#64748b" }}>❤ 좋아요</div>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#ef4444" }}>{(m.cafe_author_info.like_count || 0).toLocaleString()}</div>
+                                  <div style={{ fontSize: "1.15rem", fontWeight: "bold", color: "#ef4444" }}>{(m.cafe_author_info.like_count || 0).toLocaleString()}</div>
                                 </div>
                                 <div style={{ textAlign: "center" }}>
                                   <div style={{ fontSize: "0.75rem", color: "#64748b" }}>💬 댓글</div>
-                                  <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#3b82f6" }}>{(m.cafe_author_info.comment_count || 0).toLocaleString()}</div>
+                                  <div style={{ fontSize: "1.15rem", fontWeight: "bold", color: "#3b82f6" }}>{(m.cafe_author_info.comment_count || 0).toLocaleString()}</div>
+                                </div>
+                                <div style={{ textAlign: "center" }}>
+                                  <div style={{ fontSize: "0.75rem", color: "#64748b" }}>🔖 스크랩</div>
+                                  <div style={{ fontSize: "1.15rem", fontWeight: "bold", color: "#8b5cf6" }}>{(m.cafe_author_info.scrap_count || 0).toLocaleString()}</div>
                                 </div>
                               </div>
                             </div>

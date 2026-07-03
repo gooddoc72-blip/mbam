@@ -965,19 +965,57 @@ class SeoAnalyzer:
             print(f"[SEO] 블로그 통계 수집 실패 ({blog_id}): {e}")
         return {}
 
+    # 네이버 카페 등급 사다리(6단계) — 카페 홈 `.ico_rank rankNN` + `<em>등급명</em>`
+    _CAFE_GRADE_TIERS = {'씨앗': 1, '새싹': 2, '잎새': 3, '가지': 4, '나무': 5, '숲': 6}
+
+    @staticmethod
+    async def fetch_cafe_grade_info(session, cafe_slug: str) -> dict:
+        """카페 홈 HTML에서 카페 등급(씨앗~숲)과 대표카페 여부를 추출.
+
+        반환: {cafe_grade_name, cafe_grade_tier(1~6), is_official_cafe}
+        실패 시 빈 dict. (로그인·비공개 무관 — 카페 홈은 공개)
+        """
+        import re
+        if not cafe_slug or cafe_slug in ('ArticleRead.nhn',):
+            return {}
+        try:
+            async with session.get(f"https://cafe.naver.com/{cafe_slug}") as resp:
+                if resp.status != 200:
+                    return {}
+                html = await resp.text(errors='ignore')
+
+            out = {}
+            # 카페 등급: <span class="ico_rank rank30"></span><em>숲</em>
+            gm = re.search(r'ico_rank\s+rank(\d+)"[^>]*></span>\s*<em>([^<]+)</em>', html)
+            if gm:
+                name = gm.group(2).strip()
+                out['cafe_grade_name'] = name
+                # 등급명 우선, 없으면 rank 숫자(5단위)로 tier 추정
+                out['cafe_grade_tier'] = SeoAnalyzer._CAFE_GRADE_TIERS.get(
+                    name, max(1, min(6, int(gm.group(1)) // 5)))
+            # 대표카페: NAVER 대표카페 마크
+            out['is_official_cafe'] = ('대표카페' in html) or ('popular_40x32' in html)
+            return out
+        except Exception as e:
+            print(f"[SEO] 카페 등급 수집 실패 ({cafe_slug}): {e}")
+            return {}
+
     @staticmethod
     def _calculate_authority_scores(cafe_author_info: dict) -> dict:
-        """카페 작성자 / 카페 권위 지수 v1 (가용 데이터 기반).
+        """카페 작성자 / 카페 권위 지수 v2 (공개 데이터 기반).
 
         Author Authority (0~100):
-            등급 점수(0~40) + 인기멤버 보너스(0/15) + 글 호응도(0~45)
-            └ 호응도 = 조회(0~15) + 좋아요(0~15) + 댓글(0~15) (log scale)
+            멤버 등급(0~40) + 인기멤버 보너스(0/15) + 글 호응도(0~45)
+            └ 호응도 = 조회(0~15) + 좋아요(0~12) + 댓글(0~11) + 스크랩(0~7) (log scale)
 
         Cafe Authority (0~100):
-            회원수 정규화(log10 base 2,000,000)
+            회원수(0~55) + 카페 등급 씨앗~숲(0~30) + 대표카페(0/15)
 
-        ⚠ v1 한계: 작성글수/가입일/카페 랭킹/일일활성도 미수집.
-        해당 데이터 수집(2/3단계) 후 가중치 재조정 필요.
+        v2 수집 데이터:
+            - 카페 등급(cafe_grade_tier 1~6: 씨앗/새싹/잎새/가지/나무/숲) — 카페 홈 HTML
+            - 대표카페 여부(is_official_cafe) — 카페 홈 '대표카페' 마크
+            - 스크랩수(scrap_count) — 카페 article API
+        ⚠ 미수집(비공개/로그인 필요): 작성자 가입일·작성글수, 카페 일일활성도.
         """
         import math
         info = cafe_author_info or {}
@@ -989,25 +1027,35 @@ class SeoAnalyzer:
 
         popular_bonus = 15.0 if info.get('is_popular') else 0.0
 
-        view = max(0, int(info.get('view_count') or 0))
-        like = max(0, int(info.get('like_count') or 0))
-        comm = max(0, int(info.get('comment_count') or 0))
-        # 조회수 1000, 좋아요/댓글 50을 만점 기준 (log scale)
-        view_pts = min(15.0, math.log1p(view) / math.log(1001) * 15.0)
-        like_pts = min(15.0, math.log1p(like) / math.log(51) * 15.0)
-        comm_pts = min(15.0, math.log1p(comm) / math.log(51) * 15.0)
-        engagement = view_pts + like_pts + comm_pts
+        view  = max(0, int(info.get('view_count') or 0))
+        like  = max(0, int(info.get('like_count') or 0))
+        comm  = max(0, int(info.get('comment_count') or 0))
+        scrap = max(0, int(info.get('scrap_count') or 0))
+        # 조회수 1000 / 좋아요·댓글 50 / 스크랩 30 을 만점 기준 (log scale)
+        view_pts  = min(15.0, math.log1p(view)  / math.log(1001) * 15.0)
+        like_pts  = min(12.0, math.log1p(like)  / math.log(51)   * 12.0)
+        comm_pts  = min(11.0, math.log1p(comm)  / math.log(51)   * 11.0)
+        scrap_pts = min(7.0,  math.log1p(scrap) / math.log(31)   * 7.0)
+        engagement = view_pts + like_pts + comm_pts + scrap_pts
 
         author_score = round(min(100.0, tier_score + popular_bonus + engagement), 1)
 
         # ─ Cafe Authority ─────────────────────────────────────────
         member = max(0, int(info.get('cafe_member') or 0))
-        # 회원수 정규화: 1만=53pt, 10만=77pt, 100만=95pt, 200만+=100pt
+        # 회원수 정규화(0~55): 1만=29pt, 10만=42pt, 100만=52pt, 200만+=55pt
         if member <= 0:
-            cafe_score = 0.0
+            member_pts = 0.0
         else:
-            cafe_score = min(100.0, math.log10(member) / math.log10(2_000_000) * 100.0)
-        cafe_score = round(cafe_score, 1)
+            member_pts = min(55.0, math.log10(member) / math.log10(2_000_000) * 55.0)
+
+        # 카페 등급(0~30): 씨앗1 / 새싹2 / 잎새3 / 가지4 / 나무5 / 숲6
+        grade_tier = info.get('cafe_grade_tier')
+        cafe_grade_pts = min(30.0, max(0.0, (grade_tier or 0) / 6.0 * 30.0))
+
+        # 대표카페(0/15): NAVER 대표카페 마크
+        official_pts = 15.0 if info.get('is_official_cafe') else 0.0
+
+        cafe_score = round(min(100.0, member_pts + cafe_grade_pts + official_pts), 1)
 
         def grade(s: float) -> str:
             if s >= 80: return 'S'
@@ -1028,7 +1076,10 @@ class SeoAnalyzer:
                 'view_pts':      round(view_pts, 1),
                 'like_pts':      round(like_pts, 1),
                 'comment_pts':   round(comm_pts, 1),
-                'cafe_member_pts': cafe_score,
+                'scrap_pts':     round(scrap_pts, 1),
+                'cafe_member_pts':  round(member_pts, 1),
+                'cafe_grade_pts':   round(cafe_grade_pts, 1),
+                'cafe_official_pts': official_pts,
             },
         }
 
@@ -1251,7 +1302,10 @@ class SeoAnalyzer:
                                 _writer = article_data.get('writer', {})
                                 _cafe = _res.get('cafe', {})
                                 _icon = _writer.get('memberLevelIconUrl', '') or ''
-                                _tier_m = re.search(r'/levelicon/(\d+)/', _icon)
+                                # 아이콘 URL 예: /levelicon/1/13_120.gif
+                                #   → 경로의 1 = 테마 세트 id, 파일명 13_120 의 13 = 실제 카페 등급.
+                                #     파일명 첫 숫자(레벨)를 우선 추출, 실패 시 memberLevel 숫자 폴백.
+                                _tier_m = re.search(r'/levelicon/\d+/(\d+)_\d+', _icon)
                                 _post_date = ''
                                 _wd = article_data.get('writeDate')
                                 if _wd:
@@ -1269,6 +1323,7 @@ class SeoAnalyzer:
                                     'view_count':    int(article_data.get('readCount', 0) or 0),
                                     'like_count':    0,  # 카페 좋아요수는 별도 reaction API 필요(현재 미수집)
                                     'comment_count': int(article_data.get('commentCount', 0) or 0),
+                                    'scrap_count':   int(article_data.get('scrapCount', 0) or 0),
                                     'post_date':     _post_date,
                                     'cafe_name':     _cafe.get('name', ''),
                                     'cafe_desc':     _cafe.get('introduction', ''),
@@ -1296,7 +1351,15 @@ class SeoAnalyzer:
                                                             cafe_author_info['like_count'] = int(_rx.get('count', 0) or 0)
                                 except Exception as _le:
                                     print(f"[SEO] 카페 좋아요수 수집 실패: {_le}")
-                                    
+
+                                # 카페 등급(씨앗~숲) + 대표카페 여부 — 카페 홈 HTML 공개
+                                try:
+                                    _grade = await self.fetch_cafe_grade_info(session, _cafe.get('url', ''))
+                                    if _grade:
+                                        cafe_author_info.update(_grade)
+                                except Exception as _ge:
+                                    print(f"[SEO] 카페 등급 수집 실패: {_ge}")
+
                         else:
                             return raw_url, {"error": "지원되지 않는 URL 형식입니다. (네이버 블로그/카페만 지원)"}
                             
