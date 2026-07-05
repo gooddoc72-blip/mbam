@@ -93,7 +93,7 @@ class CrawlerEngine:
 
             # 다운로드된 올바른 드라이버 경로를 undetected-chromedriver에 주입 (강제 패치)
             # 쿠팡에서도 동일하게 적용
-            self.driver = uc.Chrome(options=options, driver_executable_path=driver_path, use_subprocess=False)
+            self.driver = uc.Chrome(options=options, driver_executable_path=driver_path)
             self.driver.set_page_load_timeout(30)
             wait = WebDriverWait(self.driver, 10)
 
@@ -518,6 +518,7 @@ class CrawlerEngine:
 
             driver_path = resolve_driver_path(self.log)
             self.driver = uc.Chrome(options=options, driver_executable_path=driver_path)
+            self.driver.set_page_load_timeout(30)  # 상세페이지가 오래 매달리는 것 방지
 
             wait = WebDriverWait(self.driver, 10)
 
@@ -579,6 +580,12 @@ class CrawlerEngine:
                                     time.sleep(3)
                             else:
                                 self.log(f"[{keyword}] 쿠팡 {page}페이지 상품 검색 시작...")
+                                # 워밍업: 홈 먼저 방문해 세션/쿠키 확보 (2페이지+ 직접 접근 차단·IP 변경 후 세션 리셋 회피)
+                                try:
+                                    self.driver.get("https://www.coupang.com/")
+                                    time.sleep(2)
+                                except Exception:
+                                    pass
                                 self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
                                 time.sleep(3)
 
