@@ -585,7 +585,18 @@ function BlogPostingContent() {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.success && data.task_id) {
+      if (data.mode === "agent" && data.job_id) {
+        // [방법 B] 발행은 내 PC의 에이전트가 실행. 완료까지 폴링(다중계정·발행이라 길게).
+        alert("내 PC의 에이전트가 발행을 실행합니다.\n(로컬 프로그램 '에이전트'가 실행 중이어야 합니다)");
+        try {
+          await pollAgentJob(data.job_id, { tries: 300, intervalMs: 4000 }); // 최대 ~20분
+          alert("✅ 발행이 완료되었습니다!");
+        } catch (err) {
+          alert("발행 실패/시간초과: " + err.message);
+        } finally {
+          setTaskStatus(null); setLoading(false);
+        }
+      } else if (data.success && data.task_id) {
         setTaskId(data.task_id);
         localStorage.setItem("mbam_auto_post_task_id", data.task_id);
       } else {

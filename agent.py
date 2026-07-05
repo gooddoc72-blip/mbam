@@ -143,6 +143,20 @@ async def _handle_seo_cafe_post(payload: dict) -> dict:
     return await run_cafe_post_analysis(req)
 
 
+async def _handle_auto_post(payload: dict) -> dict:
+    # 발행(블로그/카페): 사용자 PC에서 네이버 로그인+글쓰기 브라우저 자동화 실행
+    import uuid as _uuid
+    from mbam_nextgen.backend.routers.auto_post import run_automation_task, task_status_store, AutoPostRequest
+    req = AutoPostRequest(**payload)
+    tid = _uuid.uuid4().hex
+    await run_automation_task(tid, req)   # 워크플로우 실행 + 로컬 task_status_store에 상태 기록
+    st = task_status_store.get(tid, {})
+    if st.get("status") == "failed":
+        logs = st.get("logs", [])
+        raise RuntimeError("발행 실패: " + (" / ".join(str(l) for l in logs[-2:]) if logs else "원인 미상"))
+    return {"success": True, "logs": [str(l) for l in st.get("logs", [])[-6:]]}
+
+
 async def _handle_register_account(payload: dict) -> dict:
     # 기기 인증: 사용자 PC에서 브라우저를 열어 수동 로그인+2FA → 영구 프로필 저장
     from mbam_nextgen.orchestrator import WorkflowOrchestrator
@@ -156,6 +170,7 @@ async def _handle_register_account(payload: dict) -> dict:
 
 HANDLERS = {
     "seo_search": _handle_seo_search,
+    "auto_post": _handle_auto_post,
     "register_account": _handle_register_account,
     "seo_analyze": _handle_seo_analyze,
     "seo_cafe_urls": _handle_seo_cafe_urls,

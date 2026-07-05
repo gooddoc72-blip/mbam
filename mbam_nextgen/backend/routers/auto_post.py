@@ -325,16 +325,26 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
 
 @router.post("")
 @router.post("/")
-async def trigger_auto_post(req: AutoPostRequest, _q: dict = Depends(consume_generation_quota), db: Session = Depends(get_db)):
+async def trigger_auto_post(req: AutoPostRequest,
+                            current_user: dict = Depends(get_current_user),
+                            _q: dict = Depends(consume_generation_quota),
+                            db: Session = Depends(get_db)):
     import uuid
     # 일일 자동화 한도(관리자 설정값) 집행 — 초과 시 403
     enforce_daily_for_request(db, _q, req)
+    # [방법 B] 발행은 네이버 로그인+글쓰기 브라우저 자동화라 클라우드 불가 → 로컬 에이전트에 위임
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        payload = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "auto_post", payload)
+        return {"mode": "agent", "job_id": job_id,
+                "message": "내 PC의 에이전트가 발행을 실행합니다. (로컬 에이전트 실행 필요)"}
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_automation_task(task_id, req))
     active_tasks[task_id] = task
     return {
-        "success": True, 
-        "message": "자동화 작업이 백그라운드에서 시작되었습니다.", 
+        "success": True,
+        "message": "자동화 작업이 백그라운드에서 시작되었습니다.",
         "task_id": task_id
     }
 
