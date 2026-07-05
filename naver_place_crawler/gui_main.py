@@ -10,7 +10,7 @@ class CrawlerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Crawler Pro v1.8 (USB 테더링 다목적 크롤러)")
+        self.title("Crawler Pro v1.9 (USB 테더링 다목적 크롤러)")
         self.geometry("800x600")
 
         # 좌측 메뉴 프레임
@@ -224,18 +224,17 @@ class CrawlerApp(ctk.CTk):
             self.log("삭제할 수집 이력이 존재하지 않습니다.")
 
     def test_ip_change(self):
-        self.log("IP 변경(비행기 모드 전환)을 테스트합니다...")
+        self.log("IP 변경 진단을 시작합니다... (되는 방법을 자동으로 찾습니다)")
         import ip_changer
         def run_test():
             self.btn_test_ip.configure(state="disabled")
             try:
-                ip_changer.toggle_airplane_mode()
-                self.log("IP 변경 완료.")
+                ip_changer.diagnose_ip_change(log=self.log)
             except Exception as e:
-                self.log(f"IP 변경 실패: {e}")
+                self.log(f"IP 진단 중 오류: {e}")
             finally:
                 self.btn_test_ip.configure(state="normal")
-                
+
         threading.Thread(target=run_test, daemon=True).start()
 
     def start_crawling(self):

@@ -77,6 +77,58 @@ def get_public_ip(log=print):
     return None
 
 
+def diagnose_ip_change(log=print):
+    """어떤 IP 변경 방법이 이 폰에서 실제로 IP를 바꾸는지 실측 진단한다.
+    결과를 로그로 자세히 남겨, 되는 방법을 특정할 수 있게 한다.
+    """
+    if platform.system() == "Darwin":
+        log("Mac에서는 자동 IP 변경을 지원하지 않습니다.")
+        return
+
+    if not is_device_connected(log=log):
+        log("진단 중단: ADB로 연결된 휴대폰이 없습니다. (USB 디버깅 허용 확인)")
+        return
+
+    ver = _run_adb(["shell", "getprop", "ro.build.version.release"], log=lambda m: None)
+    log(f"===== IP 변경 진단 시작 (안드로이드 {ver or '?'}) =====")
+
+    base = get_public_ip(log=log)
+    log(f"[기준] 현재 공인 IP: {base or '조회 실패(인터넷 확인 필요)'}")
+
+    # 방법1: 비행기 모드 (Android 11+ cmd connectivity)
+    log("── 방법1: 비행기모드(cmd connectivity) ──")
+    r1 = _run_adb(["shell", "cmd", "connectivity", "airplane-mode", "enable"], log=log)
+    if r1 is None:
+        log("  → 이 폰에서는 이 명령을 지원하지 않습니다(실패).")
+    else:
+        time.sleep(6)
+        _run_adb(["shell", "cmd", "connectivity", "airplane-mode", "disable"], log=log)
+        time.sleep(9)
+        ip1 = get_public_ip(log=log)
+        ok1 = ip1 and base and ip1 != base
+        log(f"  → 방법1 결과 IP: {ip1 or '조회실패'} / {'변경됨 (성공)' if ok1 else '그대로 (실패)'}")
+        if ip1:
+            base = ip1
+
+    # 방법2: 모바일 데이터 토글 (svc data)
+    log("── 방법2: 모바일데이터 토글(svc data) ──")
+    r2 = _run_adb(["shell", "svc", "data", "disable"], log=log)
+    if r2 is None:
+        log("  → svc data 명령을 사용할 수 없습니다(실패).")
+    else:
+        time.sleep(6)
+        _run_adb(["shell", "svc", "data", "enable"], log=log)
+        time.sleep(9)
+        ip2 = get_public_ip(log=log)
+        ok2 = ip2 and base and ip2 != base
+        log(f"  → 방법2 결과 IP: {ip2 or '조회실패'} / {'변경됨 (성공)' if ok2 else '그대로 (실패)'}")
+
+    log("===== 진단 끝 =====")
+    log("※ 두 방법 모두 '그대로'라면: 폰이 WiFi로 인터넷을 받아 USB로 공유 중일 가능성이 큽니다.")
+    log("   → 폰에서 WiFi를 끄고 '모바일 데이터'로만 인터넷을 쓰도록 한 뒤 USB 테더링하면 IP가 바뀝니다.")
+    log("   (또는 통신사가 짧은 시간 같은 IP를 재할당하는 경우도 있습니다.)")
+
+
 def _rotate_mobile_ip(log=print):
     """최신 안드로이드에서 동작하는 방식으로 모바일(테더링) IP를 재할당한다.
 
