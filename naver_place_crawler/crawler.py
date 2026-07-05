@@ -31,32 +31,39 @@ def _find_cached_chromedriver():
 def resolve_driver_path(log=print):
     """크롬 드라이버 경로를 확보한다.
 
-    최초 1회는 네트워크가 필요하지만, 이후에는 캐시를 우선 사용해
-    googlechromelabs.github.io 접속 없이 동작하도록 만든다.
-    네트워크 실패 시에는 이전에 받아둔 캐시 드라이버로 폴백한다.
+    핵심: 로컬에 이미 받아둔 드라이버가 있으면 네트워크를 아예 타지 않는다.
+    (webdriver-manager는 캐시가 있어도 googlechromelabs.github.io 에서
+     '크롬 버전→드라이버 버전' 매핑을 조회하려다 이 호스트에서 타임아웃이 나기 때문)
+    로컬에 아무 드라이버도 없을 때만 네트워크로 최초 1회 다운로드한다.
     """
-    # 캐시된 드라이버를 최대 365일간 유효한 것으로 간주 → 매번 최신 버전 확인(네트워크) 안 함
-    cache_manager = DriverCacheManager(valid_range=365)
+    # 1) 로컬 캐시에 드라이버가 있으면 네트워크 없이 즉시 사용 (타임아웃 원천 차단)
+    cached = _find_cached_chromedriver()
+    if cached:
+        log("기존에 받아둔 크롬 드라이버를 사용합니다. (네트워크 확인 생략)")
+        return cached
 
+    # 2) 로컬에 없을 때만 네트워크로 다운로드 (타임아웃 30초 + 3회 재시도)
+    cache_manager = DriverCacheManager(valid_range=365)
     prev_timeout = socket.getdefaulttimeout()
     for attempt in range(1, 4):
         try:
-            # 무한 대기(read timeout=None) 방지: 최초 다운로드는 빠르게 실패하고 재시도
             socket.setdefaulttimeout(30)
-            return ChromeDriverManager(cache_manager=cache_manager).install()
+            path = ChromeDriverManager(cache_manager=cache_manager).install()
+            log("크롬 드라이버 다운로드 완료.")
+            return path
         except Exception as e:
-            log(f"크롬 드라이버 준비 재시도 {attempt}/3 중... ({e})")
+            log(f"크롬 드라이버 다운로드 재시도 {attempt}/3 중... ({e})")
             time.sleep(2)
         finally:
             socket.setdefaulttimeout(prev_timeout)
 
-    # 네트워크로 받지 못했으면 이전에 받아둔 캐시 드라이버로 폴백
+    # 3) 재시도 중 일부라도 받아졌으면 그 캐시를 사용
     cached = _find_cached_chromedriver()
     if cached:
-        log("네트워크 연결에 실패하여, 이전에 받아둔 드라이버로 실행합니다.")
+        log("네트워크가 불안정하여, 이전에 받아둔 드라이버로 실행합니다.")
         return cached
 
-    # 캐시도 없으면 uc 내장 다운로더에 맡긴다(경로 None)
+    # 4) 캐시도 없으면 uc 내장 다운로더에 맡긴다(경로 None)
     log("드라이버 자동 준비에 실패했습니다. 내장 다운로더로 시도합니다. (인터넷 연결을 확인하세요)")
     return None
 class CrawlerEngine:
