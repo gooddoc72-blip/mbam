@@ -1,4 +1,4 @@
-#define AppVer "1.4"
+#define AppVer "1.5"
 
 [Setup]
 AppName=Crawler Pro

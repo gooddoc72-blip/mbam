@@ -10,7 +10,7 @@ class CrawlerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Crawler Pro v1.4 (USB 테더링 다목적 크롤러)")
+        self.title("Crawler Pro v1.5 (USB 테더링 다목적 크롤러)")
         self.geometry("800x600")
 
         # 좌측 메뉴 프레임

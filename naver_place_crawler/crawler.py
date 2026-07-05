@@ -101,8 +101,7 @@ class CrawlerEngine:
                 if use_ip_change and idx > 0:
                     self.log(f"[{keyword}] 검색 전 IP 변경 대기 중...")
                     import ip_changer
-                    ip_changer.toggle_airplane_mode()
-                    self.log("IP 변경 완료.")
+                    ip_changer.toggle_airplane_mode(log=self.log)
 
                 self.log(f"[{keyword}] 네이버 플레이스 검색 중...")
                 
@@ -516,8 +515,7 @@ class CrawlerEngine:
                 if use_ip_change and idx > 0:
                     self.log(f"[{keyword}] 검색 전 IP 변경 시도...")
                     import ip_changer
-                    ip_changer.toggle_airplane_mode()
-                    self.log("IP 변경 완료.")
+                    ip_changer.toggle_airplane_mode(log=self.log)
 
                 # 페이지 커서: 회차가 바뀌어도 초기화하지 않고 멈춘 지점에서 계속 이어간다.
                 page = 1
@@ -717,7 +715,7 @@ class CrawlerEngine:
                             if use_ip_change and i > 0 and i % 20 == 0:
                                 self.log("안전한 수집을 위해 IP를 변경합니다... (USB 테더링)")
                                 import ip_changer
-                                ip_changer.toggle_airplane_mode()
+                                ip_changer.toggle_airplane_mode(log=self.log)
                                 time.sleep(5)
 
                             self.log(f"[{keyword}] {i+1}/{len(products)} 상품 상세 정보 수집 중...")
@@ -807,7 +805,9 @@ class CrawlerEngine:
                             if use_ip_change:
                                 self.log("다음 회차 전 IP를 변경합니다... (USB 테더링)")
                                 import ip_changer
-                                ip_changer.toggle_airplane_mode()
+                                changed = ip_changer.toggle_airplane_mode(log=self.log)
+                                if not changed:
+                                    self.log("⚠️ IP가 바뀌지 않은 채로 다음 회차를 진행하면 쿠팡에 차단될 수 있습니다. 휴대폰 연결 상태를 확인하세요.")
                                 time.sleep(5)
                             else:
                                 import random
