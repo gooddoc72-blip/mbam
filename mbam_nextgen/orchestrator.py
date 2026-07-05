@@ -422,6 +422,7 @@ class WorkflowOrchestrator:
         image_folder_path: str = None,
         source_data: str = None,
         generate_card_news: bool = False,
+        generate_ai_images: bool = False,   # 나노바나나(Gemini) AI 이미지 자동 생성·삽입 (병원 등)
         blog_id: str = None,   # 로그인ID와 다른 실제 블로그 주소(예: bonetacasa). 있으면 다이렉트 진입에 사용
         **kwargs
     ):
@@ -550,6 +551,31 @@ class WorkflowOrchestrator:
                 logger.info("🖼️ [Orchestrator] 기본 이미지 세척 중...")
                 washed_img = self.armor.wash_image(test_image, f"washed_{account_id}.jpg") if wash_images else test_image
                 if washed_img: washed_images.append(washed_img)
+            elif not washed_images and generate_ai_images:
+                # (B') 나노바나나(Gemini) AI 이미지 자동 생성 — 사용자 이미지가 없을 때 본문 기반으로 생성
+                logger.info("[Orchestrator] 등록된 이미지가 없어 AI 이미지(나노바나나 5장)를 자동 생성합니다.")
+                try:
+                    from mbam_nextgen.services.soul import SoulRewriter
+                    import uuid
+                    soul = SoulRewriter()
+                    img_prompts = await soul.generate_blog_image_prompts(
+                        title=blog_title, content=blog_content, keyword=keyword,
+                        category=promo_type, n=5
+                    )
+                    if img_prompts:
+                        ai_out = os.path.join(os.getcwd(), "generated_images", "ai", f"{account_id}_{uuid.uuid4().hex[:8]}")
+                        ai_paths = await soul.generate_images(img_prompts, ai_out, filename_prefix=f"ai_{account_id}")
+                        for idx_a, gp in enumerate(ai_paths):
+                            washed = self.armor.wash_image(gp, f"washed_ai_{account_id}_{idx_a}.jpg")
+                            washed_images.append(washed if washed else gp)
+                        logger.info(f"[Orchestrator] AI 이미지 {len(washed_images)}장 생성 완료")
+                    else:
+                        logger.info("[Orchestrator] AI 이미지 프롬프트 생성 실패 → 이미지 없이 진행")
+                except Exception as e:
+                    logger.error(f"[Orchestrator] AI 이미지 생성 실패: {e}")
+                # 생성된 이미지를 소제목 위치에 분산 배치(표지 + 본문 곳곳)
+                if washed_images:
+                    blog_content = self._align_card_markers(blog_content, len(washed_images))
             elif not washed_images and generate_card_news:
                 logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
                 # 카드 제목: '테스트'/빈 키워드면 실제 글 제목을 사용

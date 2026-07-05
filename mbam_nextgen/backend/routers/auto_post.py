@@ -120,6 +120,7 @@ class AutoPostRequest(BaseModel):
     # Automation / Content Collect Data
     source_data: Optional[str] = None
     generate_card_news: Optional[bool] = False
+    generate_ai_images: Optional[bool] = False  # 나노바나나(Gemini) AI 이미지 자동 생성·삽입
     prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
     include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
     
@@ -231,6 +232,10 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
         orchestrator = WorkflowOrchestrator()
         account_id = req.naver_id if req.naver_id else "unknown_account"
 
+        # 병원 카테고리는 '완전 자동' — 요청 플래그 또는 병원(promo_type/prompt_category)이면 AI 이미지 자동 생성
+        # (실제 생성은 사용자 이미지가 없을 때만 orchestrator에서 수행)
+        ai_images = bool(req.generate_ai_images) or (req.promo_type == "hospital") or (req.prompt_category == "hospital")
+
         if req.target_type == "blog":
             if req.accounts and len(req.accounts) > 0:
                 log(f"[다중 계정 블로그] 워크플로우를 시작합니다. (계정 수: {len(req.accounts)})")
@@ -249,6 +254,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     distribution_mode=req.distribution_mode,
                     source_data=req.source_data,
                     generate_card_news=req.generate_card_news,
+                    generate_ai_images=ai_images,
                     use_tethering=req.use_tethering,
                     insert_map=req.insert_map,
                     map_query=req.map_query,
@@ -268,6 +274,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     post_purpose=req.post_purpose,
                     promo_type=req.promo_type,
                     distribution_mode=req.distribution_mode,
+                    generate_ai_images=ai_images,
                     insert_map=req.insert_map,
                     map_query=req.map_query
                 )

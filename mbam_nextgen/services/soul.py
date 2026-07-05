@@ -525,3 +525,104 @@ class SoulRewriter:
         except Exception as e:
             print(f"[SoulRewriter] AI 소식 생성 실패: {e}")
             return {"title": "소식 업데이트", "content": f"{place_name}의 새로운 소식입니다.", "clip_texts": ["환영합니다", "감사합니다"]}
+
+    # ══════════════════════════════════════════════════════════════════
+    # 🎨 나노바나나(Gemini 이미지) 자동 생성
+    #   1) generate_blog_image_prompts: 본문 → 영문 이미지 프롬프트 N개(JSON)
+    #   2) generate_images: 프롬프트별 → PNG 저장(경로 리스트)
+    # ══════════════════════════════════════════════════════════════════
+    async def generate_blog_image_prompts(self, title: str, content: str, keyword: str,
+                                          category: str = None, n: int = 5) -> List[str]:
+        """블로그 본문을 바탕으로 나노바나나(Gemini 이미지)용 영문 프롬프트 N개를 생성.
+        병원 카테고리는 의료 이미지 공식(실사/일러스트/상담)을 주입. JSON 배열로 파싱."""
+        n = max(1, min(int(n or 5), 5))
+        body = (content or "")[:4000]
+        if (category or "").lower() == "hospital":
+            style_guide = (
+                "This is a MEDICAL (hospital) blog. Produce a 5-image set with these roles in order: "
+                "1) HERO/thumbnail: a Korean patient (age/gender fitting the topic) expressing the symptom, "
+                "with a translucent red circle graphic overlay on the affected area, bright clean background, photorealistic, trustworthy. "
+                "2) ANATOMY/cause: a clean medical illustration of the relevant anatomy, soft pastel colors, white background, educational vector style. "
+                "3) SELF-CARE/stretch: a Korean person demonstrating a safe stretch or management action, natural lighting, instructional photo. "
+                "4) CONSULTATION: a Korean patient consulting a doctor in a white coat in a bright modern clinic, photorealistic. "
+                "5) POSITIVE ENDING: a healthy Korean person doing a bright everyday activity, optimistic mood, photorealistic. "
+                "Strictly: no text/letters/numbers/watermark rendered in the image, no blood or graphic wounds, "
+                "no real celebrities, no brand logos, safe-for-work."
+            )
+        else:
+            style_guide = (
+                "Produce photorealistic, clean, blog-friendly images, one matching each major section of the post. "
+                "Strictly: no text/letters/numbers/watermark rendered in the image, no brand logos, "
+                "no identifiable real people/celebrities, safe-for-work."
+            )
+        prompt = f"""You are an art director writing prompts for an AI image generator (Google "nano banana" / Gemini image model).
+Blog topic keyword: "{keyword}"
+Blog title: {title}
+Blog body (Korean, for context only):
+\"\"\"{body}\"\"\"
+
+{style_guide}
+
+Rules for each prompt:
+- One self-contained English paragraph, 30-60 words, describing a concrete scene (subject, action, setting, lighting, style).
+- End every prompt with: "no text, no watermark, high quality."
+- Do not number the prompts inside their text.
+
+Return ONLY a JSON array of exactly {n} strings and nothing else.
+Example: ["a photorealistic ... no text, no watermark, high quality.", "..."]"""
+        raw = await self._dissect_ai_call("claude", prompt)
+        import json, re
+        s = re.sub(r'```json\s*|```', '', raw or '').strip()
+        m = re.search(r'\[.*\]', s, re.DOTALL)
+        if m:
+            s = m.group(0)
+        prompts: List[str] = []
+        try:
+            arr = json.loads(s)
+            if isinstance(arr, list):
+                prompts = [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            # 파싱 실패 시 줄 단위 폴백(30자 이상 라인만)
+            for ln in (raw or "").splitlines():
+                ln = ln.strip().strip('-"').strip()
+                if len(ln) > 30:
+                    prompts.append(ln)
+        return prompts[:n]
+
+    async def generate_images(self, prompts: List[str], out_dir: str,
+                              filename_prefix: str = "ai_img") -> List[str]:
+        """나노바나나(gemini-2.5-flash-image)로 프롬프트별 이미지를 생성해 PNG로 저장, 경로 리스트 반환.
+        Gemini 클라이언트가 없거나(키 없음) part가 비면 해당 이미지는 건너뜀(예외 대신 부분 성공)."""
+        if not self.gemini_client or not genai:
+            print("[SoulRewriter] 이미지 생성 불가: Gemini 클라이언트 없음(GEMINI_API_KEY 확인)")
+            return []
+        os.makedirs(out_dir, exist_ok=True)
+        paths: List[str] = []
+        for idx, p in enumerate(prompts):
+            if not p or not p.strip():
+                continue
+            try:
+                resp = await asyncio.to_thread(
+                    self.gemini_client.models.generate_content,
+                    model="gemini-2.5-flash-image",
+                    contents=[p],
+                )
+                saved = None
+                cand = (resp.candidates or [None])[0]
+                if cand and cand.content and cand.content.parts:
+                    for part in cand.content.parts:
+                        inline = getattr(part, "inline_data", None)
+                        if inline and inline.data:
+                            fp = os.path.join(out_dir, f"{filename_prefix}_{idx+1}.png")
+                            with open(fp, "wb") as f:
+                                f.write(inline.data)
+                            saved = fp
+                            break
+                if saved:
+                    paths.append(saved)
+                    print(f"[SoulRewriter] 이미지 생성 {idx+1}/{len(prompts)} → {saved}")
+                else:
+                    print(f"[SoulRewriter] 이미지 part 없음 (프롬프트 {idx+1}, 안전필터 가능성)")
+            except Exception as e:
+                print(f"[SoulRewriter] 이미지 생성 실패 {idx+1}: {e}")
+        return paths

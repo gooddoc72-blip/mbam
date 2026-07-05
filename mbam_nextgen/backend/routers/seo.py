@@ -192,10 +192,20 @@ async def analyze_top3_seo(request: KeywordRequest, current_user: dict = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/search")
-async def search_keyword_endpoint(keyword: str):
+async def search_keyword_endpoint(keyword: str,
+                                  current_user: dict = Depends(get_current_user),
+                                  db: Session = Depends(get_db)):
     """
     네이버 키워드 검색 결과 리스트 추출 (체크박스 UI용)
+
+    [방법 B] EXECUTION_MODE=cloud 이면 직접 스크래핑하지 않고 job을 적재한다.
+    → 사용자 로컬 에이전트가 집 IP로 실행 후 결과 반환(클라우드 IP 차단/502 회피).
+    설치형(local)에서는 기존처럼 인프로세스 즉시 실행.
     """
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "seo_search", {"keyword": keyword})
+        return {"mode": "agent", "job_id": job_id}
     try:
         result = await analyzer.search_smart_blocks(keyword)
         if "error" in result:

@@ -49,6 +49,20 @@ export default function Home() {
     }
   }, [isLoaded, keyword, data, searchPhase, blockList, selectedUrls]);
 
+  // [방법 B] 에이전트 모드: 클라우드가 job_id만 주면, 로컬 에이전트가 집 IP로 실행할 때까지 폴링.
+  const pollAgentJob = async (jobId, { tries = 60, intervalMs = 2500 } = {}) => {
+    for (let i = 0; i < tries; i++) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      const res = await fetchWithAuth(`/api/agent/jobs/${jobId}`);
+      if (!res.ok) continue;
+      const info = await res.json();
+      if (info.status === "done") return info.result || {};
+      if (info.status === "error") throw new Error(info.error || "에이전트 작업이 실패했습니다.");
+      // queued/running/not_found → 계속 대기
+    }
+    throw new Error("에이전트 응답 시간 초과입니다. 내 PC의 로컬 프로그램(에이전트)이 실행 중인지 확인해 주세요.");
+  };
+
   const handleSearchList = async (e) => {
     e.preventDefault();
     if (!keyword.trim()) return;
@@ -62,11 +76,16 @@ export default function Home() {
     try {
       const res = await fetchWithAuth(`/api/seo/search?keyword=${encodeURIComponent(keyword)}`);
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || "리스트 검색에 실패했습니다.");
       }
-      const result = await res.json();
-      
+      let result = await res.json();
+
+      // [방법 B] 에이전트 모드면 job_id를 폴링해 로컬 실행 결과를 받아온다.
+      if (result && result.mode === "agent" && result.job_id) {
+        result = await pollAgentJob(result.job_id);
+      }
+
       // result structure: { keyword, monthly_vol, blocks: [{ block_title, links: [{title, url}] }] }
       setBlockList(result.blocks || []);
       setData({...result, searchData: result}); // store search volume data
@@ -140,7 +159,7 @@ export default function Home() {
     <main style={{ maxWidth: "1400px", margin: "0 auto", padding: "2rem" }}>
       <header style={{ textAlign: "center", marginBottom: "3rem" }}>
         <h1 className="text-gradient" style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>
-          NextGen SEO Analyzer
+          통합검색 SEO 분석
         </h1>
         <p style={{ color: "var(--text-sub)", fontSize: "1.2rem" }}>
           AI 기반 네이버 블로그 정밀 분석 및 상위 노출 공식 도출

@@ -313,6 +313,25 @@ class DailyUsage(Base):
     count = Column(Integer, default=0)
 
 
+class AgentJob(Base):
+    """[방법 B] 웹(클라우드) → 사용자 로컬 에이전트로 실행 위임하는 작업 큐.
+    클라우드는 job을 queued로 적재하고, 로컬 에이전트가 폴링으로 claim→실행→결과 반환한다.
+    설치형(EXECUTION_MODE=local)에서는 큐를 쓰지 않고 인프로세스로 즉시 실행한다."""
+    __tablename__ = "agent_jobs"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)                 # 작업 소유자(=에이전트 로그인 유저, JWT sub)
+    job_type = Column(String, index=True)                # "seo_search" | "seo_analyze" | ...
+    payload = Column(Text, nullable=True)                # JSON 문자열(입력)
+    status = Column(String, default="queued", index=True)  # queued | running | done | error
+    result = Column(Text, nullable=True)                 # JSON 문자열(결과)
+    error = Column(Text, nullable=True)
+    agent_id = Column(String, nullable=True)             # 처리한 에이전트 식별자(HWID 등)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    claimed_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 def get_db():
     db = SessionLocal()
     try:
