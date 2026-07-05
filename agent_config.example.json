@@ -1,0 +1,6 @@
+{
+  "cloud_url": "https://clever-transformation-production.up.railway.app",
+  "email": "marketlabs 계정 이메일(또는 관리자 아이디)",
+  "password": "비밀번호",
+  "poll_sec": 3
+}

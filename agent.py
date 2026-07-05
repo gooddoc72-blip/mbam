@@ -66,8 +66,19 @@ async def _handle_seo_search(payload: dict) -> dict:
     return result
 
 
+async def _handle_seo_analyze(payload: dict) -> dict:
+    from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
+    result = await SeoAnalyzer().analyze_keyword(
+        payload.get("keyword", ""), target_urls=payload.get("target_urls")
+    )
+    if isinstance(result, dict) and result.get("error"):
+        raise RuntimeError(result["error"])
+    return result
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
+    "seo_analyze": _handle_seo_analyze,
 }
 
 

@@ -134,11 +134,15 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || "분석에 실패했습니다.");
       }
 
-      const result = await res.json();
+      let result = await res.json();
+      // [방법 B] 에이전트 모드면 job_id 폴링(정밀분석은 오래 걸려 여유있게).
+      if (result && result.mode === "agent" && result.job_id) {
+        result = await pollAgentJob(result.job_id, { tries: 100, intervalMs: 3000 });
+      }
       setData(result);
       setSearchPhase("done");
       try { addHistory("seo-analysis", { summary: `SEO 분석 · ${keyword || ''}` }); } catch (e) {}

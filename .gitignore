@@ -92,6 +92,13 @@ smartstore_state.txt
 *.exe
 naver_place_crawler/Output/
 
+# 비밀키·자격증명 (절대 커밋 금지)
+*.pem
+*.key
+my-key.pem
+agent_config.json
+!agent_config.example.json
+
 # 웹 배포에 필요한 설정/의존성 (위 *.txt / *.json 무시의 예외)
 !requirements.cloud.txt
 !mbam_nextgen/backend/config/plans.json

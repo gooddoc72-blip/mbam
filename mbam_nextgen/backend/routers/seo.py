@@ -127,13 +127,23 @@ async def analyze_cafe_urls_endpoint(request: CafeUrlsRequest):
 
 
 @router.post("/analyze")
-async def analyze_keyword_endpoint(request: AnalyzeRequest, db: Session = Depends(get_db), _q: dict = Depends(consume_generation_quota)):
+async def analyze_keyword_endpoint(request: AnalyzeRequest,
+                                   current_user: dict = Depends(get_current_user),
+                                   db: Session = Depends(get_db),
+                                   _q: dict = Depends(consume_generation_quota)):
     """
     네이버 키워드 SEO 정밀 분석 API
     - 키워드 검색 결과 상위 10개 추출
     - 각 포스팅 상세 크롤링 (이미지 수, 글자 수, 키워드 추출 등)
     - 상위노출 가이드라인(Winning Formula) 생성
+
+    [방법 B] EXECUTION_MODE=cloud 이면 job 적재 → 로컬 에이전트가 집 IP로 실행.
     """
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "seo_analyze",
+                                    {"keyword": request.keyword, "target_urls": request.target_urls})
+        return {"mode": "agent", "job_id": job_id}
     try:
         # seo_analyzer의 병렬 비동기 함수 호출
         result = await analyzer.analyze_keyword(request.keyword, target_urls=request.target_urls)

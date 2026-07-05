@@ -91,6 +91,24 @@ def start_backend():
     )
 
 
+def start_agent():
+    """[방법 B] 로컬 에이전트(agent.py) 기동 — 클라우드 폴링·집 IP 실행.
+    설치형 동봉 Python·Chromium 경로를 그대로 사용(에이전트도 Playwright를 돌리므로)."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(APP_DIR)
+    env["PYTHONIOENCODING"] = "utf-8"
+    bundled_browsers = APP_DIR / "runtime" / "ms-playwright"
+    if bundled_browsers.exists():
+        env["PLAYWRIGHT_BROWSERS_PATH"] = str(bundled_browsers)
+    log = open(LOG_DIR / "agent.log", "a", encoding="utf-8")
+    return subprocess.Popen(
+        [_python_exe(), str(APP_DIR / "agent.py")],
+        cwd=str(APP_DIR), env=env,
+        stdout=log, stderr=subprocess.STDOUT,
+        creationflags=CREATE_NO_WINDOW,
+    )
+
+
 def start_frontend():
     log = open(LOG_DIR / "frontend.log", "a", encoding="utf-8")
     built = (WEB_DIR / ".next" / "BUILD_ID").exists()
@@ -166,7 +184,60 @@ def show_control_window(procs):
     root.mainloop()
 
 
+def show_agent_window(proc):
+    """[방법 B] 에이전트 모드 상태창."""
+    import tkinter as tk
+    root = tk.Tk()
+    root.title("마케팅연구소 에이전트")
+    root.resizable(False, False)
+    W, H = 420, 210
+    root.update_idletasks()
+    x = (root.winfo_screenwidth() - W) // 2
+    y = (root.winfo_screenheight() - H) // 3
+    root.geometry(f"{W}x{H}+{x}+{y}")
+
+    tk.Label(root, text="마케팅연구소 에이전트", font=("맑은 고딕", 14, "bold")).pack(pady=(20, 4))
+    tk.Label(root, text="실행 중 ✓", font=("맑은 고딕", 11), fg="#27ae60").pack()
+    tk.Label(root, text="웹(marketlabs.kr)에서 분석하면\n이 PC가 집 IP로 대신 처리합니다.",
+             font=("맑은 고딕", 9), fg="#555", justify="center").pack(pady=8)
+
+    def quit_all():
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        root.destroy()
+
+    tk.Button(root, text="에이전트 종료", command=quit_all, bg="#c0392b", fg="white").pack(pady=6)
+    tk.Label(root, text="※ 이 창을 닫으면 에이전트가 종료됩니다.",
+             font=("맑은 고딕", 8), fg="#aaa").pack(side="bottom", pady=8)
+    root.protocol("WM_DELETE_WINDOW", quit_all)
+    root.mainloop()
+
+
+def run_agent_mode():
+    """[방법 B] 웹 관제형 — 로컬 백엔드/프론트 없이 에이전트만 구동."""
+    cfg = APP_DIR / "agent_config.json"
+    if not cfg.exists():
+        try:
+            import tkinter.messagebox as mb
+            mb.showwarning("설정 필요",
+                           "agent_config.json 이 없습니다.\n"
+                           "cloud_url / email / password 를 설정한 뒤 다시 실행하세요.\n"
+                           "(agent_config.example.json 참고)")
+        except Exception:
+            print("[launcher] agent_config.json 이 없습니다. (agent_config.example.json 참고)")
+        return
+    proc = start_agent()
+    show_agent_window(proc)
+
+
 def main():
+    # [방법 B] MBAM_MODE=agent → 웹 관제형(에이전트만)
+    if os.environ.get("MBAM_MODE", "full").strip().lower() == "agent":
+        run_agent_mode()
+        return
+
     # 1) 인증
     from mbam_auth_gate import run_auth_gate
     if not run_auth_gate():
