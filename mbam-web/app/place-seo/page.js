@@ -230,6 +230,7 @@ export default function PlaceSeoDashboard() {
   };
 
   return (
+    <>
     <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
       <header style={{ marginBottom: "0.5rem" }}>
         <h1 style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#1e293b", margin: 0 }}>
@@ -519,9 +520,10 @@ export default function PlaceSeoDashboard() {
           </div>
         </div>
       </div>
-      <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "0 1rem" }}>
-        <WorkHistory menuKey="place-seo" onRestore={handleRestore} />
-      </div>
     </main>
+    <div style={{ maxWidth: "1800px", margin: "0 auto", padding: "0 1.5rem 2.5rem", background: "#f8fafc" }}>
+      <WorkHistory menuKey="place-seo" onRestore={handleRestore} />
+    </div>
+    </>
   );
 }
