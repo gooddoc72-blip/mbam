@@ -477,7 +477,7 @@ class SoulRewriter:
         플레이스 리뷰를 분석하여 스마트플레이스 새소식 원고와 클립 영상용 텍스트를 생성합니다.
         선택된 테마(theme)에 따라 프롬프트 조건을 다르게 적용합니다.
         """
-        if not self.gemini_client:
+        if not (self.claude_client or self.gemini_client or self.openai_client):
             return {"title": "소식 제목", "content": "AI 설정이 필요합니다.", "clip_texts": ["리뷰 분석", "소식"]}
             
         print(f"[SoulRewriter] '{place_name}' 리뷰 분석 및 소식 원고 생성 중... (테마: {theme})")
@@ -517,10 +517,14 @@ class SoulRewriter:
 }}
 """
         try:
-            result = await self._call_gemini_client(self.gemini_client, prompt)
+            # Claude 메인 → 없으면 Gemini/OpenAI 폴백
+            result = await self._dissect_ai_call("claude", prompt)
             import json, re
-            json_str = re.sub(r'```json\s*|```', '', result).strip()
-            data = json.loads(json_str)
+            s = re.sub(r'```json\s*|```', '', result or '').strip()
+            m = re.search(r'\{.*\}', s, re.DOTALL)   # 프로즈에 감싸여 와도 JSON 객체만 추출
+            if m:
+                s = m.group(0)
+            data = json.loads(s)
             return data
         except Exception as e:
             print(f"[SoulRewriter] AI 소식 생성 실패: {e}")
