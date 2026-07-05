@@ -3,13 +3,15 @@ import { fetchWithAuth } from "../utils/api";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 
 function BlogPostingContent() {
 
   // 1. Account Settings
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const isHospital = pathname === "/hospital-blog";  // 병원 블로그 전용 메뉴로 진입 시 병원 카테고리 고정
   const [generateCardNews, setGenerateCardNews] = useState(true);
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
@@ -87,7 +89,7 @@ function BlogPostingContent() {
   const [descImageFiles, setDescImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [aiProvider, setAiProvider] = useState("claude");
   const [postPurpose, setPostPurpose] = useState("review");
-  const [promoType, setPromoType] = useState("product");
+  const [promoType, setPromoType] = useState(isHospital ? "hospital" : "product");
   const [distributionMode, setDistributionMode] = useState("normal");
   const [referenceData, setReferenceData] = useState(null);
 
@@ -730,8 +732,8 @@ function BlogPostingContent() {
         {/* Left Control Panel */}
         <div style={{ flex: 1.5, display: "flex", flexDirection: "column", gap: "1.5rem", paddingRight: "10px" }}>
         <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>블로그 자동 포스팅</h1>
-          <p style={{ color: "#64748b", margin: 0 }}>SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다.</p>
+          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>{isHospital ? "🏥 병원 블로그 자동 포스팅" : "블로그 자동 포스팅"}</h1>
+          <p style={{ color: "#64748b", margin: 0 }}>{isHospital ? "병원·의원 전용 — 의료법 준수 원고 + 나노바나나 AI 이미지 자동 생성·삽입." : "SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다."}</p>
         </div>
 
         {/* 1. Account Settings */}
