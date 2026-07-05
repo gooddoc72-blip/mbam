@@ -45,11 +45,16 @@ from mbam_nextgen.services.scheduler_service import scheduler_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시 스케줄러 가동
-    scheduler_service.start()
+    # [방법 B] 스케줄러 잡(콘텐츠 동기화·플레이스 소식·순위분석)은 전부 네이버 스크래핑이라
+    # 클라우드(cloud 모드)에선 돌 수 없다(데이터센터 IP). 클라우드에서 켜면 startup이 막혀
+    # 크래시 루프가 발생 → cloud 모드에선 스케줄러를 기동하지 않는다(스케줄 실행은 로컬/에이전트 몫).
+    from mbam_nextgen.backend import jobs as jobsvc
+    scheduler_on = not jobsvc.is_cloud_mode()
+    if scheduler_on:
+        scheduler_service.start()
     yield
-    # 종료 시 스케줄러 중지
-    scheduler_service.shutdown()
+    if scheduler_on:
+        scheduler_service.shutdown()
 
 app = FastAPI(
     title="SEO Analysis Platform API",
