@@ -34,7 +34,7 @@ const MENU_ITEMS = [
         icon: PenTool,
         submenus: [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
-            { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
+            { name: "형태소 분석", path: "/blog-analysis", icon: Search },
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
