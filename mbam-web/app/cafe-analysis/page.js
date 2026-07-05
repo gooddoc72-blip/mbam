@@ -1,5 +1,5 @@
 "use client";
-import { fetchWithAuth } from "../utils/api";
+import { fetchWithAuth, resolveMaybeAgent } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
@@ -156,7 +156,8 @@ export default function CafeAnalysisPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ keyword, urls })
             });
-            const data = await res.json();
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 120, intervalMs: 3000 });
             if (Array.isArray(data.items)) {
                 setResult(data.items);
                 setAnalyzeErrors(data.errors || []);
@@ -264,7 +265,8 @@ export default function CafeAnalysisPage() {
                 const j = await res.json().catch(() => ({}));
                 throw new Error(j.detail || `서버 오류 (${res.status})`);
             }
-            const data = await res.json();
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 90, intervalMs: 3000 });
             setUrlItems(data.items || []);
             setUrlErrors(data.errors || []);
             if ((data.items || []).length) addHistory('cafe-analysis', {

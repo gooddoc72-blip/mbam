@@ -94,9 +94,52 @@ async def _handle_place_fetch_mid(payload: dict) -> dict:
     return res
 
 
+async def _handle_blog_index(payload: dict) -> dict:
+    from mbam_nextgen.services.blog_index import analyze_blog
+    result = await analyze_blog(payload.get("blog", ""))
+    if not result:
+        raise RuntimeError("블로그 데이터를 가져오지 못했습니다. (아이디 확인 또는 비공개/차단)")
+    return {"success": True, **result}
+
+
+async def _handle_seo_cafe_urls(payload: dict) -> dict:
+    from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
+    results = await SeoAnalyzer().analyze_multiple_urls(payload.get("urls", []))
+    items, errors = [], []
+    for url, detail in results.items():
+        if "error" in detail:
+            errors.append({"url": url, "error": detail["error"]})
+        else:
+            items.append({"url": url, **detail})
+    return {"items": items, "errors": errors}
+
+
+async def _handle_seo_top3(payload: dict) -> dict:
+    from mbam_nextgen.services.seo_analyzer_v2 import SeoAnalyzerV2
+    result = await SeoAnalyzerV2().analyze(payload.get("keyword", ""))
+    if isinstance(result, dict) and not result.get("success", True) and result.get("error"):
+        raise RuntimeError(result["error"])
+    return result
+
+
+async def _handle_seo_cafe_post(payload: dict) -> dict:
+    from mbam_nextgen.backend.routers.seo import run_cafe_post_analysis, CafeAnalysisRequest
+    req = CafeAnalysisRequest(
+        keyword=payload.get("keyword", "") or "",
+        content=payload.get("content", "") or "",
+        url=payload.get("url", "") or "",
+        urls=payload.get("urls", []) or [],
+    )
+    return await run_cafe_post_analysis(req)
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
     "seo_analyze": _handle_seo_analyze,
+    "seo_cafe_urls": _handle_seo_cafe_urls,
+    "seo_top3": _handle_seo_top3,
+    "seo_cafe_post": _handle_seo_cafe_post,
+    "blog_index": _handle_blog_index,
     "place_analyze": _handle_place_analyze,
     "place_fetch_mid": _handle_place_fetch_mid,
 }

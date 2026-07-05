@@ -1,5 +1,5 @@
 "use client";
-import { fetchWithAuth } from "../utils/api";
+import { fetchWithAuth, resolveMaybeAgent } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
@@ -70,8 +70,9 @@ export default function BlogCheckPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blog: idxInput.trim() }),
       });
-      const data = await res.json();
+      let data = await res.json();
       if (!res.ok) throw new Error(data.detail || "진단 실패");
+      data = await resolveMaybeAgent(data, { tries: 60, intervalMs: 2500 });
       setIdxResult(data);
       try { addHistory("blog-check", { summary: `블로그 지수 진단 · ${idxInput || ''}` }); } catch (e) {}
     } catch (err) {

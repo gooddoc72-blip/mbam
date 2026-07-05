@@ -33,12 +33,18 @@ class BlogIndexRequest(BaseModel):
 
 
 @router.post("/blog-index", summary="네이버 블로그 지수(추정) 진단 — 개설일/이웃/방문/활성도 기반 0~100 점수")
-async def blog_index_endpoint(request: BlogIndexRequest):
-    """모바일 공개 엔드포인트를 스크래핑해 블로그 지수(추정)·등급·티어·레벨을 산출. (네이버 공식 지수 아님)"""
+async def blog_index_endpoint(request: BlogIndexRequest,
+                              current_user: dict = Depends(get_current_user),
+                              db: Session = Depends(get_db)):
+    """모바일 공개 엔드포인트를 스크래핑해 블로그 지수(추정)·등급·티어·레벨을 산출. (네이버 공식 지수 아님)
+    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트 실행."""
     from mbam_nextgen.services.blog_index import analyze_blog
+    from mbam_nextgen.backend import jobs as jobsvc
     blog = (request.blog or "").strip()
     if not blog:
         raise HTTPException(status_code=400, detail="블로그 ID 또는 URL을 입력하세요.")
+    if jobsvc.is_cloud_mode():
+        return {"mode": "agent", "job_id": jobsvc.enqueue_job(db, current_user.get("sub"), "blog_index", {"blog": blog})}
     try:
         result = await analyze_blog(blog)
     except Exception as e:
@@ -96,17 +102,24 @@ async def delete_saved_blog_index(rec_id: int, db: Session = Depends(get_db), cu
 
 
 @router.post("/analyze-cafe-urls")
-async def analyze_cafe_urls_endpoint(request: CafeUrlsRequest):
+async def analyze_cafe_urls_endpoint(request: CafeUrlsRequest,
+                                     current_user: dict = Depends(get_current_user),
+                                     db: Session = Depends(get_db)):
     """카페 글 URL 권위 분석.
 
     키워드 불필요. 각 카페 URL 의 작성자/카페 권위 데이터(cafe_author_info)
     + 본문 통계를 일괄 추출한다. /api/seo/analyze 와 달리 키워드 기반 SEO
     분석은 수행하지 않는다 (카페글 분석 메뉴 전용).
+    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트 실행.
     """
     if not request.urls:
         raise HTTPException(status_code=400, detail="URL 을 1개 이상 제공해주세요.")
     if len(request.urls) > 5:
         raise HTTPException(status_code=400, detail="한 번에 최대 5개 URL 까지 분석 가능합니다.")
+
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        return {"mode": "agent", "job_id": jobsvc.enqueue_job(db, current_user.get("sub"), "seo_cafe_urls", {"urls": request.urls})}
 
     try:
         results = await analyzer.analyze_multiple_urls(request.urls)
@@ -175,7 +188,11 @@ async def analyze_top3_seo(request: KeywordRequest, current_user: dict = Depends
     """
     신규: 상위 1~3위 블로그를 정밀 분석합니다.
     분석 완료 후 SaaS 운영 내역 DB에 결과를 저장하고 쿼터를 1 차감합니다.
+    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트 실행.
     """
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        return {"mode": "agent", "job_id": jobsvc.enqueue_job(db, current_user.get("sub"), "seo_top3", {"keyword": request.keyword})}
     try:
         result = await analyzer_v2.analyze(request.keyword)
         if not result.get("success"):
@@ -272,13 +289,9 @@ class CafeAnalysisRequest(BaseModel):
     url: str = ""           # 단일 URL (하위호환)
     urls: List[str] = []    # 다중 URL (최대 10) — 서버가 각 본문 자동 추출 후 해부
 
-@router.post("/analyze-cafe-post")
-async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest):
-    """
-    네이버 카페 상위노출 글의 4대 블랙박스 로직 + 작성자 영향력 분석.
-    - urls[](최대 10): 각 URL 본문을 자동 추출해 동시 해부 → {items, errors}
-    - url / content(단일, 하위호환): {success, data}
-    """
+async def run_cafe_post_analysis(request: CafeAnalysisRequest):
+    """네이버 카페/블로그 상위노출 글 4대 블랙박스 해부 (로컬 실행 본체).
+    엔드포인트(local)·에이전트(cloud) 양쪽에서 공용 호출."""
     from mbam_nextgen.services.soul import SoulRewriter
 
     base_keyword = (request.keyword or "").strip()
@@ -355,3 +368,17 @@ async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest):
                 "content_chars": len(content)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"본문 해부 분석 오류: {str(e)}")
+
+
+@router.post("/analyze-cafe-post")
+async def analyze_cafe_post_endpoint(request: CafeAnalysisRequest,
+                                     current_user: dict = Depends(get_current_user),
+                                     db: Session = Depends(get_db)):
+    """[방법 B] cloud 모드면 job 적재 → 로컬 에이전트가 집 IP로 본문 추출·해부."""
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        return {"mode": "agent", "job_id": jobsvc.enqueue_job(db, current_user.get("sub"), "seo_cafe_post", {
+            "keyword": request.keyword, "content": request.content,
+            "url": request.url, "urls": request.urls,
+        })}
+    return await run_cafe_post_analysis(request)

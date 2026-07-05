@@ -20,6 +20,18 @@ from sqlalchemy.orm import Session
 from mbam_nextgen.backend.database import AgentJob
 
 
+# ── DB 동기화(영속화) 훅 ──────────────────────────────────────────────
+# 추적/히스토리 계열 job은 에이전트가 집 IP로 스크래핑한 결과를 반환하고,
+# 여기 등록된 영속화 함수가 그 결과를 클라우드 DB(Postgres)에 기록한다.
+# → 웹의 관심목록/일자별 히스토리 탭이 클라우드에서 그대로 조회 가능.
+#   fn 시그니처: (db, user_id: str, payload: dict, result: dict) -> None
+PERSISTERS = {}
+
+
+def register_persister(job_type: str, fn):
+    PERSISTERS[job_type] = fn
+
+
 def execution_mode() -> str:
     return (os.environ.get("EXECUTION_MODE", "local") or "local").strip().lower()
 
@@ -78,6 +90,18 @@ def complete_job(db: Session, job_id: str, user_id: str, status: str,
     if error:
         job.error = str(error)[:2000]
     job.finished_at = datetime.utcnow()
+
+    # DB 동기화: 완료된 결과를 클라우드 DB에 영속화(등록된 job_type만)
+    if job.status == "done" and result is not None and job.job_type in PERSISTERS:
+        try:
+            payload = json.loads(job.payload) if job.payload else {}
+        except Exception:
+            payload = {}
+        try:
+            PERSISTERS[job.job_type](db, user_id, payload, result)
+        except Exception as e:
+            print(f"[jobs] 영속화 실패({job.job_type}): {e}")
+
     db.commit()
     return True
 
