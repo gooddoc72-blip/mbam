@@ -25,7 +25,8 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def _load_config() -> dict:
     cfg = {
-        "cloud_url": "http://127.0.0.1:8000",
+        # 설치형(구독/웹) 기본값 = 운영 서버. 개발 시 AGENT_CLOUD_URL 로 override.
+        "cloud_url": "https://clever-transformation-production.up.railway.app",
         "email": "",
         "password": "",
         "poll_sec": 3,
@@ -261,6 +262,59 @@ class AgentClient:
             print(f"[agent] 결과 전송 실패: {e}")
 
 
+def _prompt_login(cfg: dict) -> dict:
+    """설정에 계정이 없으면 창을 띄워 marketlabs 계정을 입력받아 agent_config.json 에 저장.
+    (설치형: 설치→부팅→최초 1회 로그인 후 이후 자동)"""
+    try:
+        import tkinter as tk
+    except Exception:
+        return cfg
+    result = {}
+    root = tk.Tk()
+    root.title("마케팅연구소 에이전트 - 로그인")
+    root.resizable(False, False)
+    W, H = 400, 300
+    try:
+        root.update_idletasks()
+        x = (root.winfo_screenwidth() - W) // 2
+        y = (root.winfo_screenheight() - H) // 3
+        root.geometry(f"{W}x{H}+{x}+{y}")
+    except Exception:
+        pass
+    tk.Label(root, text="marketlabs 계정으로 로그인", font=("맑은 고딕", 13, "bold")).pack(pady=(18, 6))
+    tk.Label(root, text="한 번만 로그인하면 이후 자동으로 실행됩니다.", font=("맑은 고딕", 9), fg="#666").pack()
+    frm = tk.Frame(root)
+    frm.pack(padx=24, pady=10, fill="x")
+    tk.Label(frm, text="이메일 / 아이디", anchor="w").pack(fill="x")
+    e_email = tk.Entry(frm); e_email.pack(fill="x", pady=(0, 8)); e_email.insert(0, cfg.get("email", "") or "")
+    tk.Label(frm, text="비밀번호", anchor="w").pack(fill="x")
+    e_pw = tk.Entry(frm, show="*"); e_pw.pack(fill="x", pady=(0, 8))
+    tk.Label(frm, text="서버 주소 (기본값 권장)", anchor="w").pack(fill="x")
+    e_url = tk.Entry(frm); e_url.pack(fill="x"); e_url.insert(0, cfg.get("cloud_url", "") or "")
+
+    def _save():
+        result["email"] = e_email.get().strip()
+        result["password"] = e_pw.get().strip()
+        result["cloud_url"] = (e_url.get().strip() or cfg.get("cloud_url"))
+        root.destroy()
+
+    tk.Button(root, text="로그인 · 저장", command=_save, bg="#2563eb", fg="white",
+              font=("맑은 고딕", 10, "bold")).pack(pady=12)
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
+    root.mainloop()
+
+    if result.get("email") and result.get("password"):
+        cfg.update(result)
+        try:
+            with open(os.path.join(APP_DIR, "agent_config.json"), "w", encoding="utf-8") as f:
+                json.dump({"cloud_url": cfg.get("cloud_url"), "email": cfg["email"],
+                           "password": cfg["password"], "poll_sec": cfg.get("poll_sec", 3)},
+                          f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[agent] 설정 저장 실패: {e}")
+    return cfg
+
+
 def main():
     if sys.platform == "win32":
         try:
@@ -269,7 +323,9 @@ def main():
             pass
     cfg = _load_config()
     if not cfg["email"] or not cfg["password"]:
-        print("[agent] 계정 미설정. AGENT_EMAIL / AGENT_PASSWORD (또는 agent_config.json) 을 지정하세요.")
+        cfg = _prompt_login(cfg)   # 최초 실행: 로그인 창
+    if not cfg["email"] or not cfg["password"]:
+        print("[agent] 계정 미설정. 종료.")
         return
     try:
         asyncio.run(AgentClient(cfg).run())
