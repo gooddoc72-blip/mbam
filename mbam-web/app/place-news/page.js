@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import { fetchWithAuth } from "../utils/api";
+import { fetchWithAuth, resolveMaybeAgent } from "../utils/api";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { PenTool, Video, Calendar, Clock, Image as ImageIcon, Search, CheckCircle2 } from "lucide-react";
@@ -55,7 +55,8 @@ export default function PlaceNewsPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ mid: mid })
             });
-            const data = await res.json();
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 40, intervalMs: 2000 });
             if (data.success && data.name) {
                 setPlaceName(data.name);
                 setPlaceUrl(`https://m.place.naver.com/place/${mid}/home`);
@@ -112,13 +113,14 @@ export default function PlaceNewsPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ place_url: placeUrl })
             });
-            const data = await res.json();
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 90, intervalMs: 3000 });
             if (data.success) {
                 setFetchedReviews(data.reviews);
                 setFetchedImages(data.image_paths);
                 setStep(2);
             } else {
-                alert("리뷰 수집 실패: " + data.error);
+                alert("리뷰 수집 실패: " + (data.error || "알 수 없는 오류"));
             }
         } catch (e) {
             alert("리뷰 수집 중 오류 발생");

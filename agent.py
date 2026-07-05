@@ -94,6 +94,16 @@ async def _handle_place_fetch_mid(payload: dict) -> dict:
     return res
 
 
+async def _handle_place_fetch_reviews(payload: dict) -> dict:
+    from mbam_nextgen.services.place_review_service import PlaceReviewService
+    data = await PlaceReviewService().collect_reviews(payload.get("place_url", ""))
+    if not data.get("success"):
+        raise RuntimeError(data.get("error", "리뷰 수집 실패"))
+    if not data.get("reviews"):
+        raise RuntimeError("최근 리뷰를 찾을 수 없습니다.")
+    return {"success": True, "reviews": data.get("reviews", []), "image_paths": data.get("image_paths", [])}
+
+
 async def _handle_blog_index(payload: dict) -> dict:
     from mbam_nextgen.services.blog_index import analyze_blog
     result = await analyze_blog(payload.get("blog", ""))
@@ -142,6 +152,7 @@ HANDLERS = {
     "blog_index": _handle_blog_index,
     "place_analyze": _handle_place_analyze,
     "place_fetch_mid": _handle_place_fetch_mid,
+    "place_fetch_reviews": _handle_place_fetch_reviews,
 }
 
 
