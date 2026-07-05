@@ -1,16 +1,18 @@
+#define AppVer "1.2"
+
 [Setup]
 AppName=Crawler Pro
-AppVersion=1.0
+AppVersion={#AppVer}
 DefaultDirName={autopf}\CrawlerPro
 DefaultGroupName=Crawler Pro
-OutputBaseFilename=CrawlerPro_Setup
+OutputBaseFilename=CrawlerPro_Setup_v{#AppVer}
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 SetupIconFile=compiler:SetupClassicIcon.ico
 
 [Files]
-Source: "dist\Crawler Pro.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\Crawler Pro\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Crawler Pro"; Filename: "{app}\Crawler Pro.exe"

@@ -10,7 +10,7 @@ class CrawlerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Crawler Pro (USB 테더링 다목적 크롤러)")
+        self.title("Crawler Pro v1.2 (USB 테더링 다목적 크롤러)")
         self.geometry("800x600")
 
         # 좌측 메뉴 프레임
@@ -51,6 +51,9 @@ class CrawlerApp(ctk.CTk):
         
         self.btn_copy_hwid = ctk.CTkButton(self.auth_frame, text="복사", width=40, height=24, command=self.copy_hwid)
         self.btn_copy_hwid.pack(side="left", padx=5, pady=5)
+        
+        self.btn_request_auth = ctk.CTkButton(self.auth_frame, text="승인 요청", width=80, height=24, fg_color="#F4A460", hover_color="#D2691E", command=self.manual_request_auth)
+        # 처음에는 숨겨둠 (미인증 시에만 표시)
         
         self.lbl_auth_status = ctk.CTkLabel(self.auth_frame, text="인증 상태: 확인 중...", font=ctk.CTkFont(weight="bold"))
         self.lbl_auth_status.pack(side="right", padx=10, pady=5)
@@ -103,18 +106,21 @@ class CrawlerApp(ctk.CTk):
     def verify_license(self):
         import auth
         
-        # 먼저 HWID를 UI에 표시
+        # 먼저 HWID를 UI에 표시 (너무 길면 자름)
         hwid = auth.get_hwid()
-        self.lbl_hwid.configure(text=f"기기 번호(HWID): {hwid}")
+        display_hwid = hwid[:20] + "..." if len(hwid) > 20 else hwid
+        self.lbl_hwid.configure(text=f"기기 번호: {display_hwid}")
         
         success, msg, _, status = auth.verify_pc_online()
         if success:
             self.lbl_auth_status.configure(text="인증 완료 ✅", text_color="green")
             self.btn_start.configure(state="normal")
             self.is_authorized = True
+            self.btn_request_auth.pack_forget()
             self.log("라이선스 인증이 완료되었습니다. 크롤링을 시작할 수 있습니다.")
         else:
             self.lbl_auth_status.configure(text="미인증 기기 ❌", text_color="red")
+            self.btn_request_auth.pack(side="left", padx=5, pady=5)
             self.log(f"라이선스 인증 실패: {msg}")
             if status == "unregistered":
                 self.log(f"신규 기기입니다. [승인 요청] 팝업에서 관리자에게 승인을 요청해 주세요.")
@@ -124,7 +130,12 @@ class CrawlerApp(ctk.CTk):
             elif status == "blocked":
                 self.log(f"이 기기는 차단되었습니다.")
             else:
-                self.log(f"관리자에게 위의 [기기 번호]를 전달하여 사용 승인을 요청하세요.")
+                self.log(f"관리자에게 위의 [기기 번호]를 전달하거나 [승인 요청] 버튼을 눌러 승인을 요청하세요.")
+
+    def manual_request_auth(self):
+        import auth
+        hwid = auth.get_hwid()
+        self.show_approval_popup(hwid)
 
     def show_approval_popup(self, hwid):
         import auth

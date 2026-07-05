@@ -1,5 +1,7 @@
 import os
 import time
+import glob
+import socket
 import pandas as pd
 import re
 import undetected_chromedriver as uc
@@ -7,7 +9,56 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.driver_cache import DriverCacheManager
 from history_manager import HistoryManager
+
+
+def _find_cached_chromedriver():
+    """이전에 받아둔 chromedriver 실행파일을 로컬 캐시(~/.wdm)에서 찾는다."""
+    pattern = os.path.join(
+        os.path.expanduser("~"), ".wdm", "drivers", "chromedriver",
+        "**", "chromedriver*",
+    )
+    candidates = [
+        p for p in glob.glob(pattern, recursive=True)
+        if p.lower().endswith("chromedriver.exe") or os.path.basename(p) == "chromedriver"
+    ]
+    # 최신 버전 폴더가 가장 마지막에 오도록 정렬
+    candidates.sort()
+    return candidates[-1] if candidates else None
+
+
+def resolve_driver_path(log=print):
+    """크롬 드라이버 경로를 확보한다.
+
+    최초 1회는 네트워크가 필요하지만, 이후에는 캐시를 우선 사용해
+    googlechromelabs.github.io 접속 없이 동작하도록 만든다.
+    네트워크 실패 시에는 이전에 받아둔 캐시 드라이버로 폴백한다.
+    """
+    # 캐시된 드라이버를 최대 365일간 유효한 것으로 간주 → 매번 최신 버전 확인(네트워크) 안 함
+    cache_manager = DriverCacheManager(valid_range=365)
+
+    prev_timeout = socket.getdefaulttimeout()
+    for attempt in range(1, 4):
+        try:
+            # 무한 대기(read timeout=None) 방지: 최초 다운로드는 빠르게 실패하고 재시도
+            socket.setdefaulttimeout(30)
+            return ChromeDriverManager(cache_manager=cache_manager).install()
+        except Exception as e:
+            log(f"크롬 드라이버 준비 재시도 {attempt}/3 중... ({e})")
+            time.sleep(2)
+        finally:
+            socket.setdefaulttimeout(prev_timeout)
+
+    # 네트워크로 받지 못했으면 이전에 받아둔 캐시 드라이버로 폴백
+    cached = _find_cached_chromedriver()
+    if cached:
+        log("네트워크 연결에 실패하여, 이전에 받아둔 드라이버로 실행합니다.")
+        return cached
+
+    # 캐시도 없으면 uc 내장 다운로더에 맡긴다(경로 None)
+    log("드라이버 자동 준비에 실패했습니다. 내장 다운로더로 시도합니다. (인터넷 연결을 확인하세요)")
+    return None
 class CrawlerEngine:
     def __init__(self, log_callback=None):
         self.log = log_callback if log_callback else print
@@ -30,9 +81,9 @@ class CrawlerEngine:
             options = uc.ChromeOptions()
             options.add_argument('--window-size=1920,1080')
             options.add_argument('--start-maximized')
-            # webdriver-manager를 이용해 현재 크롬 버전에 완벽히 맞는 드라이버를 직접 다운로드
-            driver_path = ChromeDriverManager().install()
-            
+            # 드라이버 확보(캐시 우선 + 재시도 + 오프라인 폴백)
+            driver_path = resolve_driver_path(self.log)
+
             # 다운로드된 올바른 드라이버 경로를 undetected-chromedriver에 주입 (강제 패치)
             # 쿠팡에서도 동일하게 적용
             self.driver = uc.Chrome(options=options, driver_executable_path=driver_path, use_subprocess=False)
@@ -441,7 +492,7 @@ class CrawlerEngine:
             options.add_argument('--start-maximized')
             options.add_argument('--accept-lang=ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7')
             
-            driver_path = ChromeDriverManager().install()
+            driver_path = resolve_driver_path(self.log)
             self.driver = uc.Chrome(options=options, driver_executable_path=driver_path)
             
             wait = WebDriverWait(self.driver, 10)
@@ -749,13 +800,51 @@ class CrawlerEngine:
                 self.driver = None
             self.is_running = False
 
+    def _get_desktop_dir(self):
+        """실제 바탕화면 폴더를 찾는다.
+
+        OneDrive 백업이 켜진 PC는 바탕화면이 ~/OneDrive/바탕 화면 등으로 옮겨져
+        ~/Desktop 이 존재하지 않을 수 있으므로 여러 후보를 검사한다.
+        """
+        home = os.path.expanduser("~")
+        candidates = [
+            os.path.join(home, "Desktop"),
+            os.path.join(home, "OneDrive", "Desktop"),
+            os.path.join(home, "OneDrive", "바탕 화면"),
+            os.path.join(home, "바탕 화면"),
+        ]
+        onedrive = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer")
+        if onedrive:
+            candidates.insert(0, os.path.join(onedrive, "Desktop"))
+            candidates.insert(1, os.path.join(onedrive, "바탕 화면"))
+
+        for path in candidates:
+            if os.path.isdir(path):
+                return path
+        # 어떤 후보도 없으면 홈 폴더에 저장(최소한 실패는 않도록)
+        return home
+
     def save_excel(self, filename):
         try:
+            if not self.results:
+                self.log("저장할 수집 데이터가 없어 엑셀 파일을 만들지 않았습니다.")
+                return
+
             df = pd.DataFrame(self.results)
-            # macOS 권한 문제(Error 30) 방지를 위해 무조건 바탕화면에 저장
-            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+            desktop_path = self._get_desktop_dir()
             save_path = os.path.join(desktop_path, filename)
-            df.to_excel(save_path, index=False)
-            self.log(f"데이터 엑셀 저장 완료: 바탕화면 -> {filename}")
+
+            try:
+                df.to_excel(save_path, index=False)
+            except PermissionError:
+                # 같은 파일을 Excel로 열어둔 경우 → 시간표시된 다른 이름으로 저장
+                base, ext = os.path.splitext(filename)
+                alt_name = f"{base}_{time.strftime('%Y%m%d_%H%M%S')}{ext}"
+                save_path = os.path.join(desktop_path, alt_name)
+                df.to_excel(save_path, index=False)
+                self.log("기존 파일이 열려 있어 새 이름으로 저장했습니다. (열려 있는 엑셀을 닫아주세요)")
+
+            self.log(f"데이터 엑셀 저장 완료: {save_path}")
         except Exception as e:
             self.log(f"엑셀 저장 실패: {e}")
+            self.log("(엑셀 파일이 열려 있거나 저장 폴더 접근 권한을 확인해주세요)")
