@@ -47,7 +47,7 @@ const MENU_ITEMS = [
         submenus: [
             { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
             { name: "카페 포스팅", path: "/cafe-auto", icon: PenTool },
-            { name: "이미지 세탁소", path: "/image-wash", icon: Image }
+            { name: "이미지 세탁소", path: "/cafe-image-wash", icon: Image }
         ]
     },
     {
@@ -81,7 +81,7 @@ const MENU_ITEMS = [
         submenus: [
             { name: "글감수집", path: "/content-collect", icon: FileText },
             { name: "원고관리", path: "/manuscript", icon: ScrollText },
-            { name: "이미지 세탁소", path: "/image-wash", icon: Image }
+            { name: "이미지 세탁소", path: "/content-image-wash", icon: Image }
         ]
     },
     { name: "계정관리", path: "/multi-task", icon: Layers },
