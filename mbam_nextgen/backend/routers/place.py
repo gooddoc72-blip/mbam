@@ -785,16 +785,13 @@ class GenerateWithThemeRequest(BaseModel):
     theme: str
 
 @router.post("/news/fetch-reviews")
-async def fetch_place_reviews_api(req: FetchReviewsRequest,
-                                  current_user: dict = Depends(get_current_user),
-                                  db: Session = Depends(get_db)):
+async def fetch_place_reviews_api(req: FetchReviewsRequest):
     """
-    Step 1: 1주일치 리뷰 및 사진 크롤링만 수행하여 반환
-    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트가 집 IP로 수집.
+    Step 1: 1주일치 리뷰 및 사진 크롤링만 수행하여 반환.
+    참고: 리뷰는 모바일 API 기반이라 클라우드에서도 수집 가능하고, 수집 이미지를
+    다음 단계(원고/클립 생성)가 같은 서버에서 써야 하므로 에이전트로 넘기지 않는다.
+    (place-news 전체 파이프라인 에이전트화는 P3 자동화에서 일괄 처리)
     """
-    from mbam_nextgen.backend import jobs as jobsvc
-    if jobsvc.is_cloud_mode():
-        return {"mode": "agent", "job_id": jobsvc.enqueue_job(db, current_user.get("sub"), "place_fetch_reviews", {"place_url": req.place_url})}
     try:
         from mbam_nextgen.services.place_review_service import PlaceReviewService
         pr_service = PlaceReviewService()
