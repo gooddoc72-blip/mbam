@@ -250,7 +250,7 @@ export default function PlaceSeoDashboard() {
 
   return (
     <>
-    <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
+    <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", minHeight: "100vh" }}>
       <header style={{ marginBottom: "0.5rem" }}>
         <h1 style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#1e293b", margin: 0 }}>
           플레이스 400위 순위 및 N지수 비교분석
