@@ -707,6 +707,27 @@ def get_tracked_places(current_user: dict = Depends(get_current_user),
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+class UntrackRequest(BaseModel):
+    mid: str
+    keyword: str
+
+@router.post("/untrack")
+def untrack_place(req: UntrackRequest,
+                  current_user: dict = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    """관심 매장에서 제거(유저별)."""
+    from mbam_nextgen.backend.database import PlaceTracked
+    try:
+        uid = current_user.get("sub")
+        n = (db.query(PlaceTracked)
+             .filter_by(user_id=uid, mid=req.mid.strip(), keyword=req.keyword.strip())
+             .delete())
+        db.commit()
+        return {"success": True, "deleted": n}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+
 @router.post("/history")
 def get_place_history(req: HistoryRequest,
                       current_user: dict = Depends(get_current_user),

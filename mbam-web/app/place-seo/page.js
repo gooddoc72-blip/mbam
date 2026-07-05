@@ -130,6 +130,25 @@ export default function PlaceSeoDashboard() {
     throw new Error("에이전트 응답 시간 초과입니다. 내 PC의 로컬 프로그램(에이전트)이 실행 중인지 확인해 주세요.");
   };
 
+  const handleUntrack = async (tp) => {
+    if (!confirm(`'${tp.name || tp.keyword}'을(를) 관심목록에서 삭제할까요?`)) return;
+    try {
+      const res = await fetchWithAuth("/api/place/untrack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mid: tp.mid, keyword: tp.keyword }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTrackedPlaces(prev => prev.filter(x => !(x.mid === tp.mid && x.keyword === tp.keyword)));
+      } else {
+        alert("삭제 실패: " + (data.error || "알 수 없는 오류"));
+      }
+    } catch (e) {
+      alert("삭제 중 오류 발생");
+    }
+  };
+
   const handleAnalyze = async (e) => {
     e.preventDefault();
     if (!keyword.trim() || !targetMid.trim()) {
@@ -249,13 +268,16 @@ export default function PlaceSeoDashboard() {
             ) : (
               <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                 {trackedPlaces.map((tp, i) => (
-                  <li 
-                    key={i} 
-                    onClick={() => handleTrackedClick(tp)}
-                    style={{ padding: "0.8rem", borderBottom: "1px solid #e2e8f0", cursor: "pointer", fontSize: "0.9rem", color: "#334155", background: "#f8fafc", marginBottom: "0.5rem" }}
+                  <li
+                    key={i}
+                    style={{ padding: "0.8rem", borderBottom: "1px solid #e2e8f0", fontSize: "0.9rem", color: "#334155", background: "#f8fafc", marginBottom: "0.5rem", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem" }}
                   >
-                    <div style={{ fontWeight: "bold", color: "#1e293b" }}>{tp.name || "이름없음"}</div>
-                    <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.2rem" }}>{tp.keyword}</div>
+                    <div onClick={() => handleTrackedClick(tp)} style={{ cursor: "pointer", flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: "bold", color: "#1e293b" }}>{tp.name || "이름없음"}</div>
+                      <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.2rem" }}>{tp.keyword}</div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); handleUntrack(tp); }} title="관심목록에서 삭제"
+                      style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0.2rem", flexShrink: 0 }}>✕</button>
                   </li>
                 ))}
               </ul>
