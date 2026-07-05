@@ -12,7 +12,7 @@ function BlogPostingContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const isHospital = pathname === "/hospital-blog";  // 병원 블로그 전용 메뉴로 진입 시 병원 카테고리 고정
-  const [generateCardNews, setGenerateCardNews] = useState(true);
+  const [generateCardNews, setGenerateCardNews] = useState(isHospital ? false : true);  // 병원: 카드뉴스 대신 나노바나나 AI 이미지
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
   const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
@@ -88,7 +88,7 @@ function BlogPostingContent() {
   const [extractUrlImages, setExtractUrlImages] = useState(false);
   const [descImageFiles, setDescImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [aiProvider, setAiProvider] = useState("claude");
-  const [postPurpose, setPostPurpose] = useState("review");
+  const [postPurpose, setPostPurpose] = useState(isHospital ? "info" : "review");  // 병원: 진료일기(정보성) 고정
   const [promoType, setPromoType] = useState(isHospital ? "hospital" : "product");
   const [distributionMode, setDistributionMode] = useState("normal");
   const [referenceData, setReferenceData] = useState(null);
@@ -803,6 +803,12 @@ function BlogPostingContent() {
             <p style={{ fontSize: "0.8rem", color: "#64748b", margin: "0.5rem 0 0 0" }}>* 등록한 이미지를 <b>계정마다 자동 세탁(서로 다른 버전)</b>해서 발행합니다. (계정당 최대 3장 사용)</p>
           </div>
 
+          {isHospital ? (
+            <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#fef9c3", borderRadius: "8px", border: "1px solid #fde68a" }}>
+              <div style={{ fontWeight: "bold", color: "#92400e" }}>🍌 나노바나나 AI 이미지 자동 생성·삽입</div>
+              <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.85rem", color: "#a16207" }}>* 업로드 이미지가 없으면 진료일기에 맞는 의료 이미지(썸네일·해부학·관리법·상담·마무리)를 AI가 자동 생성해 삽입합니다. (카드뉴스 미사용)</p>
+            </div>
+          ) : (
           <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#ecfdf5", borderRadius: "8px", border: "1px solid #a7f3d0" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: "#065f46" }}>
               <input type="checkbox" checked={generateCardNews} onChange={e => setGenerateCardNews(e.target.checked)} style={{ transform: "scale(1.2)" }} />
@@ -810,6 +816,7 @@ function BlogPostingContent() {
             </label>
             <p style={{ margin: "0.5rem 0 0 1.5rem", fontSize: "0.85rem", color: "#047857" }}>* 백엔드의 AI 이미지 생성기를 호출하여 원고 내용에 맞는 정보성 카드뉴스를 생성한 후 포스팅에 첨부합니다.</p>
           </div>
+          )}
 
           {/* 지도(장소) 삽입 */}
           <div style={{ marginTop: "1.5rem", padding: "1rem", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
@@ -875,12 +882,14 @@ function BlogPostingContent() {
                 </div>
               </div>
               <div style={{ flex: 1 }}>
+                {!isHospital && (<>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (선택)</label>
                 <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
                   <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
                   ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
                 </label>
+                </>)}
 
                 <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
                   <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
@@ -910,6 +919,12 @@ function BlogPostingContent() {
               </div>
             )}
               <>
+                {isHospital ? (
+                  <div style={{ padding: "1rem", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px" }}>
+                    <div style={{ fontWeight: "bold", color: "#1e40af" }}>🏥 진료일기 형식 · 병원운영 (자동)</div>
+                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.85rem", color: "#3b82f6" }}>병원 블로그는 리뷰가 아닌 <strong>진료일기(정보성)</strong> 형식으로 의료법 준수 원고를 자동 작성합니다.</p>
+                  </div>
+                ) : (<>
                 <div>
                   <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>포스팅 목적</label>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
@@ -961,8 +976,10 @@ function BlogPostingContent() {
                     </div>
                   </div>
                 </div>
+                </>)}
               </>
 
+            {!isHospital && (
             <div>
               <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>배포 방식</label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
@@ -978,7 +995,8 @@ function BlogPostingContent() {
                 </div>
               </div>
             </div>
-            
+            )}
+
             <button onClick={handleGenerateContent} disabled={isGenerating} style={{ padding: "1rem", background: "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", borderRadius: "6px", cursor: isGenerating ? "wait" : "pointer", marginTop: "1rem" }}>
               {isGenerating ? "AI가 각 계정별 원고를 창작 중입니다..." : "AI 다중 원고 자동 생성하기"}
             </button>
