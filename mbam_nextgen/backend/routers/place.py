@@ -840,7 +840,7 @@ async def generate_with_theme_api(req: GenerateWithThemeRequest, _q: dict = Depe
         from mbam_nextgen.backend.database import SessionLocal, PlaceNewsHistory
         db = SessionLocal()
         history = PlaceNewsHistory(
-            schedule_id="manual",
+            schedule_id=None,  # 수동 생성(스케줄 아님). Postgres FK 위반 방지 — "manual"은 실제 스케줄이 아님
             generated_text=f"[{req.theme}]\n제목: {ai_result.get('title')}\n\n{ai_result.get('content')}",
             clip_path=clip_path,
             status="pending"
@@ -902,7 +902,7 @@ async def generate_place_news_api(req: PlaceNewsGenerateRequest, _q: dict = Depe
         db = SessionLocal()
         # Create a dummy or standalone history record
         history = PlaceNewsHistory(
-            schedule_id="manual",
+            schedule_id=None,  # 수동 생성(스케줄 아님). Postgres FK 위반 방지 — "manual"은 실제 스케줄이 아님
             generated_text=f"제목: {ai_result.get('title')}\n\n{ai_result.get('content')}",
             clip_path=clip_path,
             status="pending"

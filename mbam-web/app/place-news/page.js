@@ -150,7 +150,7 @@ export default function PlaceNewsPage() {
                 setStep(1); // 초기화
                 fetchData();
             } else {
-                alert("생성 실패: " + data.error);
+                alert("생성 실패: " + (data.detail || data.error || "알 수 없는 오류"));
             }
         } catch (e) {
             alert("생성 중 오류 발생: " + e.message);
