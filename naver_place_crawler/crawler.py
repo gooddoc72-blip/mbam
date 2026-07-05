@@ -482,106 +482,104 @@ class CrawlerEngine:
         self.log("네이버 쇼핑 판매자 크롤링 로직은 추후 확장이 가능하도록 뼈대만 잡아두었습니다.")
         pass
 
-    def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None):
+    def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None, rounds=1):
         self.is_running = True
         self.results = resume_checkpoint.get("results", []) if resume_checkpoint else []
-        
+
+        try:
+            rounds = int(rounds)
+        except (TypeError, ValueError):
+            rounds = 1
+        if rounds < 1:
+            rounds = 1
+
+        from checkpoint_manager import CheckpointManager
+
         try:
             options = uc.ChromeOptions()
             options.add_argument('--window-size=1920,1080')
             options.add_argument('--start-maximized')
             options.add_argument('--accept-lang=ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7')
-            
+
             driver_path = resolve_driver_path(self.log)
             self.driver = uc.Chrome(options=options, driver_executable_path=driver_path)
-            
+
             wait = WebDriverWait(self.driver, 10)
 
             for idx, keyword in enumerate(keywords):
                 if not self.is_running:
                     return
-                    
+
                 # 작업 인덱스 저장
-                from checkpoint_manager import CheckpointManager
                 CheckpointManager.save_checkpoint("coupang", keywords, idx, position=1, results=self.results)
-                    
+
                 if use_ip_change and idx > 0:
                     self.log(f"[{keyword}] 검색 전 IP 변경 시도...")
                     import ip_changer
                     ip_changer.toggle_airplane_mode()
                     self.log("IP 변경 완료.")
 
+                # 페이지 커서: 회차가 바뀌어도 초기화하지 않고 멈춘 지점에서 계속 이어간다.
+                page = 1
+                if resume_checkpoint and idx == 0:
+                    page = resume_checkpoint.get("position", 1)
+                    if page > 1:
+                        self.log(f"[{keyword}] 이전 작업에서 멈춘 위치로 직행합니다. ({page}페이지부터 재개)")
+
                 try:
-                    products = []
-                    page = 1
-                    if resume_checkpoint and idx == 0:
-                        page = resume_checkpoint.get("position", 1)
-                        if page > 1:
-                            self.log(f"[{keyword}] 이전 작업에서 멈춘 위치로 직행합니다. ({page}페이지부터 재개)")
-                    while len(products) < 50 and page <= 10:
+                    for round_num in range(1, rounds + 1):
                         if not self.is_running:
-                            from checkpoint_manager import CheckpointManager
                             self.log(f"[{keyword}] 수집 중지됨. 현재 위치({page}페이지)를 저장합니다.")
                             CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
                             return
-                        if page == 1:
-                            self.log(f"[{keyword}] 로봇 탐지 방어를 위해 사람처럼 검색창에 타이핑을 시도합니다...")
-                            import random
-                            from selenium.webdriver.common.keys import Keys
-                            
-                            self.driver.get("https://www.coupang.com/")
-                            time.sleep(2)
-                            try:
-                                search_box = wait.until(EC.presence_of_element_located((By.ID, "headerSearchKeyword")))
-                                search_box.clear()
-                                for char in keyword:
-                                    search_box.send_keys(char)
-                                    time.sleep(random.uniform(0.1, 0.2))
-                                time.sleep(0.5)
-                                search_box.send_keys(Keys.ENTER)
-                                time.sleep(3)
-                            except Exception as e:
-                                self.log(f"검색창 입력 실패, 기존 주소창 방식으로 우회합니다: {e}")
+
+                        self.log(f"===== [{keyword}] {round_num}/{rounds}회차 수집 시작 ({page}페이지부터) =====")
+                        products = []
+                        round_start_len = len(self.results)
+
+                        while len(products) < 50 and page <= 10:
+                            if not self.is_running:
+                                self.log(f"[{keyword}] 수집 중지됨. 현재 위치({page}페이지)를 저장합니다.")
+                                CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
+                                return
+                            if page == 1:
+                                self.log(f"[{keyword}] 로봇 탐지 방어를 위해 사람처럼 검색창에 타이핑을 시도합니다...")
+                                import random
+                                from selenium.webdriver.common.keys import Keys
+
+                                self.driver.get("https://www.coupang.com/")
+                                time.sleep(2)
+                                try:
+                                    search_box = wait.until(EC.presence_of_element_located((By.ID, "headerSearchKeyword")))
+                                    search_box.clear()
+                                    for char in keyword:
+                                        search_box.send_keys(char)
+                                        time.sleep(random.uniform(0.1, 0.2))
+                                    time.sleep(0.5)
+                                    search_box.send_keys(Keys.ENTER)
+                                    time.sleep(3)
+                                except Exception as e:
+                                    self.log(f"검색창 입력 실패, 기존 주소창 방식으로 우회합니다: {e}")
+                                    self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
+                                    time.sleep(3)
+                            else:
+                                self.log(f"[{keyword}] 쿠팡 {page}페이지 상품 검색 시작...")
                                 self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
                                 time.sleep(3)
-                        else:
-                            self.log(f"[{keyword}] 쿠팡 {page}페이지 상품 검색 시작...")
-                            self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
-                            time.sleep(3) 
-                        
-                        # IP 차단 및 CAPTCHA 감지
-                        current_url = self.driver.current_url
-                        page_source = self.driver.page_source
-                        if "captcha" in current_url.lower() or "login" in current_url.lower() or "Access Denied" in page_source:
-                            self.log("⚠️ 쿠팡에 의해 IP 차단 또는 보안 절차(CAPTCHA)가 감지되었습니다. 작업을 중단하고 현재 시점을 저장합니다.")
-                            from checkpoint_manager import CheckpointManager
-                            CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
-                            self.is_running = False
-                            return
-                    
-                        # 상품 목록 추출 (기존 DOM과 신규 Next.js DOM 모두 지원, BeautifulSoup 활용)
-                        import bs4
-                        soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
-                    
-                        items = soup.select("li.search-product")
-                        if not items:
-                            items = soup.select("li[class*='ProductUnit']")
-                        if not items:
-                            a_tags = soup.select("a[href*='/vp/products/']")
-                            if a_tags:
-                                items = []
-                                for a in a_tags:
-                                    parent = a.find_parent('li')
-                                    if parent and parent not in items:
-                                        items.append(parent)
 
-                        if not items:
-                            self.log(f"[{keyword}] 검색 결과가 없거나 차단되었습니다. 5초 후 재시도합니다...")
-                            time.sleep(5)
-                            self.driver.refresh()
-                            time.sleep(5)
-                        
+                            # IP 차단 및 CAPTCHA 감지
+                            current_url = self.driver.current_url
+                            page_source = self.driver.page_source
+                            if "captcha" in current_url.lower() or "login" in current_url.lower() or "Access Denied" in page_source:
+                                self.log("⚠️ 쿠팡에 의해 IP 차단 또는 보안 절차(CAPTCHA)가 감지되었습니다. 작업을 중단하고 현재 시점을 저장합니다.")
+                                CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
+                                self.is_running = False
+                                return
+
+                            # 상품 목록 추출 (기존 DOM과 신규 Next.js DOM 모두 지원, BeautifulSoup 활용)
+                            import bs4
                             soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
+
                             items = soup.select("li.search-product")
                             if not items:
                                 items = soup.select("li[class*='ProductUnit']")
@@ -593,143 +591,165 @@ class CrawlerEngine:
                                         parent = a.find_parent('li')
                                         if parent and parent not in items:
                                             items.append(parent)
-                        
-                        self.log(f"[{keyword}] {page}페이지에서 {len(items)}개의 상품을 찾았습니다.")
-                    
-                        new_found = 0
-                        for item in items:
-                            if not self.is_running: break
-                            try:
-                                # 상품명 (신/구 DOM 호환)
-                                name_elem = item.select("div.name, div[class*='ProductUnit_productName']")
-                                if not name_elem: continue
-                                p_name = name_elem[0].get_text(strip=True)
-                            
-                                # 로켓배송 여부 (텍스트나 이미지 src에 rocket 포함)
-                                is_rocket = "X"
-                                if item.select("img.badge.rocket, span.badge.rocket, span.badge.roket"):
-                                    is_rocket = "O"
-                                else:
-                                    html_text = str(item).lower()
-                                    if 'rocket' in html_text or '로켓배송' in html_text or '로켓그로스' in html_text:
-                                        is_rocket = "O"
-                            
-                                # 평점
-                                rating_elem = item.select("em.rating")
-                                rating = rating_elem[0].get_text(strip=True) if rating_elem else "N/A"
-                                if rating == "N/A":
-                                    # 신규 DOM
-                                    aria_elems = item.select("div[aria-label]")
-                                    for a_el in aria_elems:
-                                        lbl = a_el.get("aria-label", "")
-                                        if lbl and lbl.replace('.', '', 1).isdigit():
-                                            rating = lbl
-                                            break
-                            
-                                # 리뷰수
-                                review_elem = item.select("span.rating-total-count")
-                                review_count = "N/A"
-                                if review_elem:
-                                    review_count = review_elem[0].get_text(strip=True).replace("(", "").replace(")", "")
-                                else:
-                                    # 신규 DOM: 괄호 안의 숫자 찾기
-                                    match = re.search(r'\((\d+)\)', item.get_text())
-                                    if match:
-                                        review_count = match.group(1)
-                            
-                                # 상품 링크
-                                link_elem = item.select("a.search-product-link, a[href*='/vp/products/']")
-                                if not link_elem: continue
-                                p_link = link_elem[0].get("href", "")
-                                if p_link and not p_link.startswith("http"):
-                                    p_link = "https://www.coupang.com" + p_link
-                                
-                                import urllib.parse as urlparse
-                                parsed = urlparse.urlparse(p_link)
-                                qs = urlparse.parse_qs(parsed.query)
-                                clean_query = []
-                                if 'itemId' in qs: clean_query.append('itemId=' + qs['itemId'][0])
-                                if 'vendorItemId' in qs: clean_query.append('vendorItemId=' + qs['vendorItemId'][0])
-                                clean_p_link = f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{'&'.join(clean_query)}"
-                                
-                                # 이력 매니저 중복 검사
-                                if self.history_manager.is_collected(clean_p_link):
-                                    continue
-                                
-                                new_found += 1
-                            
-                                products.append({
-                                    "키워드": keyword,
-                                    "수집시간": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "상품명": p_name,
-                                    "로켓배송여부": is_rocket,
-                                    "평점": rating,
-                                    "리뷰수": review_count,
-                                    "판매자명": "N/A",
-                                    "판매자 연락처": "N/A",
-                                    "주소": "N/A",
-                                    "이메일": "N/A",
-                                    "사업자번호": "N/A",
-                                    "상품URL": clean_p_link
-                                })
-                            
-                                if len(products) >= 50:
-                                    break
-                            
-                            except Exception as e:
-                                pass
-                            
-                            if not self.is_running: break
-                    
-                        if len(products) >= 50:
-                            break
-                        if not items:
-                            break # 더 이상 상품이 없으면 종료
-                        page += 1
-                        
 
-                    self.log(f"[{keyword}] 새로운 상품 총 {len(products)}개의 상세 수집을 시작합니다.")
-                
-                    for i, prod in enumerate(products):
+                            if not items:
+                                self.log(f"[{keyword}] 검색 결과가 없거나 차단되었습니다. 5초 후 재시도합니다...")
+                                time.sleep(5)
+                                self.driver.refresh()
+                                time.sleep(5)
+
+                                soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
+                                items = soup.select("li.search-product")
+                                if not items:
+                                    items = soup.select("li[class*='ProductUnit']")
+                                if not items:
+                                    a_tags = soup.select("a[href*='/vp/products/']")
+                                    if a_tags:
+                                        items = []
+                                        for a in a_tags:
+                                            parent = a.find_parent('li')
+                                            if parent and parent not in items:
+                                                items.append(parent)
+
+                            self.log(f"[{keyword}] {page}페이지에서 {len(items)}개의 상품을 찾았습니다.")
+
+                            new_found = 0
+                            for item in items:
+                                if not self.is_running: break
+                                try:
+                                    # 상품명 (신/구 DOM 호환)
+                                    name_elem = item.select("div.name, div[class*='ProductUnit_productName']")
+                                    if not name_elem: continue
+                                    p_name = name_elem[0].get_text(strip=True)
+
+                                    # 로켓배송 여부 (텍스트나 이미지 src에 rocket 포함)
+                                    is_rocket = "X"
+                                    if item.select("img.badge.rocket, span.badge.rocket, span.badge.roket"):
+                                        is_rocket = "O"
+                                    else:
+                                        html_text = str(item).lower()
+                                        if 'rocket' in html_text or '로켓배송' in html_text or '로켓그로스' in html_text:
+                                            is_rocket = "O"
+
+                                    # 평점
+                                    rating_elem = item.select("em.rating")
+                                    rating = rating_elem[0].get_text(strip=True) if rating_elem else "N/A"
+                                    if rating == "N/A":
+                                        # 신규 DOM
+                                        aria_elems = item.select("div[aria-label]")
+                                        for a_el in aria_elems:
+                                            lbl = a_el.get("aria-label", "")
+                                            if lbl and lbl.replace('.', '', 1).isdigit():
+                                                rating = lbl
+                                                break
+
+                                    # 리뷰수
+                                    review_elem = item.select("span.rating-total-count")
+                                    review_count = "N/A"
+                                    if review_elem:
+                                        review_count = review_elem[0].get_text(strip=True).replace("(", "").replace(")", "")
+                                    else:
+                                        # 신규 DOM: 괄호 안의 숫자 찾기
+                                        match = re.search(r'\((\d+)\)', item.get_text())
+                                        if match:
+                                            review_count = match.group(1)
+
+                                    # 상품 링크
+                                    link_elem = item.select("a.search-product-link, a[href*='/vp/products/']")
+                                    if not link_elem: continue
+                                    p_link = link_elem[0].get("href", "")
+                                    if p_link and not p_link.startswith("http"):
+                                        p_link = "https://www.coupang.com" + p_link
+
+                                    import urllib.parse as urlparse
+                                    parsed = urlparse.urlparse(p_link)
+                                    qs = urlparse.parse_qs(parsed.query)
+                                    clean_query = []
+                                    if 'itemId' in qs: clean_query.append('itemId=' + qs['itemId'][0])
+                                    if 'vendorItemId' in qs: clean_query.append('vendorItemId=' + qs['vendorItemId'][0])
+                                    clean_p_link = f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{'&'.join(clean_query)}"
+
+                                    # 이력 매니저 중복 검사 (이미 수집한 상품은 건너뛰어 회차가 이어지도록 함)
+                                    if self.history_manager.is_collected(clean_p_link):
+                                        continue
+
+                                    new_found += 1
+
+                                    products.append({
+                                        "키워드": keyword,
+                                        "수집시간": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "상품명": p_name,
+                                        "로켓배송여부": is_rocket,
+                                        "평점": rating,
+                                        "리뷰수": review_count,
+                                        "판매자명": "N/A",
+                                        "판매자 연락처": "N/A",
+                                        "주소": "N/A",
+                                        "이메일": "N/A",
+                                        "사업자번호": "N/A",
+                                        "상품URL": clean_p_link
+                                    })
+
+                                    if len(products) >= 50:
+                                        break
+
+                                except Exception as e:
+                                    pass
+
+                                if not self.is_running: break
+
+                            if len(products) >= 50:
+                                break
+                            if not items:
+                                break  # 더 이상 상품이 없으면 종료
+                            page += 1
+
+                        if not products:
+                            self.log(f"[{keyword}] {round_num}회차: 더 이상 수집할 새 상품이 없습니다. 이 키워드를 종료합니다.")
+                            break
+
+                        self.log(f"[{keyword}] {round_num}회차 - 새로운 상품 총 {len(products)}개의 상세 수집을 시작합니다.")
+
+                        for i, prod in enumerate(products):
                             if not self.is_running: break
-                        
+
                             # 자동 IP 변경 (IP 차단 방지)
                             if use_ip_change and i > 0 and i % 20 == 0:
                                 self.log("안전한 수집을 위해 IP를 변경합니다... (USB 테더링)")
                                 import ip_changer
                                 ip_changer.toggle_airplane_mode()
                                 time.sleep(5)
-                            
+
                             self.log(f"[{keyword}] {i+1}/{len(products)} 상품 상세 정보 수집 중...")
-                        
+
                             seller_name = "N/A"
                             seller_contact = "N/A"
                             seller_address = "N/A"
                             seller_email = "N/A"
                             seller_bizno = "N/A"
-                        
+
                             try:
                                 # 봇 차단 방지를 위한 랜덤 딜레이
                                 import random
                                 time.sleep(random.uniform(1.5, 3.5))
-                            
+
                                 self.driver.get(prod["상품URL"])
-                            
+
                                 # 페이지 로드 후 자연스러운 스크롤
                                 time.sleep(random.uniform(1.0, 2.0))
                                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                                 time.sleep(random.uniform(0.5, 1.0))
-                            
+
                                 # Access Denied 처리 방어 (단순 확인용)
                                 if "Access Denied" in self.driver.title or "edgesuite" in self.driver.page_source:
                                     self.log("  [경고] 쿠팡 접근 차단됨(Access Denied). 10초 대기 후 새로고침 시도...")
                                     time.sleep(10)
                                     self.driver.refresh()
                                     time.sleep(5)
-                                
+
                                 import bs4
                                 detail_soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
-                            
+
                                 for th in detail_soup.find_all('th'):
                                     th_text = th.get_text(strip=True).replace(" ", "").lower()
                                     td = th.find_next_sibling('td')
@@ -745,7 +765,7 @@ class CrawlerEngine:
                                             seller_contact = td_text
                                         elif "사업자번호" in th_text or "사업자등록번호" in th_text:
                                             seller_bizno = td_text
-                                        
+
                                 if seller_name == "N/A":
                                     seller_info_div = detail_soup.select_one("div.seller-info, div.prod-sell-info")
                                     if seller_info_div:
@@ -755,13 +775,13 @@ class CrawlerEngine:
                                             seller_name = text
                                         elif "쿠팡(주)" in text or "로켓그로스" in text:
                                             seller_name = text
-                                        
+
                                 if prod["로켓배송여부"] == "O" and seller_name == "N/A":
                                     seller_name = "쿠팡(주) 또는 로켓그로스"
-                                
+
                             except Exception as detail_e:
                                 self.log(f"상세 페이지 수집 오류: {detail_e}")
-                            
+
                             prod["판매자명"] = seller_name
                             prod["판매자 연락처"] = seller_contact
                             prod["주소"] = seller_address
@@ -769,27 +789,38 @@ class CrawlerEngine:
                             prod["사업자번호"] = seller_bizno
                             if "판매자 연락처" in prod:
                                 del prod["판매자 연락처"]
-                            
+
                             # 수집 성공 시 이력에 추가
                             self.history_manager.add_collected(prod["상품URL"])
                             self.results.append(prod)
-                        
-                    if len(products) >= 50:
-                        from checkpoint_manager import CheckpointManager
-                        self.log(f"[{keyword}] 50개 수집 완료. 봇 탐지 방지를 위해 여기서 일시 정지하며, 현재 위치({page}페이지)를 메모리에 저장합니다.")
+
+                        # ---- 이번 회차 마무리: 결과 저장 + 체크포인트 갱신 ----
+                        round_items = self.results[round_start_len:]
+                        if round_items:
+                            fname = f"coupang_{keyword}_{round_num}회차_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+                            self.save_excel(fname, data=round_items)
                         CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
-                        return
-                        
+                        self.log(f"[{keyword}] {round_num}/{rounds}회차 완료 — {len(round_items)}건 저장 (누적 {len(self.results)}건). 다음 회차는 {page}페이지부터 이어갑니다.")
+
+                        # 회차 사이 대기/IP 변경 (봇 탐지 방지)
+                        if round_num < rounds and self.is_running:
+                            if use_ip_change:
+                                self.log("다음 회차 전 IP를 변경합니다... (USB 테더링)")
+                                import ip_changer
+                                ip_changer.toggle_airplane_mode()
+                                time.sleep(5)
+                            else:
+                                import random
+                                wait_s = random.uniform(5, 10)
+                                self.log(f"봇 탐지 방지를 위해 {wait_s:.0f}초 대기 후 다음 회차를 이어갑니다...")
+                                time.sleep(wait_s)
+
                 except Exception as ex:
                     self.log(f"[{keyword}] 수집 중 에러: {ex}")
 
             # 체크포인트 지우지 않음 (무한 이어하기 지원)
-
             self.log("모든 쿠팡 크롤링이 완료되었습니다.")
-            if self.results:
-                filename = f"coupang_result_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
-                self.save_excel(filename)
-                
+
         except Exception as e:
             self.log(f"크롤러 초기화/실행 오류: {e}")
             import traceback
@@ -824,13 +855,14 @@ class CrawlerEngine:
         # 어떤 후보도 없으면 홈 폴더에 저장(최소한 실패는 않도록)
         return home
 
-    def save_excel(self, filename):
+    def save_excel(self, filename, data=None):
         try:
-            if not self.results:
+            rows = data if data is not None else self.results
+            if not rows:
                 self.log("저장할 수집 데이터가 없어 엑셀 파일을 만들지 않았습니다.")
                 return
 
-            df = pd.DataFrame(self.results)
+            df = pd.DataFrame(rows)
             desktop_path = self._get_desktop_dir()
             save_path = os.path.join(desktop_path, filename)
 

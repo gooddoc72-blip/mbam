@@ -10,7 +10,7 @@ class CrawlerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Crawler Pro v1.2 (USB 테더링 다목적 크롤러)")
+        self.title("Crawler Pro v1.3 (USB 테더링 다목적 크롤러)")
         self.geometry("800x600")
 
         # 좌측 메뉴 프레임
@@ -72,6 +72,14 @@ class CrawlerApp(ctk.CTk):
         self.entry_pages = ctk.CTkEntry(self.main_frame, width=100)
         self.entry_pages.pack(pady=5, padx=10, anchor="w")
         self.entry_pages.insert(0, "1")
+
+        # 쿠팡 반복 회차 수 설정 (1회차 = 50건, 멈춘 지점에서 자동으로 다음 회차 진행)
+        self.lbl_rounds = ctk.CTkLabel(self.main_frame, text="쿠팡 반복 회차 수 (1회차=50건, 마친 지점에서 자동 이어감):")
+        self.lbl_rounds.pack(pady=(10, 0), anchor="w", padx=10)
+
+        self.entry_rounds = ctk.CTkEntry(self.main_frame, width=100)
+        self.entry_rounds.pack(pady=5, padx=10, anchor="w")
+        self.entry_rounds.insert(0, "1")
 
         # 버튼 컨테이너
         self.btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -257,7 +265,13 @@ class CrawlerApp(ctk.CTk):
             elif target == "shopping":
                 self.crawler_engine.crawl_naver_shopping(keywords, use_ip_change)
             elif target == "coupang":
-                self.crawler_engine.crawl_coupang(keywords, use_ip_change)
+                try:
+                    rounds = int(self.entry_rounds.get().strip())
+                    if rounds < 1:
+                        rounds = 1
+                except:
+                    rounds = 1
+                self.crawler_engine.crawl_coupang(keywords, use_ip_change, rounds=rounds)
                 
             self.log("크롤링 작업이 종료되었습니다.")
         except Exception as e:
