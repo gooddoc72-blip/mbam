@@ -7,11 +7,15 @@ from typing import List, Optional, Dict
 import math
 import urllib.parse
 
-try:
-    from kiwipiepy import Kiwi
-    kiwi = Kiwi()
-except ImportError:
-    kiwi = None
+import os as _os
+if (_os.environ.get("EXECUTION_MODE", "local") or "").strip().lower() == "cloud":
+    kiwi = None  # [슬림] 클라우드는 분석을 에이전트에 위임 → Kiwi 형태소 모델 미로드(OOM 방지)
+else:
+    try:
+        from kiwipiepy import Kiwi
+        kiwi = Kiwi()
+    except ImportError:
+        kiwi = None
 
 from mbam_nextgen.backend.quota import check_quota, increment_quota
 

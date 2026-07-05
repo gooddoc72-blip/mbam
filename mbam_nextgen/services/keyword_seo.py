@@ -11,11 +11,15 @@ import base64
 import time
 
 # Optional Kiwi for NLP
-try:
-    from kiwipiepy import Kiwi
-    kiwi = Kiwi()
-except ImportError:
-    kiwi = None
+import os as _os
+if (_os.environ.get("EXECUTION_MODE", "local") or "").strip().lower() == "cloud":
+    kiwi = None  # [슬림] 클라우드는 분석을 에이전트에 위임 → Kiwi 미로드(OOM 방지)
+else:
+    try:
+        from kiwipiepy import Kiwi
+        kiwi = Kiwi()
+    except ImportError:
+        kiwi = None
 
 SPAM_WORDS = {'특가', '무료배송', '이벤트', '신상', '쿠폰', '할인', '정품', '사은품', '당일발송', '무료', '배송', '포장', '용량', '박스', '주문', '사이즈'}
 

@@ -25,11 +25,15 @@ from dotenv import load_dotenv
 from mbam_nextgen.services.soul import SoulRewriter
 
 # 뉴스 제목 명사 추출용 (선택적)
-try:
-    from kiwipiepy import Kiwi
-    _kiwi = Kiwi()
-except Exception:
-    _kiwi = None
+import os as _os
+if (_os.environ.get("EXECUTION_MODE", "local") or "").strip().lower() == "cloud":
+    _kiwi = None  # [슬림] 클라우드는 분석을 에이전트에 위임 → Kiwi 미로드(OOM 방지)
+else:
+    try:
+        from kiwipiepy import Kiwi
+        _kiwi = Kiwi()
+    except Exception:
+        _kiwi = None
 
 load_dotenv("mbam_nextgen/.env")
 
