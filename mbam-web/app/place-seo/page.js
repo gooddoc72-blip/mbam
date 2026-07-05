@@ -117,16 +117,29 @@ export default function PlaceSeoDashboard() {
     }
   };
 
+  // [방법 B] 에이전트 모드: 클라우드가 job_id만 주면 로컬 에이전트 실행을 폴링.
+  const pollAgentJob = async (jobId, { tries = 120, intervalMs = 3000 } = {}) => {
+    for (let i = 0; i < tries; i++) {
+      await new Promise((r) => setTimeout(r, intervalMs));
+      const res = await fetchWithAuth(`/api/agent/jobs/${jobId}`);
+      if (!res.ok) continue;
+      const info = await res.json();
+      if (info.status === "done") return info.result || {};
+      if (info.status === "error") throw new Error(info.error || "에이전트 작업이 실패했습니다.");
+    }
+    throw new Error("에이전트 응답 시간 초과입니다. 내 PC의 로컬 프로그램(에이전트)이 실행 중인지 확인해 주세요.");
+  };
+
   const handleAnalyze = async (e) => {
     e.preventDefault();
     if (!keyword.trim() || !targetMid.trim()) {
       return alert("키워드와 타겟 MID를 모두 입력해주세요.");
     }
-    
+
     setLoading(true);
     setResult(null);
     abortControllerRef.current = new AbortController();
-    
+
     try {
       // 1. API 호출: 300위 수집 및 분석
       const res = await fetchWithAuth("/api/place/analyze-keyword", {
@@ -135,9 +148,13 @@ export default function PlaceSeoDashboard() {
         body: JSON.stringify({ keyword, target_mid: targetMid, compare_days: compareDays }),
         signal: abortControllerRef.current.signal
       });
-      const data = await res.json();
+      let data = await res.json();
       if (!res.ok) throw new Error(data.detail || "분석 실패");
-      
+      // [방법 B] 에이전트 모드면 job_id 폴링(400위 수집은 오래 걸림).
+      if (data && data.mode === "agent" && data.job_id) {
+        data = await pollAgentJob(data.job_id, { tries: 160, intervalMs: 3000 });
+      }
+
       setResult(data);
       setActiveRightTab("ranking"); // 조회 후에는 순위 탭으로 전환
       addHistory("place-seo", {
@@ -171,7 +188,10 @@ export default function PlaceSeoDashboard() {
         body: JSON.stringify({ mid: targetMid })
       });
       if (res.ok) {
-        const data = await res.json();
+        let data = await res.json();
+        if (data && data.mode === "agent" && data.job_id) {
+          data = await pollAgentJob(data.job_id, { tries: 40, intervalMs: 2000 });
+        }
         setTargetName(data.name || "");
       }
     } catch (err) {

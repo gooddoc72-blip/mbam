@@ -76,9 +76,29 @@ async def _handle_seo_analyze(payload: dict) -> dict:
     return result
 
 
+async def _handle_place_analyze(payload: dict) -> dict:
+    from mbam_nextgen.backend.routers.place import run_place_analysis
+    return await asyncio.to_thread(
+        run_place_analysis,
+        payload.get("keyword", ""), payload.get("target_mid", ""),
+        int(payload.get("compare_days", 1) or 1), bool(payload.get("force_refresh", True)),
+    )
+
+
+async def _handle_place_fetch_mid(payload: dict) -> dict:
+    from mbam_nextgen.backend.routers.place import fetch_place_by_mid_cli
+    res = await asyncio.to_thread(fetch_place_by_mid_cli, payload.get("mid", ""))
+    if isinstance(res, dict) and res.get("error"):
+        raise RuntimeError(res["error"])
+    res["success"] = True
+    return res
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
     "seo_analyze": _handle_seo_analyze,
+    "place_analyze": _handle_place_analyze,
+    "place_fetch_mid": _handle_place_fetch_mid,
 }
 
 

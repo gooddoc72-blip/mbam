@@ -1,5 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from mbam_nextgen.backend.quota import consume_generation_quota
+from mbam_nextgen.backend.auth import get_current_user
+from mbam_nextgen.backend.database import get_db
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 import os
@@ -99,10 +102,17 @@ class ScoreRequest(BaseModel):
     baseline_has_booking: bool
 
 @router.post("/fetch-mid")
-def fetch_mid(request: FetchMidRequest):
+def fetch_mid(request: FetchMidRequest,
+              current_user: dict = Depends(get_current_user),
+              db: Session = Depends(get_db)):
     """
     네이버 플레이스 MID를 기반으로 실시간 업체 정보를 스크래핑합니다.
+    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트가 집 IP로 실행.
     """
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "place_fetch_mid", {"mid": request.mid})
+        return {"mode": "agent", "job_id": job_id}
     try:
         res = fetch_place_by_mid_cli(request.mid)
         # naver_crawler.py returns a dict with 'name', 'category', 'success' (maybe), etc.
@@ -586,13 +596,23 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
     }
 
 @router.post("/analyze-keyword")
-def analyze_keyword(request: KeywordAnalysisRequest):
+def analyze_keyword(request: KeywordAnalysisRequest,
+                    current_user: dict = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
     """
     300위 심층 분석용 통합 API
+    [방법 B] cloud 모드면 job 적재 → 로컬 에이전트가 집 IP로 실행.
     """
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "place_analyze", {
+            "keyword": request.keyword, "target_mid": request.target_mid,
+            "compare_days": request.compare_days, "force_refresh": request.force_refresh,
+        })
+        return {"mode": "agent", "job_id": job_id}
     try:
         return run_place_analysis(request.keyword, request.target_mid, request.compare_days, request.force_refresh)
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
