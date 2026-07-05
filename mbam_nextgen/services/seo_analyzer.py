@@ -738,33 +738,37 @@ class SeoAnalyzer:
                     'mo': v.get('mobile', 0)
                 }
             
-            lookup_main = keyword.replace(' ', '')
-            related_keywords_data.append({
-                "keyword": keyword,
-                "pc_vol": vol_map.get(lookup_main, {}).get('pc', pc_vol),
-                "mo_vol": vol_map.get(lookup_main, {}).get('mo', mo_vol),
-                "type": "자동완성" # 메인
-            })
-            
-            for kw in html_rel_kws:
-                lookup_kw = kw.replace(' ', '')
-                if kw != keyword:
-                    related_keywords_data.append({
-                        "keyword": kw,
-                        "pc_vol": vol_map.get(lookup_kw, {}).get('pc', 0),
-                        "mo_vol": vol_map.get(lookup_kw, {}).get('mo', 0),
-                        "type": "함께찾는"
-                    })
-                    
-            for kw in kw_list:
-                if kw not in html_rel_kws and kw != keyword:
-                    lookup_kw = kw.replace(' ', '')
-                    related_keywords_data.append({
-                        "keyword": kw,
-                        "pc_vol": vol_map.get(lookup_kw, {}).get('pc', 0),
-                        "mo_vol": vol_map.get(lookup_kw, {}).get('mo', 0),
-                        "type": "자동완성"
-                    })
+            # 비키워드성(UI/탭 문구) 제외 패턴
+            NON_KW = ("인기글", "네이버 메이트", "메이트", "웹문서", "함께찾는",
+                      "연관검색", "더보기", "전체보기", "지식iN")
+
+            def _vol(kw):
+                v = vol_map.get(kw.replace(' ', ''), {})
+                return int(v.get('pc', 0) or 0), int(v.get('mo', 0) or 0)
+
+            # 메인 키워드는 항상 포함(필터 예외)
+            m_pc, m_mo = _vol(keyword)
+            items = [{"keyword": keyword, "pc_vol": m_pc or pc_vol, "mo_vol": m_mo or mo_vol, "type": "자동완성"}]
+            seen = {keyword.replace(' ', '')}
+
+            # 후보 수집(함께찾는 → 자동완성) 후 필터 적용
+            candidates = [(kw, "함께찾는") for kw in html_rel_kws] + \
+                         [(kw, "자동완성") for kw in kw_list if kw not in html_rel_kws]
+            for kw, typ in candidates:
+                k = kw.replace(' ', '')
+                if not kw or kw == keyword or k in seen:
+                    continue
+                if any(p in kw for p in NON_KW):          # ③ 비키워드성 제거
+                    continue
+                pc, mo = _vol(kw)
+                if (pc + mo) < 10:                        # ① 검색량 10 미만 제거
+                    continue
+                seen.add(k)
+                items.append({"keyword": kw, "pc_vol": pc, "mo_vol": mo, "type": typ})
+
+            # ② 검색량(PC+MO) 높은 순 정렬(자동완성 포함) → ④ 상위 15개
+            items.sort(key=lambda e: (e["pc_vol"] + e["mo_vol"]), reverse=True)
+            related_keywords_data = items[:15]
                 
         filtered_blocks = []
         for b in blocks_data:
