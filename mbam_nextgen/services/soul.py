@@ -517,7 +517,7 @@ class SoulRewriter:
 }}
 """
         try:
-            result = await self._call_gemini(prompt)
+            result = await self._call_gemini_client(self.gemini_client, prompt)
             import json, re
             json_str = re.sub(r'```json\s*|```', '', result).strip()
             data = json.loads(json_str)
