@@ -654,8 +654,16 @@ function BlogPostingContent() {
 
       {/* 발행 모드 탭 */}
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", marginBottom: "-1rem" }}>
-        <Link href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</Link>
-        <Link href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>🗓️ 매일 자동 포스팅</Link>
+        {[
+          { href: "/blog-posting", label: "✍️ 블로그 발행 (수동·예약)" },
+          { href: "/hospital-blog", label: "🏥 병원 블로그" },
+          { href: "/blog-schedule", label: "🗓️ 매일 자동 포스팅" },
+        ].map(t => {
+          const active = pathname === t.href;
+          return (
+            <Link key={t.href} href={t.href} style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: active ? "#2563eb" : "#64748b", fontWeight: "bold", borderBottom: active ? "3px solid #2563eb" : "3px solid transparent", marginBottom: "-2px" }}>{t.label}</Link>
+          );
+        })}
       </div>
 
       {/* 이미지 보관함 선택 모달 */}
