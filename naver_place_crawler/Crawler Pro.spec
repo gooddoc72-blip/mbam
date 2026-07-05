@@ -5,7 +5,12 @@ a = Analysis(
     ['gui_main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('adb/adb.exe', 'adb'),
+        ('adb/AdbWinApi.dll', 'adb'),
+        ('adb/AdbWinUsbApi.dll', 'adb'),
+        ('adb/libwinpthread-1.dll', 'adb'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

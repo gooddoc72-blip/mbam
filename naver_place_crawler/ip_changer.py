@@ -1,7 +1,26 @@
+import os
+import sys
 import subprocess
 import time
 import platform
 import urllib.request
+
+
+def _adb_exe():
+    """동봉된 adb.exe 경로를 우선 반환하고, 없으면 PATH의 adb를 사용한다."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        # PyInstaller로 패키징된 경우: _MEIPASS(내부 리소스) 및 실행파일 옆 폴더 확인
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates.append(os.path.join(base, "adb", "adb.exe"))
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "adb", "adb.exe"))
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "_internal", "adb", "adb.exe"))
+    else:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "adb", "adb.exe"))
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return "adb"  # 마지막 폴백: PATH에 등록된 adb
 
 
 def _run_adb(args, log=print):
@@ -13,7 +32,7 @@ def _run_adb(args, log=print):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
         result = subprocess.run(
-            ["adb"] + args,
+            [_adb_exe()] + args,
             capture_output=True,
             text=True,
             startupinfo=startupinfo,

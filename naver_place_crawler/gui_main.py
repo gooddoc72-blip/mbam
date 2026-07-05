@@ -10,7 +10,7 @@ class CrawlerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Crawler Pro v1.5 (USB 테더링 다목적 크롤러)")
+        self.title("Crawler Pro v1.6 (USB 테더링 다목적 크롤러)")
         self.geometry("800x600")
 
         # 좌측 메뉴 프레임
@@ -73,8 +73,16 @@ class CrawlerApp(ctk.CTk):
         self.entry_pages.pack(pady=5, padx=10, anchor="w")
         self.entry_pages.insert(0, "1")
 
-        # 쿠팡 반복 회차 수 설정 (1회차 = 50건, 멈춘 지점에서 자동으로 다음 회차 진행)
-        self.lbl_rounds = ctk.CTkLabel(self.main_frame, text="쿠팡 반복 회차 수 (1회차=50건, 마친 지점에서 자동 이어감):")
+        # 쿠팡 회차당 페이지 수 (1페이지 ≈ 60건, 페이지 단위로 수집)
+        self.lbl_coupang_pages = ctk.CTkLabel(self.main_frame, text="쿠팡 회차당 페이지 수 (1페이지≈60건):")
+        self.lbl_coupang_pages.pack(pady=(10, 0), anchor="w", padx=10)
+
+        self.entry_coupang_pages = ctk.CTkEntry(self.main_frame, width=100)
+        self.entry_coupang_pages.pack(pady=5, padx=10, anchor="w")
+        self.entry_coupang_pages.insert(0, "1")
+
+        # 쿠팡 반복 회차 수 (마친 지점에서 자동으로 다음 회차 진행, 회차 사이 IP 변경)
+        self.lbl_rounds = ctk.CTkLabel(self.main_frame, text="쿠팡 반복 회차 수 (마친 페이지에서 자동 이어감):")
         self.lbl_rounds.pack(pady=(10, 0), anchor="w", padx=10)
 
         self.entry_rounds = ctk.CTkEntry(self.main_frame, width=100)
@@ -271,7 +279,13 @@ class CrawlerApp(ctk.CTk):
                         rounds = 1
                 except:
                     rounds = 1
-                self.crawler_engine.crawl_coupang(keywords, use_ip_change, rounds=rounds)
+                try:
+                    pages_per_round = int(self.entry_coupang_pages.get().strip())
+                    if pages_per_round < 1:
+                        pages_per_round = 1
+                except:
+                    pages_per_round = 1
+                self.crawler_engine.crawl_coupang(keywords, use_ip_change, rounds=rounds, pages_per_round=pages_per_round)
                 
             self.log("크롤링 작업이 종료되었습니다.")
         except Exception as e:

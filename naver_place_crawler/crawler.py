@@ -481,7 +481,7 @@ class CrawlerEngine:
         self.log("네이버 쇼핑 판매자 크롤링 로직은 추후 확장이 가능하도록 뼈대만 잡아두었습니다.")
         pass
 
-    def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None, rounds=1):
+    def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None, rounds=1, pages_per_round=1):
         self.is_running = True
         self.results = resume_checkpoint.get("results", []) if resume_checkpoint else []
 
@@ -491,6 +491,15 @@ class CrawlerEngine:
             rounds = 1
         if rounds < 1:
             rounds = 1
+
+        try:
+            pages_per_round = int(pages_per_round)
+        except (TypeError, ValueError):
+            pages_per_round = 1
+        if pages_per_round < 1:
+            pages_per_round = 1
+
+        MAX_PAGE = 200  # 쿠팡 페이지네이션 안전 상한
 
         from checkpoint_manager import CheckpointManager
 
@@ -531,11 +540,12 @@ class CrawlerEngine:
                             CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
                             return
 
-                        self.log(f"===== [{keyword}] {round_num}/{rounds}회차 수집 시작 ({page}페이지부터) =====")
+                        end_page = page + pages_per_round - 1
+                        self.log(f"===== [{keyword}] {round_num}/{rounds}회차 수집 시작 ({page}~{end_page}페이지, {pages_per_round}페이지 분량) =====")
                         products = []
                         round_start_len = len(self.results)
 
-                        while len(products) < 50 and page <= 10:
+                        while page <= end_page and page <= MAX_PAGE:
                             if not self.is_running:
                                 self.log(f"[{keyword}] 수집 중지됨. 현재 위치({page}페이지)를 저장합니다.")
                                 CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
@@ -688,16 +698,11 @@ class CrawlerEngine:
                                         "상품URL": clean_p_link
                                     })
 
-                                    if len(products) >= 50:
-                                        break
-
                                 except Exception as e:
                                     pass
 
                                 if not self.is_running: break
 
-                            if len(products) >= 50:
-                                break
                             if not items:
                                 break  # 더 이상 상품이 없으면 종료
                             page += 1
