@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -311,6 +311,42 @@ class DailyUsage(Base):
     action_type = Column(String, index=True)   # blog_post | cafe_post | cafe_comment | boost | place_news
     date_str = Column(String, index=True)       # "YYYY-MM-DD" (서버 로컬 날짜)
     count = Column(Integer, default=0)
+
+
+class PlaceTracked(Base):
+    """[방법 B·DB동기화] 플레이스 관심 매장 — 클라우드 Postgres 저장(유저별).
+    (기존 data/ranking.db tracked_places 를 대체 — 클라우드는 SQLite가 휘발성이므로)"""
+    __tablename__ = "place_tracked"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    mid = Column(String, index=True)
+    keyword = Column(String)
+    name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PlaceRankSnapshot(Base):
+    """[방법 B·DB동기화] 플레이스 일자별 순위 스냅샷 — 에이전트 분석 결과를 클라우드에 영속화.
+    웹의 '일자별 히스토리'가 클라우드에서 조회된다."""
+    __tablename__ = "place_rank_snapshot"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    mid = Column(String, index=True)
+    keyword = Column(String, index=True)
+    date_str = Column(String, index=True)   # "YYYY-MM-DD"
+    rank = Column(Integer, default=0)
+    saves = Column(Integer, default=0)
+    visitor_reviews = Column(Integer, default=0)
+    blog_reviews = Column(Integer, default=0)
+    n1 = Column(Float, default=0.0)
+    n2 = Column(Float, default=0.0)
+    n3 = Column(Float, default=0.0)
+    n4 = Column(Float, default=1.0)
+    n5 = Column(Float, default=0.0)
+    snapshot_json = Column(Text, nullable=True)   # 400위 전체(1위 역산용)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class AgentJob(Base):

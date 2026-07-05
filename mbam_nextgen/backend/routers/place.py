@@ -595,6 +595,54 @@ def run_place_analysis(keyword: str, target_mid: str, compare_days: int = 1, for
         "history": history_data
     }
 
+def persist_place_snapshot(db, user_id: str, payload: dict, result: dict):
+    """[DB동기화] place_analyze 결과를 클라우드 Postgres(PlaceRankSnapshot)에 일자별 upsert.
+    cloud: jobs.PERSISTERS 훅으로 자동 호출 / local: analyze-keyword 에서 직접 호출."""
+    from mbam_nextgen.backend.database import PlaceRankSnapshot
+    from datetime import datetime as _dt
+    import json as _json
+    if not isinstance(result, dict) or not result.get("success"):
+        return
+    mid = str(result.get("target_mid") or (payload or {}).get("target_mid") or "").strip()
+    keyword = str(result.get("keyword") or (payload or {}).get("keyword") or "").strip()
+    if not mid or not keyword:
+        return
+    places = result.get("places") or []
+    target = next((p for p in places if p.get("is_target")), None)
+    date_str = _dt.now().strftime("%Y-%m-%d")
+
+    def _f(v, d=0.0):
+        try: return float(v)
+        except Exception: return d
+    def _i(v, d=0):
+        try: return int(v)
+        except Exception: return d
+
+    row = (db.query(PlaceRankSnapshot)
+           .filter(PlaceRankSnapshot.user_id == user_id, PlaceRankSnapshot.mid == mid,
+                   PlaceRankSnapshot.keyword == keyword, PlaceRankSnapshot.date_str == date_str).first())
+    if not row:
+        row = PlaceRankSnapshot(user_id=user_id, mid=mid, keyword=keyword, date_str=date_str)
+        db.add(row)
+    row.rank = _i(result.get("target_rank"))
+    if target:
+        row.saves = _i(target.get("saves"))
+        row.visitor_reviews = _i(target.get("visitor_reviews"))
+        row.blog_reviews = _i(target.get("blog_reviews"))
+        row.n1 = _f(target.get("n1")); row.n2 = _f(target.get("n2")); row.n3 = _f(target.get("n3"))
+        row.n4 = _f(target.get("n4"), 1.0); row.n5 = _f(target.get("n5"))
+    row.snapshot_json = _json.dumps(places, ensure_ascii=False)
+    # commit 은 호출측(complete_job / 엔드포인트)에서 수행
+
+
+# 클라우드 모드: 에이전트가 place_analyze 결과를 반환하면 자동으로 Postgres에 영속화
+try:
+    from mbam_nextgen.backend import jobs as _jobs
+    _jobs.register_persister("place_analyze", persist_place_snapshot)
+except Exception:
+    pass
+
+
 @router.post("/analyze-keyword")
 def analyze_keyword(request: KeywordAnalysisRequest,
                     current_user: dict = Depends(get_current_user),
@@ -611,131 +659,101 @@ def analyze_keyword(request: KeywordAnalysisRequest,
         })
         return {"mode": "agent", "job_id": job_id}
     try:
-        return run_place_analysis(request.keyword, request.target_mid, request.compare_days, request.force_refresh)
+        result = run_place_analysis(request.keyword, request.target_mid, request.compare_days, request.force_refresh)
+        # 로컬(설치형)도 결과를 클라우드/메인 DB에 영속화 → 히스토리 탭 일관성
+        try:
+            persist_place_snapshot(db, current_user.get("sub"),
+                                   {"keyword": request.keyword, "target_mid": request.target_mid}, result)
+            db.commit()
+        except Exception:
+            db.rollback()
+        return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/track")
-def track_place(req: TrackRequest):
-    """
-    특정 키워드와 MID 조합을 관심 목록(DB)에 추가합니다.
-    """
+def track_place(req: TrackRequest,
+                current_user: dict = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    """관심 매장(키워드+MID)을 클라우드 DB(유저별)에 추가."""
+    from mbam_nextgen.backend.database import PlaceTracked
     try:
-        import sqlite3
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        
-        c.execute("INSERT OR REPLACE INTO tracked_places (mid, keyword, name) VALUES (?, ?, ?)", 
-                  (req.mid.strip(), req.keyword.strip(), req.name.strip()))
-        conn.commit()
-        conn.close()
-        
+        uid = current_user.get("sub")
+        mid, kw, name = req.mid.strip(), req.keyword.strip(), (req.name or "").strip()
+        existing = db.query(PlaceTracked).filter_by(user_id=uid, mid=mid, keyword=kw).first()
+        if existing:
+            existing.name = name
+        else:
+            db.add(PlaceTracked(user_id=uid, mid=mid, keyword=kw, name=name))
+        db.commit()
         return {"success": True, "message": "성공적으로 저장되었습니다."}
     except Exception as e:
+        db.rollback()
         return {"success": False, "error": str(e)}
 
 @router.get("/tracked")
-def get_tracked_places():
-    """
-    저장된 관심 매장 목록을 반환합니다.
-    """
+def get_tracked_places(current_user: dict = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """저장된 관심 매장 목록(유저별)."""
+    from mbam_nextgen.backend.database import PlaceTracked
     try:
-        import sqlite3
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        
-        # 테이블이 존재하는지 확인 (만약 없는 상태에서 호출될 경우 대비)
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS tracked_places (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mid TEXT NOT NULL,
-                keyword TEXT NOT NULL,
-                name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(mid, keyword)
-            )
-        ''')
-        c.execute("SELECT mid, keyword, name, created_at FROM tracked_places ORDER BY created_at DESC")
-        rows = c.fetchall()
-        conn.close()
-        
-        tracked = []
-        for r in rows:
-            tracked.append({
-                "mid": r[0],
-                "keyword": r[1],
-                "name": r[2],
-                "created_at": r[3]
-            })
-            
+        uid = current_user.get("sub")
+        rows = (db.query(PlaceTracked).filter_by(user_id=uid)
+                .order_by(PlaceTracked.created_at.desc()).all())
+        tracked = [{"mid": r.mid, "keyword": r.keyword, "name": r.name,
+                    "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
         return {"success": True, "tracked": tracked}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @router.post("/history")
-def get_place_history(req: HistoryRequest):
-    """
-    특정 키워드/MID에 대한 DB 기록 (순위 변동, 저장수 등) 히스토리를 반환합니다.
-    """
+def get_place_history(req: HistoryRequest,
+                      current_user: dict = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """키워드/MID 일자별 순위 히스토리(클라우드 DB, 유저별) + 1위 역산 컨설팅."""
+    from mbam_nextgen.backend.database import PlaceRankSnapshot
+    import json as _json
     try:
-        import sqlite3
-        import os
-        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
+        uid = current_user.get("sub")
+        rows = (db.query(PlaceRankSnapshot)
+                .filter_by(user_id=uid, mid=req.target_mid.strip(), keyword=req.keyword.strip())
+                .order_by(PlaceRankSnapshot.date_str.asc()).all())
 
-        # 테이블이 아직 없으면(분석 이력 없음) 빈 히스토리로 응답
-        try:
-            c.execute("SELECT date, rank, saves, visitor_reviews, blog_reviews, n1, n2, n3, n4, n5, snapshot_json FROM place_rank_history WHERE mid=? AND keyword=? ORDER BY date ASC",
-                      (req.target_mid.strip(), req.keyword.strip()))
-            rows = c.fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-        conn.close()
-        
         history_data = []
         latest_rank = 0
         latest_places = []
         for r in rows:
             history_data.append({
-                "date": r[0][-5:],
-                "rank": r[1],
-                "saves": r[2],
-                "visitor_reviews": r[3] or 0,
-                "blog_reviews": r[4] or 0,
-                "n1": r[5] or 0,
-                "n2": r[6] or 0,
-                "n3": r[7] or 0,
-                "n4": r[8] if r[8] is not None else 1.0,
-                "n5": r[9] or 0
+                "date": (r.date_str or "")[-5:],
+                "rank": r.rank,
+                "saves": r.saves,
+                "visitor_reviews": r.visitor_reviews or 0,
+                "blog_reviews": r.blog_reviews or 0,
+                "n1": r.n1 or 0, "n2": r.n2 or 0, "n3": r.n3 or 0,
+                "n4": r.n4 if r.n4 is not None else 1.0, "n5": r.n5 or 0,
             })
-            latest_rank = r[1]
-            if r[10]:
-                import json
+            latest_rank = r.rank
+            if r.snapshot_json:
                 try:
-                    latest_places = json.loads(r[10])
-                except:
+                    latest_places = _json.loads(r.snapshot_json)
+                except Exception:
                     pass
-            
-        # 1위 매장 역산 분석 (Comparative Analyzer)
+
         top1_data = None
         target_data = None
         for p in latest_places:
-            if p["rank"] == 1:
+            if p.get("rank") == 1:
                 top1_data = p
-            if p["is_target"]:
+            if p.get("is_target"):
                 target_data = p
-                
+
         advantage_report = "분석 불가능"
         if top1_data and target_data:
             advantage_report = calculator.analyze_1st_advantage(target_data, top1_data)
-            
-        # 최종 결과 반환
+
         report = f"'{req.keyword}' 분석 완료!\n- 순위: {latest_rank}위\n- 영수증 검증 점수(N1): {target_data['n1'] if target_data else 0:.4f}\n\n💡 **[AI 1위 역산 컨설팅]**\n{advantage_report}"
-            
+
         return {
             "success": True,
             "keyword": req.keyword,
