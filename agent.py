@@ -143,8 +143,20 @@ async def _handle_seo_cafe_post(payload: dict) -> dict:
     return await run_cafe_post_analysis(req)
 
 
+async def _handle_register_account(payload: dict) -> dict:
+    # 기기 인증: 사용자 PC에서 브라우저를 열어 수동 로그인+2FA → 영구 프로필 저장
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+    result = await WorkflowOrchestrator().register_account_session(
+        payload.get("naver_id", ""), payload.get("naver_pw")
+    )
+    if not result.get("success"):
+        raise RuntimeError(result.get("error", "기기 인증 실패"))
+    return result
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
+    "register_account": _handle_register_account,
     "seo_analyze": _handle_seo_analyze,
     "seo_cafe_urls": _handle_seo_cafe_urls,
     "seo_top3": _handle_seo_top3,

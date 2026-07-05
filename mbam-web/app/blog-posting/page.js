@@ -1,5 +1,5 @@
 "use client";
-import { fetchWithAuth } from "../utils/api";
+import { fetchWithAuth, pollAgentJob } from "../utils/api";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, Suspense } from "react";
@@ -610,14 +610,27 @@ function BlogPostingContent() {
         body: JSON.stringify({ naver_id: acc.id, naver_pw: acc.pw || null })
       });
       const data = await res.json();
-      if (data.success && data.task_id) {
+      // 계정 관리(중앙 저장소)에도 등록 (best-effort)
+      fetchWithAuth("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ naver_id: acc.id, naver_pw: acc.pw || null, blog_addr: acc.blogAddr || null }),
+      }).catch(() => {});
+
+      if (data.mode === "agent" && data.job_id) {
+        // [방법 B] 내 PC의 에이전트가 브라우저를 열어 수동 로그인+2FA. 완료까지 폴링(사용자 입력 대기 → 길게).
+        alert("내 PC에서 곧 브라우저가 열립니다.\n로그인 + 2단계 인증을 완료해 주세요.\n(로컬 프로그램 '에이전트'가 실행 중이어야 합니다)");
+        try {
+          await pollAgentJob(data.job_id, { tries: 200, intervalMs: 4000 }); // 최대 ~13분
+          alert("✅ 기기 인증이 완료되었습니다! 이제 자동 로그인됩니다.");
+        } catch (err) {
+          alert("기기 인증 실패/시간초과: " + err.message);
+        } finally {
+          setTaskStatus(null); setLoading(false);
+          try { fetchWithAuth("/api/auto_post/registered-accounts"); } catch (e) {}
+        }
+      } else if (data.success && data.task_id) {
         setTaskId(data.task_id);
-        // 계정 관리(중앙 저장소)에도 등록 (best-effort)
-        fetchWithAuth("/api/accounts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ naver_id: acc.id, naver_pw: acc.pw || null, blog_addr: acc.blogAddr || null }),
-        }).catch(() => {});
       } else {
         alert("기기 인증 시작에 실패했습니다.");
         setLoading(false);

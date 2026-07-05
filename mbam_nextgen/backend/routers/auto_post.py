@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from mbam_nextgen.orchestrator import WorkflowOrchestrator, task_logger
 from mbam_nextgen.backend.quota import consume_generation_quota
 from mbam_nextgen.backend.database import get_db, Advertiser
+from mbam_nextgen.backend.auth import get_current_user
 from mbam_nextgen.backend.limits import check_daily_limit, consume_daily
 from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
 
@@ -370,7 +371,17 @@ async def run_register_task(task_id: str, naver_id: str, naver_pw: Optional[str]
 
 
 @router.post("/register-account", summary="네이버 계정 등록(기기 인증) — 1회 수동 로그인")
-async def register_account(req: RegisterAccountRequest):
+async def register_account(req: RegisterAccountRequest,
+                           current_user: dict = Depends(get_current_user),
+                           db: Session = Depends(get_db)):
+    # [방법 B] 기기 인증은 사용자 PC에서 브라우저(headless=False)를 띄워 수동 로그인+2FA 하는 작업.
+    # 클라우드에선 브라우저를 못 여므로 반드시 로컬 에이전트에 위임한다.
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "register_account",
+                                    {"naver_id": req.naver_id, "naver_pw": req.naver_pw})
+        return {"mode": "agent", "job_id": job_id,
+                "message": "내 PC에서 브라우저가 열립니다. 로그인 + 2단계 인증을 완료해 주세요. (로컬 에이전트 실행 필요)"}
     import uuid
     task_id = str(uuid.uuid4())
     task = asyncio.create_task(run_register_task(task_id, req.naver_id, req.naver_pw))
