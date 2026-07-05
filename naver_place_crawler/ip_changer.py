@@ -77,8 +77,46 @@ def get_public_ip(log=print):
     return None
 
 
+def _rotate_mobile_ip(log=print):
+    """최신 안드로이드에서 동작하는 방식으로 모바일(테더링) IP를 재할당한다.
+
+    구형 방식(am broadcast AIRPLANE_MODE)은 Android 10+에서
+    'SecurityException: Permission Denial'로 차단되므로 더 이상 쓰지 않는다.
+    성공한 방식 이름을 반환한다.
+    """
+    # 방식 A: 비행기 모드 (Android 11+ 의 cmd connectivity, shell 권한으로 동작)
+    r = _run_adb(["shell", "cmd", "connectivity", "airplane-mode", "enable"], log=log)
+    if r is not None:
+        log("비행기 모드 ON (연결 끊는 중)...")
+        time.sleep(5)
+        _run_adb(["shell", "cmd", "connectivity", "airplane-mode", "disable"], log=log)
+        log("비행기 모드 OFF (네트워크 복구 중)...")
+        time.sleep(8)
+        return "airplane-mode(cmd)"
+
+    # 방식 B: 모바일 데이터 토글 (svc data) — 대부분의 기기에서 shell 권한으로 IP 재할당
+    rd = _run_adb(["shell", "svc", "data", "disable"], log=log)
+    if rd is not None:
+        log("모바일 데이터 OFF (연결 끊는 중)...")
+        time.sleep(5)
+        _run_adb(["shell", "svc", "data", "enable"], log=log)
+        log("모바일 데이터 ON (네트워크 복구 중)...")
+        time.sleep(8)
+        return "mobile-data(svc)"
+
+    # 방식 C: 구형 폴백 (settings + broadcast) — 최신 기기에선 broadcast가 막혀 실패할 수 있음
+    log("최신 방식이 동작하지 않아 구형 방식으로 시도합니다...")
+    _run_adb(["shell", "settings", "put", "global", "airplane_mode_on", "1"], log=log)
+    _run_adb(["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "true"], log=log)
+    time.sleep(5)
+    _run_adb(["shell", "settings", "put", "global", "airplane_mode_on", "0"], log=log)
+    _run_adb(["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "false"], log=log)
+    time.sleep(8)
+    return "legacy(settings+broadcast)"
+
+
 def toggle_airplane_mode(log=print, verify=True):
-    """비행기 모드를 껐다 켜서 모바일(테더링) IP를 변경한다.
+    """모바일(테더링) IP를 재할당한다.
 
     반환값: IP 변경 성공(또는 성공으로 추정) True / 실패 False
     verify=True 이면 변경 전후 공인 IP를 비교해 실제로 바뀌었는지 확인한다.
@@ -97,18 +135,10 @@ def toggle_airplane_mode(log=print, verify=True):
     if verify:
         log(f"현재 IP: {old_ip or '조회 실패'} → 변경 시도")
 
-    log("비행기 모드 활성화 중 (IP 변경 시작)...")
-    _run_adb(["shell", "settings", "put", "global", "airplane_mode_on", "1"], log=log)
-    _run_adb(["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "true"], log=log)
-    time.sleep(5)  # IP 갱신 대기
-
-    log("비행기 모드 비활성화 중 (네트워크 복구)...")
-    _run_adb(["shell", "settings", "put", "global", "airplane_mode_on", "0"], log=log)
-    _run_adb(["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE", "--ez", "state", "false"], log=log)
-    time.sleep(8)  # 네트워크 완전 연결 대기
+    method = _rotate_mobile_ip(log=log)
 
     if not verify:
-        log("IP 변경 작업 완료")
+        log(f"IP 변경 작업 완료 (방식: {method})")
         return True
 
     # 2) 네트워크가 복구되고 IP가 실제로 바뀌었는지 최대 여러 번 확인
@@ -123,10 +153,10 @@ def toggle_airplane_mode(log=print, verify=True):
         log("⚠️ IP 조회에 실패했습니다(네트워크 복구 지연 가능). 변경 여부를 확인하지 못했습니다.")
         return False
     if old_ip and new_ip == old_ip:
-        log(f"⚠️ IP가 변경되지 않았습니다 (여전히 {new_ip}). 통신사 재접속/테더링 상태를 확인하세요.")
+        log(f"⚠️ IP가 변경되지 않았습니다 (여전히 {new_ip}, 방식: {method}). 통신사가 같은 IP를 재할당했을 수 있습니다.")
         return False
 
-    log(f"✅ IP 변경 완료: {old_ip or '이전'} → {new_ip}")
+    log(f"✅ IP 변경 완료: {old_ip or '이전'} → {new_ip} (방식: {method})")
     return True
 
 
