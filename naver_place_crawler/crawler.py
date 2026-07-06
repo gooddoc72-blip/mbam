@@ -514,6 +514,81 @@ class CrawlerEngine:
         except Exception:
             return False
 
+    def _coupang_type_search(self, keyword, wait):
+        """홈에서 검색창에 사람처럼 타이핑해 검색결과 1페이지로 진입한다. 성공 시 True."""
+        import random
+        from selenium.webdriver.common.keys import Keys
+        try:
+            self.driver.get("https://www.coupang.com/")
+            time.sleep(random.uniform(3.5, 5.5))  # 검색창 로딩 여유
+            search_box = wait.until(EC.element_to_be_clickable((By.ID, "headerSearchKeyword")))
+            search_box.click()
+            time.sleep(random.uniform(0.3, 0.7))
+            search_box.clear()
+            for char in keyword:
+                search_box.send_keys(char)
+                time.sleep(random.uniform(0.08, 0.25))
+            time.sleep(random.uniform(0.4, 0.9))
+            search_box.send_keys(Keys.ENTER)
+            time.sleep(random.uniform(2.5, 4.0))
+            return True
+        except Exception as e:
+            self.log(f"검색창 입력 실패: {e}")
+            return False
+
+    def _coupang_goto_page(self, keyword, page, wait):
+        """검색결과에서 목표 페이지로 '사람처럼' 이동한다.
+
+        핵심: 쿠팡은 np/search?...&page=N URL을 직접 치고 들어오는 딥링크를 봇으로 보고
+        빈 결과를 내려준다(1페이지는 검색창 타이핑이라 통과, 2페이지+ URL 직행은 0개).
+        따라서 검색창으로 1페이지에 먼저 진입한 뒤, 하단 페이지네이션의 해당 번호를
+        실제로 클릭해 이동한다. 클릭 대상을 못 찾으면 URL 폴백(호출부에서 처리)을 위해 False.
+        """
+        import random
+        # 검색결과 페이지가 아니면(상세페이지 등) 먼저 검색으로 1페이지 진입
+        try:
+            cur = self.driver.current_url or ""
+        except Exception:
+            cur = ""
+        if "/np/search" not in cur:
+            if not self._coupang_type_search(keyword, wait):
+                return False
+        # 목표가 1페이지면 검색 직후 상태로 충분
+        if page <= 1:
+            return True
+        # 페이지네이션이 하단에 있으므로 스크롤 후, href에 page=N 이 담긴 앵커를 클릭
+        try:
+            from urllib.parse import urlparse, parse_qs
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(random.uniform(1.0, 2.0))
+            # 정확 매칭: 버튼 텍스트가 페이지 번호이거나, href의 page 파라미터가 정확히 일치.
+            # (CSS href*='page=2' 는 page=20/21 에도 걸리는 substring 버그가 있어 쓰지 않는다)
+            target = str(page)
+            link = None
+            for a in self.driver.find_elements(By.CSS_SELECTOR, "a"):
+                try:
+                    if not a.is_displayed():
+                        continue
+                    if a.text.strip() == target:
+                        link = a
+                        break
+                    href = a.get_attribute("href") or ""
+                    if "page=" in href and parse_qs(urlparse(href).query).get("page", [None])[0] == target:
+                        link = a
+                        break
+                except Exception:
+                    continue
+            if not link:
+                return False
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
+            time.sleep(random.uniform(0.5, 1.0))
+            link.click()
+            time.sleep(random.uniform(2.5, 4.0))
+            return True
+        except Exception as e:
+            self.log(f"{page}페이지 이동(페이지네이션 클릭) 실패: {e}")
+            return False
+
     def _coupang_session_reset(self, use_ip_change, restart_browser=True):
         """차단 낙인이 찍힌 세션을 통째로 갈아준다: IP 변경 + 브라우저 재시작 + 홈 워밍업.
 
@@ -697,47 +772,32 @@ class CrawlerEngine:
                                 self.log(f"[{keyword}] 수집 중지됨. 현재 위치({page}페이지)를 저장합니다.")
                                 CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
                                 return
+                            import random
+                            from urllib.parse import quote
+                            # 드라이버가 재시작됐을 수 있으므로 wait을 현재 드라이버에 매번 새로 묶는다.
+                            wait = WebDriverWait(self.driver, 15)
+
                             if page == 1:
                                 self.log(f"[{keyword}] 로봇 탐지 방어를 위해 사람처럼 검색창에 타이핑을 시도합니다...")
-                                import random
-                                from selenium.webdriver.common.keys import Keys
-
-                                # 드라이버가 재시작됐을 수 있으므로 wait을 현재 드라이버에 새로 묶는다.
-                                wait = WebDriverWait(self.driver, 15)
-                                self.driver.get("https://www.coupang.com/")
-                                time.sleep(random.uniform(3.5, 5.5))  # 검색창 로딩 여유 (기존 2초는 너무 짧아 타임아웃)
-                                try:
-                                    # 클릭 가능한 상태까지 기다린다(존재만 확인하던 기존 방식은 미완성 DOM에서 실패).
-                                    search_box = wait.until(EC.element_to_be_clickable((By.ID, "headerSearchKeyword")))
-                                    search_box.click()
-                                    time.sleep(random.uniform(0.3, 0.7))
-                                    search_box.clear()
-                                    for char in keyword:
-                                        search_box.send_keys(char)
-                                        time.sleep(random.uniform(0.08, 0.25))
-                                    time.sleep(random.uniform(0.4, 0.9))
-                                    search_box.send_keys(Keys.ENTER)
-                                    time.sleep(random.uniform(2.5, 4.0))
-                                except Exception as e:
-                                    self.log(f"검색창 입력 실패, 홈 워밍업 후 검색 URL로 우회합니다: {e}")
-                                    # URL 직행은 봇 신호이므로, 최소한 홈을 한 번 더 거쳐 세션을 확보한 뒤 이동한다.
+                                if not self._coupang_type_search(keyword, wait):
+                                    # 검색창 실패 시에만 URL 폴백(홈 워밍업 경유)
+                                    self.log(f"[{keyword}] 검색창 입력 실패 → 홈 워밍업 후 검색 URL로 우회합니다.")
                                     try:
                                         self.driver.get("https://www.coupang.com/")
                                         time.sleep(random.uniform(2.0, 3.5))
                                     except Exception:
                                         pass
-                                    self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
+                                    self.driver.get(f"https://www.coupang.com/np/search?q={quote(keyword)}&page={page}")
                                     time.sleep(random.uniform(2.5, 4.0))
                             else:
-                                self.log(f"[{keyword}] 쿠팡 {page}페이지 상품 검색 시작...")
-                                # 워밍업: 홈 먼저 방문해 세션/쿠키 확보 (2페이지+ 직접 접근 차단·IP 변경 후 세션 리셋 회피)
-                                try:
-                                    self.driver.get("https://www.coupang.com/")
-                                    time.sleep(2)
-                                except Exception:
-                                    pass
-                                self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
-                                time.sleep(3)
+                                # 2페이지+ 는 검색창→페이지네이션 클릭으로 사람처럼 이동한다.
+                                # (URL 직행 딥링크는 쿠팡이 빈 결과를 주므로 반드시 클릭 이동)
+                                self.log(f"[{keyword}] 쿠팡 {page}페이지로 이동합니다... (검색→페이지네이션 클릭)")
+                                if not self._coupang_goto_page(keyword, page, wait):
+                                    self.log(f"[{keyword}] 페이지네이션 클릭 실패 → 검색 세션 확보 후 URL 폴백")
+                                    self._coupang_type_search(keyword, wait)  # 정상 세션 먼저 확보
+                                    self.driver.get(f"https://www.coupang.com/np/search?q={quote(keyword)}&page={page}")
+                                    time.sleep(random.uniform(2.5, 4.0))
 
                             # IP 차단 및 CAPTCHA 감지
                             current_url = self.driver.current_url
@@ -765,10 +825,14 @@ class CrawlerEngine:
                                             items.append(parent)
 
                             if not items:
-                                self.log(f"[{keyword}] 검색 결과가 없거나 차단되었습니다. 5초 후 재시도합니다...")
-                                time.sleep(5)
-                                self.driver.refresh()
-                                time.sleep(5)
+                                try:
+                                    self.log(f"[{keyword}] 검색 결과가 없거나 차단되었습니다. (현재 주소: {self.driver.current_url}) 검색창으로 재진입 후 재시도합니다...")
+                                except Exception:
+                                    self.log(f"[{keyword}] 검색 결과가 없거나 차단되었습니다. 재시도합니다...")
+                                time.sleep(3)
+                                # 단순 refresh 대신, 사람처럼 검색창→페이지네이션으로 다시 진입한다.
+                                self._coupang_goto_page(keyword, page, wait)
+                                time.sleep(3)
 
                                 soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
                                 items = soup.select("li.search-product")
