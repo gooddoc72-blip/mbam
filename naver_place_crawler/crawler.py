@@ -634,8 +634,6 @@ class CrawlerEngine:
         prod["주소"] = seller_address
         prod["이메일"] = seller_email
         prod["사업자번호"] = seller_bizno
-        if "판매자 연락처" in prod:
-            del prod["판매자 연락처"]
         return True
 
     def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None, rounds=1, pages_per_round=1):
