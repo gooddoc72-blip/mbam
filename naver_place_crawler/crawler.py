@@ -488,6 +488,156 @@ class CrawlerEngine:
         self.log("네이버 쇼핑 판매자 크롤링 로직은 추후 확장이 가능하도록 뼈대만 잡아두었습니다.")
         pass
 
+    def _interruptible_sleep(self, seconds):
+        """중지 요청에 빠르게 반응하도록 0.5초 단위로 쪼개어 대기한다."""
+        end = seconds
+        slept = 0.0
+        while slept < end and self.is_running:
+            time.sleep(min(0.5, end - slept))
+            slept += 0.5
+
+    def _build_coupang_driver(self):
+        """쿠팡용 크롬 드라이버를 새로 생성한다. (재시작 시 재사용)"""
+        options = uc.ChromeOptions()
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--start-maximized')
+        options.add_argument('--accept-lang=ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7')
+        driver_path = resolve_driver_path(self.log)
+        driver = uc.Chrome(options=options, driver_executable_path=driver_path)
+        driver.set_page_load_timeout(30)  # 상세페이지가 오래 매달리는 것 방지
+        return driver
+
+    def _coupang_is_blocked(self):
+        """현재 페이지가 쿠팡(Akamai) 차단 상태인지 확인한다."""
+        try:
+            return "Access Denied" in self.driver.title or "edgesuite" in self.driver.page_source
+        except Exception:
+            return False
+
+    def _coupang_session_reset(self, use_ip_change, restart_browser=True):
+        """차단 낙인이 찍힌 세션을 통째로 갈아준다: IP 변경 + 브라우저 재시작 + 홈 워밍업.
+
+        Akamai는 _abck 쿠키뿐 아니라 localStorage/sessionStorage의 센서 데이터에도
+        봇 판정을 심어둔다. delete_all_cookies()만으로는 이 지문이 남으므로,
+        브라우저를 완전히 종료(quit)하고 새 프로필로 다시 띄워 "완전히 새로운 사람"이 된다.
+        홈을 먼저 방문해 정상 쿠키/센서를 새로 발급받은 뒤 복귀한다.
+        """
+        import random
+        if use_ip_change:
+            import ip_changer
+            changed = ip_changer.toggle_airplane_mode(log=self.log)
+            if not changed:
+                self.log("⚠️ IP가 바뀌지 않았습니다. 휴대폰 테더링 연결 상태를 확인하세요.")
+
+        if restart_browser:
+            # 브라우저 완전 재시작 — 쿠키+localStorage+세션지문까지 통째로 폐기
+            try:
+                if self.driver:
+                    self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
+            try:
+                self.driver = self._build_coupang_driver()
+                self.log("브라우저를 완전히 새로 띄웠습니다. (쿠키·저장소·세션지문 초기화)")
+            except Exception as e:
+                self.log(f"⚠️ 브라우저 재시작 실패: {e}")
+                return False
+        else:
+            try:
+                self.driver.delete_all_cookies()
+                self.log("차단 판정이 담긴 쿠키를 삭제했습니다. (세션 초기화)")
+            except Exception as e:
+                self.log(f"쿠키 삭제 실패(무시하고 진행): {e}")
+
+        # 홈 워밍업 — 검색 없이 곧장 상세로 가지 않도록 정상 세션을 먼저 확보
+        try:
+            self.driver.get("https://www.coupang.com/")
+            time.sleep(random.uniform(2, 4))
+        except Exception:
+            pass
+        return True
+
+    def _collect_coupang_detail(self, prod, use_ip_change):
+        """상품 상세 페이지에서 판매자 정보를 수집해 prod에 채운다.
+
+        반환값: True = 수집 완료(정보가 없어도 페이지는 정상 열람),
+                False = 차단으로 페이지 자체를 못 봄(재시도 필요, prod는 저장하면 안 됨)
+        """
+        import random
+        if self.driver is None:
+            return False  # 이전 재시작 실패 등으로 드라이버가 없으면 저장 금지
+        seller_name = "N/A"
+        seller_contact = "N/A"
+        seller_address = "N/A"
+        seller_email = "N/A"
+        seller_bizno = "N/A"
+
+        try:
+            # 봇 차단 방지를 위한 랜덤 딜레이
+            time.sleep(random.uniform(1.5, 3.5))
+
+            self.driver.get(prod["상품URL"])
+
+            # 페이지 로드 후 자연스러운 스크롤
+            time.sleep(random.uniform(1.0, 2.0))
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
+            time.sleep(random.uniform(0.5, 1.0))
+
+            # Access Denied → 세션 리셋(IP+브라우저 재시작+워밍업) 후 같은 상품 1회 재시도
+            if self._coupang_is_blocked():
+                self.log("  [경고] 쿠팡 접근 차단됨(Access Denied). IP 변경+브라우저 재시작 후 재시도합니다...")
+                if not self._coupang_session_reset(use_ip_change) or self.driver is None:
+                    return False  # 재시작 실패 — 저장하지 않고 재시도 큐로
+                self.driver.get(prod["상품URL"])
+                time.sleep(random.uniform(2, 4))
+                if self._coupang_is_blocked():
+                    return False
+
+            import bs4
+            detail_soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
+
+            for th in detail_soup.find_all('th'):
+                th_text = th.get_text(strip=True).replace(" ", "").lower()
+                td = th.find_next_sibling('td')
+                if td:
+                    td_text = td.get_text(strip=True)
+                    if "상호/대표자" in th_text or "판매자상호" in th_text or "상호명" in th_text:
+                        seller_name = td_text
+                    elif "사업장소재지" in th_text or "주소" in th_text:
+                        seller_address = td_text
+                    elif "e-mail" in th_text or "이메일" in th_text:
+                        seller_email = td_text
+                    elif "연락처" in th_text or "전화번호" in th_text:
+                        seller_contact = td_text
+                    elif "사업자번호" in th_text or "사업자등록번호" in th_text:
+                        seller_bizno = td_text
+
+            if seller_name == "N/A":
+                seller_info_div = detail_soup.select_one("div.seller-info, div.prod-sell-info")
+                if seller_info_div:
+                    text = seller_info_div.get_text(" ", strip=True)
+                    if "판매자:" in text:
+                        text = text.split("판매자:")[1].split("다른 판매자")[0].strip()
+                        seller_name = text
+                    elif "쿠팡(주)" in text or "로켓그로스" in text:
+                        seller_name = text
+
+            if prod["로켓배송여부"] == "O" and seller_name == "N/A":
+                seller_name = "쿠팡(주) 또는 로켓그로스"
+
+        except Exception as detail_e:
+            self.log(f"상세 페이지 수집 오류: {detail_e}")
+
+        prod["판매자명"] = seller_name
+        prod["판매자 연락처"] = seller_contact
+        prod["주소"] = seller_address
+        prod["이메일"] = seller_email
+        prod["사업자번호"] = seller_bizno
+        if "판매자 연락처" in prod:
+            del prod["판매자 연락처"]
+        return True
+
     def crawl_coupang(self, keywords, use_ip_change=False, resume_checkpoint=None, rounds=1, pages_per_round=1):
         self.is_running = True
         self.results = resume_checkpoint.get("results", []) if resume_checkpoint else []
@@ -511,16 +661,7 @@ class CrawlerEngine:
         from checkpoint_manager import CheckpointManager
 
         try:
-            options = uc.ChromeOptions()
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--start-maximized')
-            options.add_argument('--accept-lang=ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7')
-
-            driver_path = resolve_driver_path(self.log)
-            self.driver = uc.Chrome(options=options, driver_executable_path=driver_path)
-            self.driver.set_page_load_timeout(30)  # 상세페이지가 오래 매달리는 것 방지
-
-            wait = WebDriverWait(self.driver, 10)
+            self.driver = self._build_coupang_driver()
 
             for idx, keyword in enumerate(keywords):
                 if not self.is_running:
@@ -563,21 +704,32 @@ class CrawlerEngine:
                                 import random
                                 from selenium.webdriver.common.keys import Keys
 
+                                # 드라이버가 재시작됐을 수 있으므로 wait을 현재 드라이버에 새로 묶는다.
+                                wait = WebDriverWait(self.driver, 15)
                                 self.driver.get("https://www.coupang.com/")
-                                time.sleep(2)
+                                time.sleep(random.uniform(3.5, 5.5))  # 검색창 로딩 여유 (기존 2초는 너무 짧아 타임아웃)
                                 try:
-                                    search_box = wait.until(EC.presence_of_element_located((By.ID, "headerSearchKeyword")))
+                                    # 클릭 가능한 상태까지 기다린다(존재만 확인하던 기존 방식은 미완성 DOM에서 실패).
+                                    search_box = wait.until(EC.element_to_be_clickable((By.ID, "headerSearchKeyword")))
+                                    search_box.click()
+                                    time.sleep(random.uniform(0.3, 0.7))
                                     search_box.clear()
                                     for char in keyword:
                                         search_box.send_keys(char)
-                                        time.sleep(random.uniform(0.1, 0.2))
-                                    time.sleep(0.5)
+                                        time.sleep(random.uniform(0.08, 0.25))
+                                    time.sleep(random.uniform(0.4, 0.9))
                                     search_box.send_keys(Keys.ENTER)
-                                    time.sleep(3)
+                                    time.sleep(random.uniform(2.5, 4.0))
                                 except Exception as e:
-                                    self.log(f"검색창 입력 실패, 기존 주소창 방식으로 우회합니다: {e}")
+                                    self.log(f"검색창 입력 실패, 홈 워밍업 후 검색 URL로 우회합니다: {e}")
+                                    # URL 직행은 봇 신호이므로, 최소한 홈을 한 번 더 거쳐 세션을 확보한 뒤 이동한다.
+                                    try:
+                                        self.driver.get("https://www.coupang.com/")
+                                        time.sleep(random.uniform(2.0, 3.5))
+                                    except Exception:
+                                        pass
                                     self.driver.get(f"https://www.coupang.com/np/search?q={keyword}&page={page}")
-                                    time.sleep(3)
+                                    time.sleep(random.uniform(2.5, 4.0))
                             else:
                                 self.log(f"[{keyword}] 쿠팡 {page}페이지 상품 검색 시작...")
                                 # 워밍업: 홈 먼저 방문해 세션/쿠키 확보 (2페이지+ 직접 접근 차단·IP 변경 후 세션 리셋 회피)
@@ -727,89 +879,54 @@ class CrawlerEngine:
 
                         self.log(f"[{keyword}] {round_num}회차 - 새로운 상품 총 {len(products)}개의 상세 수집을 시작합니다.")
 
+                        import random
+                        retry_queue = []
                         for i, prod in enumerate(products):
                             if not self.is_running: break
 
-                            # 자동 IP 변경 (IP 차단 방지)
+                            # 자동 IP 변경 (IP 차단 방지) — IP만 바꾸면 Akamai 쿠키/저장소 낙인이
+                            # 따라오므로 브라우저를 완전히 재시작하고 홈 워밍업까지 수행한다.
                             if use_ip_change and i > 0 and i % 20 == 0:
-                                self.log("안전한 수집을 위해 IP를 변경합니다... (USB 테더링)")
-                                import ip_changer
-                                ip_changer.toggle_airplane_mode(log=self.log)
+                                self.log("안전한 수집을 위해 IP를 변경하고 브라우저를 재시작합니다... (USB 테더링)")
+                                self._coupang_session_reset(use_ip_change)
                                 time.sleep(5)
 
                             self.log(f"[{keyword}] {i+1}/{len(products)} 상품 상세 정보 수집 중...")
 
-                            seller_name = "N/A"
-                            seller_contact = "N/A"
-                            seller_address = "N/A"
-                            seller_email = "N/A"
-                            seller_bizno = "N/A"
+                            if self._collect_coupang_detail(prod, use_ip_change):
+                                # 수집 성공 시 이력에 추가
+                                self.history_manager.add_collected(prod["상품URL"])
+                                self.results.append(prod)
+                            else:
+                                self.log("  [경고] 재시도에도 차단 상태입니다. 이 상품은 회차 말미에 다시 시도합니다.")
+                                retry_queue.append(prod)
 
-                            try:
-                                # 봇 차단 방지를 위한 랜덤 딜레이
-                                import random
-                                time.sleep(random.uniform(1.5, 3.5))
+                            # 사람처럼 보이는 체류 간격: 상품마다 5~15초 랜덤(가우시안 중심 8초),
+                            # 8개마다 20~40초 '지능형 휴식'을 넣어 기계적 등간격 리듬을 깬다.
+                            if self.is_running and i < len(products) - 1:
+                                if (i + 1) % 8 == 0:
+                                    rest = random.uniform(20, 40)
+                                    self.log(f"  자연스러운 패턴을 위해 {rest:.0f}초 쉬어갑니다...")
+                                else:
+                                    rest = min(15, max(5, random.gauss(8, 2.5)))
+                                self._interruptible_sleep(rest)
 
-                                self.driver.get(prod["상품URL"])
-
-                                # 페이지 로드 후 자연스러운 스크롤
-                                time.sleep(random.uniform(1.0, 2.0))
-                                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
-                                time.sleep(random.uniform(0.5, 1.0))
-
-                                # Access Denied 처리 방어 (단순 확인용)
-                                if "Access Denied" in self.driver.title or "edgesuite" in self.driver.page_source:
-                                    self.log("  [경고] 쿠팡 접근 차단됨(Access Denied). 10초 대기 후 새로고침 시도...")
-                                    time.sleep(10)
-                                    self.driver.refresh()
-                                    time.sleep(5)
-
-                                import bs4
-                                detail_soup = bs4.BeautifulSoup(self.driver.page_source, 'html.parser')
-
-                                for th in detail_soup.find_all('th'):
-                                    th_text = th.get_text(strip=True).replace(" ", "").lower()
-                                    td = th.find_next_sibling('td')
-                                    if td:
-                                        td_text = td.get_text(strip=True)
-                                        if "상호/대표자" in th_text or "판매자상호" in th_text or "상호명" in th_text:
-                                            seller_name = td_text
-                                        elif "사업장소재지" in th_text or "주소" in th_text:
-                                            seller_address = td_text
-                                        elif "e-mail" in th_text or "이메일" in th_text:
-                                            seller_email = td_text
-                                        elif "연락처" in th_text or "전화번호" in th_text:
-                                            seller_contact = td_text
-                                        elif "사업자번호" in th_text or "사업자등록번호" in th_text:
-                                            seller_bizno = td_text
-
-                                if seller_name == "N/A":
-                                    seller_info_div = detail_soup.select_one("div.seller-info, div.prod-sell-info")
-                                    if seller_info_div:
-                                        text = seller_info_div.get_text(" ", strip=True)
-                                        if "판매자:" in text:
-                                            text = text.split("판매자:")[1].split("다른 판매자")[0].strip()
-                                            seller_name = text
-                                        elif "쿠팡(주)" in text or "로켓그로스" in text:
-                                            seller_name = text
-
-                                if prod["로켓배송여부"] == "O" and seller_name == "N/A":
-                                    seller_name = "쿠팡(주) 또는 로켓그로스"
-
-                            except Exception as detail_e:
-                                self.log(f"상세 페이지 수집 오류: {detail_e}")
-
-                            prod["판매자명"] = seller_name
-                            prod["판매자 연락처"] = seller_contact
-                            prod["주소"] = seller_address
-                            prod["이메일"] = seller_email
-                            prod["사업자번호"] = seller_bizno
-                            if "판매자 연락처" in prod:
-                                del prod["판매자 연락처"]
-
-                            # 수집 성공 시 이력에 추가
-                            self.history_manager.add_collected(prod["상품URL"])
-                            self.results.append(prod)
+                        # ---- 차단으로 밀린 상품 재시도 (회차 말미 1회) ----
+                        if retry_queue and self.is_running:
+                            self.log(f"[{keyword}] 차단으로 밀린 상품 {len(retry_queue)}개를 재시도합니다. (세션 초기화 후 잠시 대기)")
+                            self._coupang_session_reset(use_ip_change)
+                            time.sleep(10)
+                            still_blocked = 0
+                            for j, prod in enumerate(retry_queue):
+                                if not self.is_running: break
+                                self.log(f"[{keyword}] 재시도 {j+1}/{len(retry_queue)} 상품 상세 정보 수집 중...")
+                                if self._collect_coupang_detail(prod, use_ip_change):
+                                    self.history_manager.add_collected(prod["상품URL"])
+                                    self.results.append(prod)
+                                else:
+                                    still_blocked += 1
+                            if still_blocked:
+                                self.log(f"[{keyword}] {still_blocked}개 상품은 끝내 차단으로 수집하지 못했습니다. (수집 이력에 남기지 않으므로 다음 실행 때 다시 수집됩니다)")
 
                         # ---- 이번 회차 마무리: 결과 저장 + 체크포인트 갱신 ----
                         round_items = self.results[round_start_len:]
@@ -822,11 +939,8 @@ class CrawlerEngine:
                         # 회차 사이 대기/IP 변경 (봇 탐지 방지)
                         if round_num < rounds and self.is_running:
                             if use_ip_change:
-                                self.log("다음 회차 전 IP를 변경합니다... (USB 테더링)")
-                                import ip_changer
-                                changed = ip_changer.toggle_airplane_mode(log=self.log)
-                                if not changed:
-                                    self.log("⚠️ IP가 바뀌지 않은 채로 다음 회차를 진행하면 쿠팡에 차단될 수 있습니다. 휴대폰 연결 상태를 확인하세요.")
+                                self.log("다음 회차 전 IP를 변경하고 세션을 초기화합니다... (USB 테더링)")
+                                self._coupang_session_reset(use_ip_change)
                                 time.sleep(5)
                             else:
                                 import random
@@ -846,7 +960,10 @@ class CrawlerEngine:
             traceback.print_exc()
         finally:
             if self.driver:
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                except Exception:
+                    pass
                 self.driver = None
             self.is_running = False
 
