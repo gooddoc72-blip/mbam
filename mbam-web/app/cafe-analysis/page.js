@@ -134,21 +134,72 @@ function CafeAuthorityCards({ item }) {
     );
 }
 
-export default function CafeAnalysisPage() {
-    const [mode, setMode] = usePersistentState('cafe-analysis:mode', 'url'); // 'url' | 'content'
+// 블로그 URL 권위 분석 결과 카드 — 블로그 지수 진단(/api/seo/blog-index) 결과 표시
+function BlogAuthorityCards({ item }) {
+    const b = item.blog || {};
+    const s = b.stats || {};
+    const ix = b.index || {};
+    const tierColor = (tier) => {
+        if (!tier) return '#64748b';
+        if (tier.startsWith('최적')) return '#10b981';
+        if (tier.startsWith('준최적')) return '#3b82f6';
+        if (tier === '일반') return '#f59e0b';
+        return '#ef4444';
+    };
+    const n = (v) => (v == null ? '-' : Number(v).toLocaleString());
+    const d = (ms) => (ms ? new Date(ms).toLocaleDateString('ko-KR') : '-');
+    return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ flex: '1 1 220px', border: '1px solid #e2e8f0', backgroundColor: 'white', borderRadius: '10px', padding: '1.2rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.8rem', color: '#7c3aed', fontWeight: 'bold', marginBottom: '0.5rem' }}>🩺 블로그 지수 (추정)</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 'bold', color: tierColor(ix.tier) }}>{ix.score ?? '-'}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 'bold', color: tierColor(ix.tier) }}>{ix.tier || '-'} <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>Lv.{ix.level ?? '-'}</span></div>
+            </div>
+            <div style={{ flex: '1 1 240px', border: '1px solid #e2e8f0', backgroundColor: 'white', borderRadius: '10px', padding: '1.2rem' }}>
+                <div style={{ fontSize: '0.8rem', color: '#0ea5e9', fontWeight: 'bold', marginBottom: '0.6rem' }}>📚 블로그 규모</div>
+                <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#0f172a', marginBottom: '0.5rem' }}>{s.title || s.blog_id || '-'}</div>
+                <div style={{ fontSize: '0.88rem', color: '#475569', lineHeight: 1.8 }}>
+                    👥 이웃 <strong>{n(s.subscriber_count)}</strong>명 · 📝 총 글 <strong>{n(s.total_post_count)}</strong>개<br />
+                    📅 개설 {d(s.first_post_date)} · 최근 발행 {d(s.last_post_date)}
+                </div>
+            </div>
+            <div style={{ flex: '1 1 240px', border: '1px solid #e2e8f0', backgroundColor: 'white', borderRadius: '10px', padding: '1.2rem' }}>
+                <div style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 'bold', marginBottom: '0.6rem' }}>📊 활동/트래픽</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', textAlign: 'center' }}>
+                    <div><div style={{ fontSize: '0.75rem', color: '#64748b' }}>총 방문</div><div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#0f172a' }}>{n(s.total_visitor_count)}</div></div>
+                    <div><div style={{ fontSize: '0.75rem', color: '#64748b' }}>일 방문</div><div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#0f172a' }}>{n(s.day_visitor_count)}</div></div>
+                    <div><div style={{ fontSize: '0.75rem', color: '#64748b' }}>최근 30일 글</div><div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#3b82f6' }}>{n(s.recent_post_count_30d)}</div></div>
+                    <div><div style={{ fontSize: '0.75rem', color: '#64748b' }}>평균 공감</div><div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: '#ef4444' }}>{s.avg_sympathy != null ? Number(s.avg_sympathy).toFixed(1) : '-'}</div></div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default function CafeAnalysisPage({ channel = 'cafe' }) {
+    // channel: 'cafe' | 'blog' — 메뉴별로 분석 대상/기능을 분리 (카페 메뉴=카페글, 블로그 메뉴=블로그글)
+    const isBlog = channel === 'blog';
+    const menuKey = isBlog ? 'blog-analysis' : 'cafe-analysis';
+    const chName = isBlog ? '블로그글' : '카페글';
+    const chDomain = isBlog ? 'blog.naver.com' : 'cafe.naver.com';
+    const domainOk = (u) => u.includes(chDomain);
+
+    const [mode, setMode] = usePersistentState(`${menuKey}:mode`, 'url'); // 'url' | 'content'
 
     // ─ 본문 해부 분석 (다중 URL, 최대 10) ───────────────────────
-    const [keyword, setKeyword] = usePersistentState('cafe-analysis:keyword', '');
-    const [cafeUrls, setCafeUrls] = usePersistentState('cafe-analysis:cafeUrls', '');
-    const [loading, setLoading] = usePersistentState('cafe-analysis:loading', false);
-    const [result, setResult] = usePersistentState('cafe-analysis:result', null);        // [{url, title, used_keyword, content_chars, data}]
-    const [analyzeErrors, setAnalyzeErrors] = usePersistentState('cafe-analysis:analyzeErrors', []);
-    const [error, setError] = usePersistentState('cafe-analysis:error', '');
+    const [keyword, setKeyword] = usePersistentState(`${menuKey}:keyword`, '');
+    const [cafeUrls, setCafeUrls] = usePersistentState(`${menuKey}:cafeUrls`, '');
+    const [loading, setLoading] = usePersistentState(`${menuKey}:loading`, false);
+    const [result, setResult] = usePersistentState(`${menuKey}:result`, null);        // [{url, title, used_keyword, content_chars, data}]
+    const [analyzeErrors, setAnalyzeErrors] = usePersistentState(`${menuKey}:analyzeErrors`, []);
+    const [error, setError] = usePersistentState(`${menuKey}:error`, '');
 
     const handleAnalyze = async () => {
         const urls = cafeUrls.split(/\r?\n/).map(s => s.trim()).filter(s => s.startsWith('http'));
-        if (urls.length === 0) { alert('카페글 또는 블로그글 URL을 1개 이상 입력해주세요. (한 줄에 한 개)'); return; }
+        if (urls.length === 0) { alert(`${chName} URL을 1개 이상 입력해주세요. (한 줄에 한 개)`); return; }
         if (urls.length > 10) { alert('한 번에 최대 10개까지 분석할 수 있습니다.'); return; }
+        const wrong = urls.filter(u => !domainOk(u));
+        if (wrong.length) { alert(`이 메뉴는 ${chName} 전용입니다. ${chDomain} 형식의 URL만 입력해주세요.\n(잘못된 URL: ${wrong[0]})`); return; }
         setLoading(true); setError(''); setResult(null); setAnalyzeErrors([]);
         try {
             const res = await fetchWithAuth('/api/seo/analyze-cafe-post', {
@@ -162,7 +213,7 @@ export default function CafeAnalysisPage() {
                 setResult(data.items);
                 setAnalyzeErrors(data.errors || []);
                 if (data.items.length === 0) setError('분석된 글이 없습니다. URL을 확인해주세요.');
-                else addHistory('cafe-analysis', {
+                else addHistory(menuKey, {
                     summary: `본문 해부 ${data.items.length}건${keyword ? ' · ' + keyword : ''}`,
                     payload: { cafeUrls, keyword, result: data.items, analyzeErrors: data.errors || [], mode: 'content' }
                 });
@@ -243,19 +294,52 @@ export default function CafeAnalysisPage() {
         }
     };
 
-    // ─ URL 권위 분석 (신규) ─────────────────────────────────────
-    const [urlsText, setUrlsText] = usePersistentState('cafe-analysis:urlsText', '');
-    const [urlLoading, setUrlLoading] = usePersistentState('cafe-analysis:urlLoading', false);
-    const [urlError, setUrlError] = usePersistentState('cafe-analysis:urlError', '');
-    const [urlItems, setUrlItems] = usePersistentState('cafe-analysis:urlItems', null);    // [{url, cafe_author_info, ...}]
-    const [urlErrors, setUrlErrors] = usePersistentState('cafe-analysis:urlErrors', []);
+    // ─ URL 권위 분석 ─────────────────────────────────────
+    // cafe: 카페 작성자/카페 권위 (analyze-cafe-urls) / blog: 블로그 지수 진단 (blog-index)
+    const [urlsText, setUrlsText] = usePersistentState(`${menuKey}:urlsText`, '');
+    const [urlLoading, setUrlLoading] = usePersistentState(`${menuKey}:urlLoading`, false);
+    const [urlError, setUrlError] = usePersistentState(`${menuKey}:urlError`, '');
+    const [urlItems, setUrlItems] = usePersistentState(`${menuKey}:urlItems`, null);
+    const [urlErrors, setUrlErrors] = usePersistentState(`${menuKey}:urlErrors`, []);
 
     const handleUrlAnalyze = async () => {
         const urls = urlsText.split(/\r?\n/).map(s => s.trim()).filter(s => s.startsWith('http'));
-        if (urls.length === 0) { alert('카페 URL을 1개 이상 입력해주세요. (한 줄에 한 개)'); return; }
+        if (urls.length === 0) { alert(`${chName} URL을 1개 이상 입력해주세요. (한 줄에 한 개)`); return; }
         if (urls.length > 5) { alert('한 번에 최대 5개까지 분석할 수 있습니다.'); return; }
+        const wrong = urls.filter(u => !domainOk(u));
+        if (wrong.length) { alert(`이 메뉴는 ${chName} 전용입니다. ${chDomain} 형식의 URL만 입력해주세요.\n(잘못된 URL: ${wrong[0]})`); return; }
         setUrlLoading(true); setUrlError(''); setUrlItems(null); setUrlErrors([]);
         try {
+            if (isBlog) {
+                // 블로그: URL별 블로그 지수 진단 (같은 블로그가 중복되면 1회만)
+                const seen = new Set();
+                const items = [], errs = [];
+                for (const u of urls) {
+                    const idMatch = u.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+                    const blogId = idMatch ? idMatch[1] : u;
+                    if (seen.has(blogId)) continue;
+                    seen.add(blogId);
+                    try {
+                        const res = await fetchWithAuth('/api/seo/blog-index', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ blog: u })
+                        });
+                        let data = await res.json();
+                        if (!res.ok) throw new Error(data.detail || `서버 오류 (${res.status})`);
+                        data = await resolveMaybeAgent(data, { tries: 90, intervalMs: 2000 });
+                        items.push({ url: u, title: data.stats?.title || blogId, blog: data });
+                    } catch (err) {
+                        errs.push({ url: u, error: err.message || '분석 실패' });
+                    }
+                }
+                setUrlItems(items); setUrlErrors(errs);
+                if (items.length) addHistory(menuKey, {
+                    summary: `블로그 권위 분석 ${items.length}건`,
+                    payload: { urlsText, urlItems: items, urlErrors: errs, mode: 'url' }
+                });
+                return;
+            }
             const res = await fetchWithAuth('/api/seo/analyze-cafe-urls', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -269,7 +353,7 @@ export default function CafeAnalysisPage() {
             data = await resolveMaybeAgent(data, { tries: 90, intervalMs: 3000 });
             setUrlItems(data.items || []);
             setUrlErrors(data.errors || []);
-            if ((data.items || []).length) addHistory('cafe-analysis', {
+            if ((data.items || []).length) addHistory(menuKey, {
                 summary: `URL 권위 분석 ${data.items.length}건`,
                 payload: { urlsText, urlItems: data.items, urlErrors: data.errors || [], mode: 'url' }
             });
@@ -298,8 +382,12 @@ export default function CafeAnalysisPage() {
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto", paddingBottom: "3rem" }}>
             <div style={{ marginBottom: "1rem" }}>
-                <h1 style={{ fontSize: "2rem", color: "#1e293b", margin: "0 0 0.5rem 0" }}>카페글·블로그글 분석</h1>
-                <p style={{ color: "#64748b", margin: 0 }}>네이버 검색 인기글을 분석합니다 — URL 권위 분석(카페 작성자/카페 권위) + 본문 해부 분석(카페글·블로그글 유형 자동 판별).</p>
+                <h1 style={{ fontSize: "2rem", color: "#1e293b", margin: "0 0 0.5rem 0" }}>{chName} 분석</h1>
+                <p style={{ color: "#64748b", margin: 0 }}>
+                    {isBlog
+                        ? '네이버 검색 인기 블로그글을 분석합니다 — URL 권위 분석(블로그 지수·등급) + 본문 해부 분석(블로그글 전용).'
+                        : '네이버 검색 인기 카페글을 분석합니다 — URL 권위 분석(카페 작성자/카페 권위) + 본문 해부 분석(카페글 전용).'}
+                </p>
             </div>
 
             {/* 탭 */}
@@ -313,12 +401,14 @@ export default function CafeAnalysisPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 380px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
                     {/* 입력 */}
                     <div className="glass-card" style={{ padding: '1.5rem' }}>
-                        <h3 style={{ margin: '0 0 0.6rem 0', fontSize: '1rem', color: '#334155' }}>분석할 카페 글 URL</h3>
-                        <p style={{ margin: '0 0 0.8rem 0', fontSize: '0.8rem', color: '#94a3b8' }}>한 줄에 한 개씩, 최대 5개. <code>cafe.naver.com/...</code> 형식</p>
+                        <h3 style={{ margin: '0 0 0.6rem 0', fontSize: '1rem', color: '#334155' }}>분석할 {chName} URL</h3>
+                        <p style={{ margin: '0 0 0.8rem 0', fontSize: '0.8rem', color: '#94a3b8' }}>한 줄에 한 개씩, 최대 5개. <code>{chDomain}/...</code> 형식</p>
                         <textarea
                             value={urlsText}
                             onChange={(e) => setUrlsText(e.target.value)}
-                            placeholder={"https://cafe.naver.com/example/12345\nhttps://cafe.naver.com/another/6789"}
+                            placeholder={isBlog
+                                ? "https://blog.naver.com/blogid/223938928244\nhttps://blog.naver.com/another"
+                                : "https://cafe.naver.com/example/12345\nhttps://cafe.naver.com/another/6789"}
                             rows={8}
                             style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', boxSizing: 'border-box', fontFamily: 'monospace', lineHeight: '1.5' }}
                         />
@@ -337,19 +427,34 @@ export default function CafeAnalysisPage() {
                         )}
 
                         {/* 점수 기준 안내 */}
-                        <div style={{ marginTop: '1.5rem', padding: '0.9rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.78rem', color: '#475569', lineHeight: '1.6' }}>
-                            <strong style={{ color: '#334155' }}>등급 기준</strong><br />
-                            <span style={{ color: '#92400e', fontWeight: 'bold' }}>S</span> 80+ ·{' '}
-                            <span style={{ color: '#065f46', fontWeight: 'bold' }}>A</span> 65+ ·{' '}
-                            <span style={{ color: '#1e40af', fontWeight: 'bold' }}>B</span> 45+ ·{' '}
-                            <span style={{ color: '#9a3412', fontWeight: 'bold' }}>C</span> 25+ ·{' '}
-                            <span style={{ color: '#475569', fontWeight: 'bold' }}>D</span> 미만
-                            <br /><br />
-                            <span style={{ color: '#94a3b8' }}>
-                                Author = 멤버등급 + 인기멤버 + 호응도(조회/좋아요/댓글/스크랩)<br />
-                                Cafe = 회원수 + 카페등급(씨앗~숲) + 대표카페
-                            </span>
-                        </div>
+                        {isBlog ? (
+                            <div style={{ marginTop: '1.5rem', padding: '0.9rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.78rem', color: '#475569', lineHeight: '1.6' }}>
+                                <strong style={{ color: '#334155' }}>지수 등급 기준 (0~100 추정)</strong><br />
+                                <span style={{ color: '#065f46', fontWeight: 'bold' }}>최적</span> 70+ ·{' '}
+                                <span style={{ color: '#1e40af', fontWeight: 'bold' }}>준최적</span> 50+ ·{' '}
+                                <span style={{ color: '#92400e', fontWeight: 'bold' }}>일반</span> 30+ ·{' '}
+                                <span style={{ color: '#991b1b', fontWeight: 'bold' }}>저품질</span> 미만
+                                <br /><br />
+                                <span style={{ color: '#94a3b8' }}>
+                                    이웃·트래픽·인게이지먼트·누적 글수·업력·발행 활성도를 종합한 추정치<br />
+                                    (네이버 공식 지수 아님 · 같은 블로그 URL은 1회만 진단)
+                                </span>
+                            </div>
+                        ) : (
+                            <div style={{ marginTop: '1.5rem', padding: '0.9rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.78rem', color: '#475569', lineHeight: '1.6' }}>
+                                <strong style={{ color: '#334155' }}>등급 기준</strong><br />
+                                <span style={{ color: '#92400e', fontWeight: 'bold' }}>S</span> 80+ ·{' '}
+                                <span style={{ color: '#065f46', fontWeight: 'bold' }}>A</span> 65+ ·{' '}
+                                <span style={{ color: '#1e40af', fontWeight: 'bold' }}>B</span> 45+ ·{' '}
+                                <span style={{ color: '#9a3412', fontWeight: 'bold' }}>C</span> 25+ ·{' '}
+                                <span style={{ color: '#475569', fontWeight: 'bold' }}>D</span> 미만
+                                <br /><br />
+                                <span style={{ color: '#94a3b8' }}>
+                                    Author = 멤버등급 + 인기멤버 + 호응도(조회/좋아요/댓글/스크랩)<br />
+                                    Cafe = 회원수 + 카페등급(씨앗~숲) + 대표카페
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {/* 결과 */}
@@ -357,14 +462,14 @@ export default function CafeAnalysisPage() {
                         {!urlItems && !urlLoading && (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', border: '2px dashed #cbd5e1', borderRadius: '16px', color: '#94a3b8' }}>
                                 <Users size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                                <p style={{ fontSize: '1rem', margin: 0 }}>카페 URL을 입력하면 작성자/카페 권위 지수를 분석합니다.</p>
-                                <p style={{ fontSize: '0.85rem', marginTop: '0.4rem' }}>닉네임 · 등급 · 인기멤버 · 글 호응도 · 카페 회원수</p>
+                                <p style={{ fontSize: '1rem', margin: 0 }}>{isBlog ? '블로그 글 URL을 입력하면 블로그 지수·등급을 분석합니다.' : '카페 URL을 입력하면 작성자/카페 권위 지수를 분석합니다.'}</p>
+                                <p style={{ fontSize: '0.85rem', marginTop: '0.4rem' }}>{isBlog ? '지수 · 등급(최적~저품질) · 이웃수 · 방문자 · 발행 활성도' : '닉네임 · 등급 · 인기멤버 · 글 호응도 · 카페 회원수'}</p>
                             </div>
                         )}
                         {urlLoading && (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px' }}>
                                 <div style={{ width: '50px', height: '50px', border: '4px solid #f3f3f3', borderTop: '4px solid #3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                                <p style={{ marginTop: '1.5rem', color: '#3b82f6', fontWeight: 'bold', fontSize: '1rem' }}>카페 데이터 수집 중…</p>
+                                <p style={{ marginTop: '1.5rem', color: '#3b82f6', fontWeight: 'bold', fontSize: '1rem' }}>{isBlog ? '블로그 데이터 수집 중…' : '카페 데이터 수집 중…'}</p>
                                 <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
                             </div>
                         )}
@@ -382,7 +487,7 @@ export default function CafeAnalysisPage() {
                                             </a>
                                             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px', wordBreak: 'break-all' }}>{item.url}</div>
                                         </div>
-                                        <CafeAuthorityCards item={item} />
+                                        {isBlog ? <BlogAuthorityCards item={item} /> : <CafeAuthorityCards item={item} />}
                                     </div>
                                 ))}
                                 {urlErrors.length > 0 && (
@@ -406,9 +511,9 @@ export default function CafeAnalysisPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     <div className="glass-card" style={{ padding: '2rem' }}>
                         <div style={{ marginBottom: '1.2rem' }}>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>카페글·블로그글 URL <span style={{ fontWeight: 'normal', color: '#94a3b8', fontSize: '0.85rem' }}>(한 줄에 하나, 최대 10개)</span></label>
-                            <textarea value={cafeUrls} onChange={(e) => setCafeUrls(e.target.value)} placeholder={"https://cafe.naver.com/카페주소/글번호\nhttps://blog.naver.com/블로그아이디/글번호\n..."} rows={5} style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.6' }} />
-                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.83rem', color: '#94a3b8' }}>네이버 검색 인기글의 <b>카페글·블로그글 URL</b>을 섞어 넣어도 됩니다. 서버가 글 유형을 자동 판별해 각각 맞는 지표로 해부합니다. (현재 {cafeUrls.split(/\r?\n/).filter(s => s.trim().startsWith('http')).length}개)</p>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>{chName} URL <span style={{ fontWeight: 'normal', color: '#94a3b8', fontSize: '0.85rem' }}>(한 줄에 하나, 최대 10개)</span></label>
+                            <textarea value={cafeUrls} onChange={(e) => setCafeUrls(e.target.value)} placeholder={isBlog ? "https://blog.naver.com/블로그아이디/글번호\n..." : "https://cafe.naver.com/카페주소/글번호\n..."} rows={5} style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.6' }} />
+                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.83rem', color: '#94a3b8' }}>네이버 검색 인기글의 <b>{chName} URL</b>({chDomain})을 넣으면 {chName}에 맞는 지표로 해부합니다. (현재 {cafeUrls.split(/\r?\n/).filter(s => s.trim().startsWith('http')).length}개)</p>
                         </div>
                         {/* 타겟 키워드 + 분석 시작 버튼 한 줄 */}
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
@@ -426,8 +531,8 @@ export default function CafeAnalysisPage() {
                     {!result && !loading && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '220px', border: '2px dashed #cbd5e1', borderRadius: '16px', color: '#94a3b8' }}>
                             <Activity size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                            <p style={{ fontSize: '1.1rem', margin: 0 }}>카페글·블로그글 URL을 입력하고 분석을 시작해보세요.</p>
-                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>AI가 5가지 주요 알고리즘 지표를 통해 글을 해부합니다. (유형 자동 판별)</p>
+                            <p style={{ fontSize: '1.1rem', margin: 0 }}>{chName} URL을 입력하고 분석을 시작해보세요.</p>
+                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>AI가 5가지 주요 알고리즘 지표를 통해 {chName}을 해부합니다.</p>
                         </div>
                     )}
                     {loading && (
@@ -480,7 +585,7 @@ export default function CafeAnalysisPage() {
                 </div>
             )}
 
-            <WorkHistory menuKey="cafe-analysis" onRestore={handleRestore} />
+            <WorkHistory menuKey={menuKey} onRestore={handleRestore} />
         </div>
     );
 }
