@@ -106,6 +106,11 @@ async def update_naver_api_keys(keys: NaverApiKeys):
         "NAVER_SECRET_KEY": keys.secret_key
     }
     write_env(env_vars)
+
+    # Reload env into os.environ (재시작 없이 즉시 반영)
+    for k, v in env_vars.items():
+        if v: os.environ[k] = v
+
     return {"message": "네이버 검색광고 API 키가 성공적으로 저장되었습니다."}
 
 @router.get("/naver-dev-api", response_model=NaverDevApiKeys)

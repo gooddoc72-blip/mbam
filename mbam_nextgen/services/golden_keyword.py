@@ -37,11 +37,12 @@ else:
 
 load_dotenv("mbam_nextgen/.env")
 
-_CID = os.getenv("NAVER_CUSTOMER_ID")
-_LIC = os.getenv("NAVER_ACCESS_LICENSE")
-_SK = os.getenv("NAVER_SECRET_KEY")
-_OID = os.getenv("NAVER_CLIENT_ID")
-_OSEC = os.getenv("NAVER_CLIENT_SECRET")
+# 키는 호출 시점에 읽는다 — 관리자(/admin)에서 저장한 키가 서버 재시작 없이 바로 반영되도록.
+def _cid(): return os.getenv("NAVER_CUSTOMER_ID")
+def _lic(): return os.getenv("NAVER_ACCESS_LICENSE")
+def _sk(): return os.getenv("NAVER_SECRET_KEY")
+def _oid(): return os.getenv("NAVER_CLIENT_ID")
+def _osec(): return os.getenv("NAVER_CLIENT_SECRET")
 
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9]+")
 # 카테고리 공통어/조사성 단어 — 시드 토큰에서 제외 (관련도 필터가 너무 헐거워지는 것 방지)
@@ -126,7 +127,7 @@ async def _volumes_map(client: httpx.AsyncClient, keywords: list) -> dict:
 
 
 def has_keys() -> bool:
-    return all([_CID, _LIC, _SK, _OID, _OSEC])
+    return all([_cid(), _lic(), _sk(), _oid(), _osec()])
 
 
 # --- 결과 캐시 (글감 캐시와 동일 디렉터리, 카테고리별 파일) ---------------------
@@ -165,7 +166,7 @@ def load_cache(category: str):
 def _sign(ts: str, method: str, uri: str) -> str:
     msg = f"{ts}.{method}.{uri}"
     return base64.b64encode(
-        hmac.new(_SK.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).digest()
+        hmac.new(_sk().encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).digest()
     ).decode("utf-8")
 
 
@@ -204,8 +205,8 @@ async def _keywordstool(client: httpx.AsyncClient, hint_words: list) -> list:
     uri = "/keywordstool"
     headers = {
         "X-Timestamp": ts,
-        "X-API-KEY": _LIC,
-        "X-Customer": str(_CID),
+        "X-API-KEY": _lic(),
+        "X-Customer": str(_cid()),
         "X-Signature": _sign(ts, "GET", uri),
     }
     params = {"hintKeywords": ",".join(w.replace(" ", "") for w in hint_words[:5]), "showDetail": 1}
@@ -230,7 +231,7 @@ async def _doc_count(client: httpx.AsyncClient, kind: str, kw: str, _retry: bool
     None 은 '문서 0건'과 구분하기 위함 — 실패를 0으로 처리하면 황금점수가 거짓이 됨.
     """
     url = f"https://openapi.naver.com/v1/search/{kind}.json"
-    headers = {"X-Naver-Client-Id": _OID, "X-Naver-Client-Secret": _OSEC}
+    headers = {"X-Naver-Client-Id": _oid(), "X-Naver-Client-Secret": _osec()}
     try:
         r = await client.get(url, params={"query": kw, "display": 1}, headers=headers, timeout=5.0)
         if r.status_code == 200:
