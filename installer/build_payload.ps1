@@ -45,8 +45,9 @@ $exDirs = @("venv",".git","installer","auth_server","mbam-web","node_modules","_
             "temp_images","temp_clips","sessions","logs","generated_images","scratch","tests",
             "node_modules","nodejs_qa_crawler","chrome_extension")
 # 개발 산출물/덤프 제외 (prompts.json 등 *.json 은 유지해야 하므로 통째 제외 금지)
-# agent_config.json: 빌드 PC(운영자)의 로그인 계정이 고객 설치본에 들어가면 안 됨 — 반드시 제외
-$exFiles = @("agent_config.json",
+# agent_config.json / .env: 빌드 PC(운영자)의 로그인 계정·API 키(네이버/AI)가
+# 고객 설치본에 들어가면 안 됨 — 반드시 제외 (고객 키는 각자 설치 후 입력)
+$exFiles = @("agent_config.json", ".env",
              "*.log","*.pyc","crash*.txt","crash*.log","*.zip","test_*.py",
              "*.html","*_dump.*","screenshot*.png","map_screenshot.png","naver_shopping.png",
              "cli_test.json","crawler_test_*.json","graphql_responses.json","debug_*.json")
