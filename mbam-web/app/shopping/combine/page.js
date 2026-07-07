@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Search, Loader2, Sparkles, Tags, AlertCircle, TrendingUp, CheckCircle, Copy } from 'lucide-react';
 
 import { fetchWithAuth } from '../../utils/api';
+import { usePersistentState } from '../../utils/persistentState';
 import { addHistory } from '../../utils/workHistory';
 import WorkHistory from '../../components/WorkHistory';
 
@@ -10,12 +11,13 @@ export default function ShoppingCombine() {
     const [brandName, setBrandName] = useState('');
     const [seedKeyword, setSeedKeyword] = useState('');
     const [tokensInput, setTokensInput] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState(null);
-    
+    // 분석/AI 제안 진행·결과는 전역 보관 — 메뉴 이동해도 계속 진행·복귀 시 유지
+    const [loading, setLoading] = usePersistentState('shopping-combine:loading', false);
+    const [result, setResult] = usePersistentState('shopping-combine:result', null);
+
     // AI 자동 제안용 상태
-    const [aiLoading, setAiLoading] = useState(false);
-    const [aiResult, setAiResult] = useState(null);
+    const [aiLoading, setAiLoading] = usePersistentState('shopping-combine:aiLoading', false);
+    const [aiResult, setAiResult] = usePersistentState('shopping-combine:aiResult', null);
 
     const handleAssemble = async () => {
         if (!seedKeyword) return alert('메인 시드 키워드를 입력해주세요.');

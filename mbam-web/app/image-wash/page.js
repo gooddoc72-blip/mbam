@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { Plus, Check, Download, Info } from "lucide-react";
@@ -10,8 +11,9 @@ import { Plus, Check, Download, Info } from "lucide-react";
 export default function ImageWashPage() {
   const [files, setFiles] = useState([]);
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState([]); // List of { original_filename, base64_data }
+  // 세탁 진행/결과는 전역 보관 — 메뉴 이동해도 처리 계속·복귀 시 결과 유지
+  const [loading, setLoading] = usePersistentState("image-wash:loading", false);
+  const [results, setResults] = usePersistentState("image-wash:results", []); // List of { original_filename, base64_data }
   const fileInputRef = useRef(null);
 
   // Settings state

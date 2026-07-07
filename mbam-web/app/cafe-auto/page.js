@@ -1,5 +1,6 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, useRef } from "react";
@@ -60,12 +61,13 @@ export default function CafeAutoPage() {
   const [pickItemId, setPickItemId] = useState("");     // 선택한 글감 id(표시 유지)
 
   // --- Common ---
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = usePersistentState("cafe-auto:loading", false);
   const [registeredIds, setRegisteredIds] = useState([]);
   const [promptCategory, setPromptCategory] = useState(null);
   const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
-  const [isGenerating, setIsGenerating] = useState(false); // AI 원고 생성(미리보기) 진행 중
-  const [cafeGenerated, setCafeGenerated] = useState([]); // 계정별 생성 원고 [{account_id,title,content}]
+  // AI 원고 생성/결과는 전역 보관 — 메뉴 이동해도 생성이 계속되고 돌아오면 결과 유지
+  const [isGenerating, setIsGenerating] = usePersistentState("cafe-auto:isGenerating", false); // AI 원고 생성(미리보기) 진행 중
+  const [cafeGenerated, setCafeGenerated] = usePersistentState("cafe-auto:cafeGenerated", []); // 계정별 생성 원고 [{account_id,title,content}]
   const [imageFiles, setImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [imageFolder, setImageFolder] = useState(""); // 업로드된 이미지 폴더(발행 시 첨부)
   const [useTethering, setUseTethering] = useState(false); // USB 테더링 IP 우회
@@ -110,7 +112,7 @@ export default function CafeAutoPage() {
   const [accountDelay, setAccountDelay] = useState(5); // 계정 간 발행 텀(분)
   const [accountTargets, setAccountTargets] = useState({}); // 계정별 타겟 {accId: {cafe_url, board_name}}
   const [savedManuscripts, setSavedManuscripts] = useState([]); // 저장된 일괄 원고
-  const [batchPosting, setBatchPosting] = useState(false);
+  const [batchPosting, setBatchPosting] = usePersistentState("cafe-auto:batchPosting", false);
   const batchCancelRef = useRef(false); // 일괄 발행 강제 중지 플래그
   const [editMs, setEditMs] = useState(null); // 수정 중인 저장 원고
 
@@ -121,10 +123,11 @@ export default function CafeAutoPage() {
       if (Array.isArray(data.registered)) setRegisteredIds(data.registered);
     } catch (e) { /* 서버 미기동 시 조용히 무시 */ }
   };
-  const [taskId, setTaskId] = useState(null);
-  const [taskKind, setTaskKind] = useState("post"); // "post"(포스팅) | "comment"(댓글 작업) — 폴링 엔드포인트 결정
-  const [statusLogs, setStatusLogs] = useState([]);
-  const [taskStatus, setTaskStatus] = useState("");
+  // 실행 작업 추적(taskId/로그)도 전역 보관 — 이동 후 복귀 시 진행상황 폴링 재개
+  const [taskId, setTaskId] = usePersistentState("cafe-auto:taskId", null);
+  const [taskKind, setTaskKind] = usePersistentState("cafe-auto:taskKind", "post"); // "post"(포스팅) | "comment"(댓글 작업) — 폴링 엔드포인트 결정
+  const [statusLogs, setStatusLogs] = usePersistentState("cafe-auto:statusLogs", []);
+  const [taskStatus, setTaskStatus] = usePersistentState("cafe-auto:taskStatus", "");
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 
@@ -43,11 +44,12 @@ export default function CommunicationPage() {
   const [enableComment, setEnableComment] = useState(false);
   const [commentMessage, setCommentMessage] = useState("좋은 글 잘 읽고 갑니다!");
   
-  const [loading, setLoading] = useState(false);
-  const [taskId, setTaskId] = useState(null);
-  const [statusLogs, setStatusLogs] = useState([]);
-  const [taskStatus, setTaskStatus] = useState("");
-  const [stopping, setStopping] = useState(false);
+  // 자동화 실행 상태는 전역 보관 — 메뉴 이동해도 작업이 계속되고 복귀 시 진행상황 이어서 표시
+  const [loading, setLoading] = usePersistentState("communication:loading", false);
+  const [taskId, setTaskId] = usePersistentState("communication:taskId", null);
+  const [statusLogs, setStatusLogs] = usePersistentState("communication:statusLogs", []);
+  const [taskStatus, setTaskStatus] = usePersistentState("communication:taskStatus", "");
+  const [stopping, setStopping] = usePersistentState("communication:stopping", false);
 
   // 저장된 네이버 계정 (계정 관리와 공유)
   const [accounts, setAccounts] = useState([]);

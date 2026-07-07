@@ -1,13 +1,15 @@
 "use client";
 import { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { Loader2, Plus, Trash2, Send, LayoutDashboard, Search, KeyRound, TrendingUp } from 'lucide-react';
 
 export default function BlogspotDashboard() {
   const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // 발행(AI 생성) 진행/결과는 전역 보관 — 메뉴 이동해도 계속 진행·복귀 시 유지
+  const [loading, setLoading] = usePersistentState("blogspot:loading", false);
   const [activeTab, setActiveTab] = useState("accounts");
   
   // Add Account Form
@@ -23,7 +25,7 @@ export default function BlogspotDashboard() {
   const [keyword, setKeyword] = useState("");
   const [aiProvider, setAiProvider] = useState("gemini");
   const [generateImage, setGenerateImage] = useState(true);
-  const [postResult, setPostResult] = useState(null);
+  const [postResult, setPostResult] = usePersistentState("blogspot:postResult", null);
 
   // SEO Rank Form
   const [rankKeyword, setRankKeyword] = useState("");

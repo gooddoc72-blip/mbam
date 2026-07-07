@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { fetchWithAuth, resolveMaybeAgent } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { PenTool, Video, Calendar, Clock, Image as ImageIcon, Search, CheckCircle2 } from "lucide-react";
@@ -11,15 +12,15 @@ export default function PlaceNewsPage() {
     const [placeName, setPlaceName] = useState("");
     const [intervalWeeks, setIntervalWeeks] = useState(1);
     
-    // Step 2 State
-    const [fetchedReviews, setFetchedReviews] = useState([]);
-    const [fetchedImages, setFetchedImages] = useState([]);
-    const [selectedTheme, setSelectedTheme] = useState("🌟 고객 극찬 릴레이 (방문 후기형)");
-    const [step, setStep] = useState(1); // 1: 설정/수집, 2: 테마선택/생성
-    
+    // Step 2 State — 수집/생성 진행 상태는 전역 보관: 메뉴 이동해도 작업이 계속되고 복귀 시 유지
+    const [fetchedReviews, setFetchedReviews] = usePersistentState("place-news:fetchedReviews", []);
+    const [fetchedImages, setFetchedImages] = usePersistentState("place-news:fetchedImages", []);
+    const [selectedTheme, setSelectedTheme] = usePersistentState("place-news:selectedTheme", "🌟 고객 극찬 릴레이 (방문 후기형)");
+    const [step, setStep] = usePersistentState("place-news:step", 1); // 1: 설정/수집, 2: 테마선택/생성
+
     const [schedules, setSchedules] = useState([]);
     const [history, setHistory] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = usePersistentState("place-news:loading", false);
     
     useEffect(() => {
         fetchData();

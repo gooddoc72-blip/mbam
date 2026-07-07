@@ -1,28 +1,30 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect } from "react";
 
 export default function ContentCollectPage() {
   const [categories, setCategories] = useState([]);
-  const [selectedCat, setSelectedCat] = useState("공공서비스");
+  // 수집 진행/결과는 전역 보관 — 메뉴 이동해도 수집이 계속되고 복귀 시 그대로
+  const [selectedCat, setSelectedCat] = usePersistentState("content-collect:selectedCat", "공공서비스");
   const [fullSyncTime, setFullSyncTime] = useState("기록 없음");
-  const [items, setItems] = useState([]);
-  const [lastSync, setLastSync] = useState("없음");
+  const [items, setItems] = usePersistentState("content-collect:items", []);
+  const [lastSync, setLastSync] = usePersistentState("content-collect:lastSync", "없음");
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [loading, setLoading] = usePersistentState("content-collect:loading", false);
+  const [error, setError] = usePersistentState("content-collect:error", null);
   
   // Schedule state
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [interestCategories, setInterestCategories] = useState([]);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
-  // 황금키워드 추천 state
-  const [goldenLoading, setGoldenLoading] = useState(false);
-  const [golden, setGolden] = useState(null); // { keywords:[...], seed:[...], candidate_count }
-  const [goldenError, setGoldenError] = useState(null);
+  // 황금키워드 추천 state (전역 보관 — 분석 중 메뉴 이동해도 계속)
+  const [goldenLoading, setGoldenLoading] = usePersistentState("content-collect:goldenLoading", false);
+  const [golden, setGolden] = usePersistentState("content-collect:golden", null); // { keywords:[...], seed:[...], candidate_count }
+  const [goldenError, setGoldenError] = usePersistentState("content-collect:goldenError", null);
 
   // 1. 카테고리 목록 로드
   useEffect(() => {

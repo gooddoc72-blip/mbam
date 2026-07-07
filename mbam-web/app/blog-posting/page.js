@@ -1,5 +1,6 @@
 "use client";
 import { fetchWithAuth, pollAgentJob } from "../utils/api";
+import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { useState, useEffect, Suspense } from "react";
@@ -95,8 +96,9 @@ function BlogPostingContent() {
 
   // Generated Contents & Manual Contents
   // For AI, we hold an array of { account_id, title, content }
-  const [generatedContents, setGeneratedContents] = useState([]);
-  const [isGenerating, setIsGenerating] = useState(false);
+  // 원고 생성(최대 ~20분)은 전역 보관 — 메뉴 이동해도 생성이 계속되고 돌아오면 결과 표시
+  const [generatedContents, setGeneratedContents] = usePersistentState("blog-posting:generatedContents", []);
+  const [isGenerating, setIsGenerating] = usePersistentState("blog-posting:isGenerating", false);
 
   // 3. Image Settings
   const [washImages, setWashImages] = useState(true);
