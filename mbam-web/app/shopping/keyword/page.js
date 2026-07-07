@@ -1,6 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { Search, Loader2, Key, Tag, Check, Copy } from 'lucide-react';
+import {
+    ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
+    XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, LabelList
+} from 'recharts';
 
 import { fetchWithAuth } from '../../utils/api';
 import { usePersistentState } from '../../utils/persistentState';
@@ -11,6 +15,23 @@ export default function ShoppingKeyword() {
     const [seedKeyword, setSeedKeyword] = usePersistentState('shopping-keyword:seedKeyword', '');
     const [loading, setLoading] = usePersistentState('shopping-keyword:loading', false);
     const [result, setResult] = usePersistentState('shopping-keyword:result', null);
+    // 키워드 인사이트(데이터랩): 성별/연령/월별 추이
+    const [insight, setInsight] = usePersistentState('shopping-keyword:insight', null);
+    const [insightLoading, setInsightLoading] = usePersistentState('shopping-keyword:insightLoading', false);
+
+    const fetchInsight = (kw) => {
+        setInsightLoading(true);
+        setInsight(null);
+        fetchWithAuth('/api/shopping/keyword/insight', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seed_keyword: kw })
+        })
+            .then(r => r.json())
+            .then(d => setInsight(d))
+            .catch(() => setInsight({ success: false, error: '인사이트 조회 중 오류가 발생했습니다.' }))
+            .finally(() => setInsightLoading(false));
+    };
 
     // 클린 토큰 선택 상태(상품명 조립에 들어갈 토큰)
     const [selected, setSelected] = useState(() => new Set());
@@ -28,6 +49,7 @@ export default function ShoppingKeyword() {
         setLoading(true);
         setResult(null);
         setAssembled(null);
+        fetchInsight(seedKeyword);   // 데이터랩 인사이트는 병렬 조회(별도 로딩)
         try {
             const res = await fetchWithAuth(`/api/shopping/keyword/analyze`, {
                 method: 'POST',
@@ -52,6 +74,7 @@ export default function ShoppingKeyword() {
         const p = (entry && entry.payload) || {};
         if (p.seedKeyword !== undefined) setSeedKeyword(p.seedKeyword);
         if (p.result) { setResult(p.result); setSelected(new Set(p.result.valid_tokens_pool || [])); }
+        if (p.seedKeyword) fetchInsight(p.seedKeyword);   // 인사이트는 최신 데이터로 재조회
         try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
     };
 
@@ -218,6 +241,125 @@ export default function ShoppingKeyword() {
                                     })}
                                 </div>
                             </div>
+                        </div>
+
+                        {/* 키워드 인사이트: 월간 검색량 · 자동완성 · 성별/연령/월별 추이 */}
+                        <div style={{ marginTop: '1.5rem' }}>
+                            {result.seed_volume && (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                                    {[
+                                        { label: '월간 검색량 (전체)', value: result.seed_volume.total.toLocaleString(), color: '#0f172a' },
+                                        { label: 'PC 검색량', value: result.seed_volume.pc.toLocaleString(), color: '#475569' },
+                                        { label: '모바일 검색량', value: result.seed_volume.mobile.toLocaleString(), color: '#475569' },
+                                        { label: '광고 경쟁도', value: result.seed_volume.comp, color: '#475569' },
+                                    ].map((t, i) => (
+                                        <div key={i} style={{ background: 'white', padding: '1rem 1.2rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.3rem' }}>{t.label}</div>
+                                            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: t.color }}>{t.value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {(result.autocomplete || []).length > 0 && (
+                                <div style={{ background: 'white', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                                    <h4 style={{ fontWeight: 'bold', marginBottom: '0.6rem', color: '#334155' }}>🔍 자동완성 검색어 ({result.autocomplete.length}개)</h4>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                        {result.autocomplete.map((kw, i) => (
+                                            <span key={i} style={{ background: '#f8fafc', color: '#475569', padding: '0.3rem 0.7rem', borderRadius: '8px', fontSize: '0.88rem', border: '1px solid #e2e8f0' }}>{kw}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {insightLoading && (
+                                <div style={{ background: 'white', padding: '2rem', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#64748b', marginBottom: '1.5rem' }}>
+                                    <Loader2 size={20} className="animate-spin" style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                                    성별·연령·월별 검색 트렌드 조회 중...
+                                </div>
+                            )}
+                            {insight && !insight.success && !insightLoading && (
+                                <div style={{ background: '#fffbeb', padding: '1rem', borderRadius: '8px', border: '1px solid #fde68a', color: '#92400e', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
+                                    검색 트렌드(성별/연령/월별)를 불러오지 못했습니다 — {insight.error}
+                                </div>
+                            )}
+
+                            {insight?.success && (
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
+                                        {insight.gender && (
+                                            <div style={{ background: 'white', padding: '1.2rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                <h4 style={{ fontWeight: 'bold', color: '#334155', margin: '0 0 1rem 0' }}>성별 검색 비율</h4>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        {[
+                                                            { name: '여성', pct: insight.gender.female, color: '#ef4444' },
+                                                            { name: '남성', pct: insight.gender.male, color: '#3b82f6' },
+                                                        ].map((g) => (
+                                                            <div key={g.name} style={{ marginBottom: '0.9rem' }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '0.3rem' }}>
+                                                                    <span style={{ color: '#475569', fontWeight: 600 }}>{g.name}</span>
+                                                                    <strong style={{ color: '#334155' }}>{g.pct} %</strong>
+                                                                </div>
+                                                                <div style={{ background: '#e2e8f0', borderRadius: '99px', height: '8px' }}>
+                                                                    <div style={{ width: `${g.pct}%`, background: g.color, height: '8px', borderRadius: '99px' }} />
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <PieChart width={150} height={150}>
+                                                        <Pie data={[
+                                                            { name: '여성', value: insight.gender.female },
+                                                            { name: '남성', value: insight.gender.male },
+                                                        ]} dataKey="value" innerRadius={42} outerRadius={70} startAngle={90} endAngle={-270} stroke="#ffffff" strokeWidth={2}>
+                                                            <Cell fill="#ef4444" />
+                                                            <Cell fill="#3b82f6" />
+                                                        </Pie>
+                                                        <RTooltip formatter={(v) => `${v}%`} />
+                                                    </PieChart>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {insight.ages && (
+                                            <div style={{ background: 'white', padding: '1.2rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                                <h4 style={{ fontWeight: 'bold', color: '#334155', margin: '0 0 1rem 0' }}>연령별 검색 비율</h4>
+                                                <ResponsiveContainer width="100%" height={200}>
+                                                    <BarChart data={insight.ages} margin={{ top: 24, right: 8, left: 8, bottom: 0 }}>
+                                                        <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} tick={{ fontSize: 12, fill: '#64748b' }} />
+                                                        <YAxis hide />
+                                                        <RTooltip formatter={(v) => `${v}%`} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                                                        <Bar dataKey="pct" name="검색 비율" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={44}>
+                                                            <LabelList dataKey="pct" position="top" formatter={(v) => `${v}%`} style={{ fill: '#475569', fontSize: 12, fontWeight: 600 }} />
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {insight.trend && insight.trend.length > 0 && (
+                                        <div style={{ background: 'white', padding: '1.2rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                                            <h4 style={{ fontWeight: 'bold', color: '#334155', margin: 0 }}>최근 1년간 월별 검색량 추이</h4>
+                                            <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.2rem 0 1rem 0' }}>
+                                                네이버 쇼핑 검색 상대지수 (기간 내 최대=100 기준) · 카테고리: {insight.category}
+                                            </p>
+                                            <ResponsiveContainer width="100%" height={260}>
+                                                <LineChart data={insight.trend} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                                                    <CartesianGrid vertical={false} stroke="#f1f5f9" />
+                                                    <XAxis dataKey="month" tickLine={false} axisLine={{ stroke: '#e2e8f0' }} tick={{ fontSize: 12, fill: '#64748b' }} />
+                                                    <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#64748b' }} width={36} />
+                                                    <RTooltip />
+                                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '0.85rem' }} />
+                                                    <Line type="monotone" dataKey="total" name="Total" stroke="#6366f1" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+                                                    <Line type="monotone" dataKey="pc" name="PC" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4 }} />
+                                                    <Line type="monotone" dataKey="mobile" name="Mobile" stroke="#059669" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4 }} />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
 
                         {/* 연관 키워드 (검색량순) — 태그와 분리, 선택 가능 */}

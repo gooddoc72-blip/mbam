@@ -119,14 +119,19 @@ async def analyze_keyword(req: KeywordAnalyzeRequest):
     vol_map = {}
     ad_related = []
     source = "자동완성"
+    seed_volume = None  # 시드 키워드 자체의 월간 검색량 (PC/모바일/합계/경쟁도)
     try:
         ad_items = await fetch_search_ad_keywords(seed)
+        _seed_ns_vol = seed.replace(" ", "")
         for k in (ad_items or []):
             kw = (k.get("relKeyword") or "").strip()
             if not kw:
                 continue
+            pc, mo = _parse_vol(k.get("monthlyPcQcCnt", 0)), _parse_vol(k.get("monthlyMobileQcCnt", 0))
+            if seed_volume is None and kw.replace(" ", "") == _seed_ns_vol:
+                seed_volume = {"pc": pc, "mobile": mo, "total": pc + mo, "comp": k.get("compIdx") or "-"}
             ad_related.append(kw)
-            vol_map[kw] = _parse_vol(k.get("monthlyPcQcCnt", 0)) + _parse_vol(k.get("monthlyMobileQcCnt", 0))
+            vol_map[kw] = pc + mo
         if ad_related:
             source = "검색광고 키워드도구"
     except Exception as e:
@@ -210,6 +215,8 @@ async def analyze_keyword(req: KeywordAnalyzeRequest):
     return {
         "seed_keyword": seed,
         "seed_tokens": seed_tokens,
+        "seed_volume": seed_volume,                  # 시드 월간 검색량 {pc, mobile, total, comp} (키 없으면 null)
+        "autocomplete": remove_duplicates_keep_order(auto_related)[:15],  # 자동완성 검색어(원문)
         "related_keywords": related,                 # 연관 검색어 원문
         "related_with_volume": related_with_volume,  # 연관키워드 + 검색량(검색량순)
         "related_keywords_count": len(related),
@@ -219,6 +226,150 @@ async def analyze_keyword(req: KeywordAnalyzeRequest):
         "source": source,
         "message": f"분석 완료 (소스: {source})"
     }
+
+# ==========================================
+# 2-1. 키워드 인사이트 (데이터랩 쇼핑인사이트: 성별/연령/월별 추이)
+# ==========================================
+
+# 네이버 쇼핑인사이트 1분류 카테고리 CID (쇼핑 검색 결과의 category1 이름 → cid)
+_DATALAB_CATS = {
+    "패션의류": "50000000", "패션잡화": "50000001", "화장품/미용": "50000002",
+    "디지털/가전": "50000003", "가구/인테리어": "50000004", "출산/육아": "50000005",
+    "식품": "50000006", "스포츠/레저": "50000007", "생활/건강": "50000008",
+    "여가/생활편의": "50000009", "면세점": "50000010",
+}
+
+
+async def _detect_datalab_category(client, seed: str, headers: dict):
+    """쇼핑 검색 상위 40개의 최빈 1분류 카테고리 → (이름, cid). 감지 실패 시 (None, None)."""
+    from collections import Counter
+    try:
+        r = await client.get(
+            f"https://openapi.naver.com/v1/search/shop.json?query={urllib.parse.quote(seed)}&display=40",
+            headers=headers, timeout=8.0)
+        if r.status_code != 200:
+            return None, None
+        names = [it.get("category1") for it in r.json().get("items", []) if it.get("category1")]
+        for name, _cnt in Counter(names).most_common():
+            if name in _DATALAB_CATS:
+                return name, _DATALAB_CATS[name]
+    except Exception as e:
+        print("datalab category detect error:", e)
+    return None, None
+
+
+class KeywordInsightRequest(BaseModel):
+    seed_keyword: str
+
+
+@router.post("/keyword/insight")
+async def keyword_insight(req: KeywordInsightRequest):
+    """키워드 인사이트 — 성별/연령별 검색 비율 + 최근 1년 월별 추이(PC/모바일).
+    네이버 데이터랩 쇼핑인사이트 API 사용(오픈API 키 필요, 애플리케이션에 '데이터랩' API 추가 필요).
+    ratio 는 요청 내 최대값=100 기준의 상대지수 — 같은 요청 안의 그룹끼리 비교 가능."""
+    import json
+    from datetime import date, timedelta
+
+    seed = req.seed_keyword.strip()
+    if not seed:
+        raise HTTPException(status_code=400, detail="키워드를 입력하세요.")
+    client_id = os.environ.get("NAVER_CLIENT_ID")
+    client_secret = os.environ.get("NAVER_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return {"success": False, "error": "네이버 오픈API 키가 설정되지 않았습니다."}
+
+    search_headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
+    datalab_headers = {**search_headers, "Content-Type": "application/json"}
+
+    # 진행 중인 이번 달은 데이터가 불완전해 추이가 급락처럼 보임 → 지난달 말일까지 12개월
+    end = date.today().replace(day=1) - timedelta(days=1)
+    sy, sm = end.year, end.month - 11
+    if sm <= 0:
+        sy, sm = sy - 1, sm + 12
+    start = date(sy, sm, 1)
+    base_body = {
+        "startDate": start.isoformat(), "endDate": end.isoformat(),
+        "timeUnit": "month", "keyword": seed,
+        "device": "", "gender": "", "ages": [],
+    }
+
+    async with httpx.AsyncClient() as client:
+        cat_name, cid = await _detect_datalab_category(client, seed, search_headers)
+        if not cid:
+            return {"success": False, "error": "쇼핑 카테고리를 감지하지 못했습니다. (검색 결과 없음)"}
+        body = {**base_body, "category": cid}
+
+        async def _datalab(kind: str):
+            url = f"https://openapi.naver.com/v1/datalab/shopping/category/keyword/{kind}"
+            try:
+                r = await client.post(url, headers=datalab_headers,
+                                      content=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                                      timeout=10.0)
+                if r.status_code != 200:
+                    print(f"datalab {kind} {r.status_code}: {r.text[:200]}")
+                    return None
+                results = r.json().get("results") or []
+                return (results[0].get("data") or []) if results else []
+            except Exception as e:
+                print(f"datalab {kind} error:", e)
+                return None
+
+        g_data, a_data, d_data = await asyncio.gather(_datalab("gender"), _datalab("age"), _datalab("device"))
+
+    if g_data is None and a_data is None and d_data is None:
+        return {"success": False,
+                "error": "데이터랩 조회 실패 — developers.naver.com 애플리케이션에 '데이터랩(쇼핑인사이트)' API가 추가되어 있는지 확인하세요."}
+
+    # 성별: 기간 전체 ratio 합산 → 비율(%)
+    gender = None
+    if g_data:
+        sums = {"f": 0.0, "m": 0.0}
+        for d in g_data:
+            if d.get("group") in sums:
+                sums[d["group"]] += float(d.get("ratio") or 0)
+        tot = sums["f"] + sums["m"]
+        if tot > 0:
+            gender = {"female": round(sums["f"] / tot * 100, 1), "male": round(sums["m"] / tot * 100, 1)}
+
+    # 연령: 10~60 그룹 합산, 50+60 은 '50대+' 로 합침 → 비율(%)
+    ages = None
+    if a_data:
+        sums = {}
+        for d in a_data:
+            g = str(d.get("group") or "")
+            sums[g] = sums.get(g, 0.0) + float(d.get("ratio") or 0)
+        tot = sum(sums.values())
+        if tot > 0:
+            def pct(*groups):
+                return round(sum(sums.get(g, 0.0) for g in groups) / tot * 100, 1)
+            ages = [
+                {"label": "10대", "pct": pct("10")}, {"label": "20대", "pct": pct("20")},
+                {"label": "30대", "pct": pct("30")}, {"label": "40대", "pct": pct("40")},
+                {"label": "50대+", "pct": pct("50", "60")},
+            ]
+
+    # 월별 추이: 같은 요청 안의 pc/mo ratio → 정규화 공유로 비교 가능. total = pc + mo
+    trend = None
+    if d_data:
+        months = {}
+        for d in d_data:
+            period = str(d.get("period") or "")[:7]   # YYYY-MM
+            if not period:
+                continue
+            row = months.setdefault(period, {"pc": 0.0, "mobile": 0.0})
+            if d.get("group") == "pc":
+                row["pc"] += float(d.get("ratio") or 0)
+            elif d.get("group") == "mo":
+                row["mobile"] += float(d.get("ratio") or 0)
+        trend = [
+            {"month": k[2:].replace("-", "-"), "pc": round(v["pc"], 1),
+             "mobile": round(v["mobile"], 1), "total": round(v["pc"] + v["mobile"], 1)}
+            for k, v in sorted(months.items())
+        ]
+
+    return {"success": True, "keyword": seed, "category": cat_name,
+            "gender": gender, "ages": ages, "trend": trend}
+
 
 # ==========================================
 # 3. 상품명 조립 (모듈 3, 4)
