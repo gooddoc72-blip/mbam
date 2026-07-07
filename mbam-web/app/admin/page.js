@@ -176,6 +176,31 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleResetPassword = async (userId, email) => {
+    const newPw = prompt(`[${email}] 회원의 새 비밀번호를 입력하세요. (8자 이상)`);
+    if (newPw === null) return;
+    if (!newPw || newPw.length < 8) {
+      alert("비밀번호는 8자 이상이어야 합니다.");
+      return;
+    }
+    try {
+      const token = localStorage.getItem("mbam_token");
+      const res = await fetch(`/api/admin/users/${userId}/password`, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ new_password: newPw })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || "비밀번호가 재설정되었습니다.");
+      } else {
+        alert(data.detail || "비밀번호 재설정에 실패했습니다.");
+      }
+    } catch (err) {
+      alert("서버와 통신할 수 없습니다.");
+    }
+  };
+
   const handleResetDevices = async (userId) => {
     if (!confirm("해당 회원의 모든 기기(PC) 등록 정보를 초기화하시겠습니까?\\n(초기화 후 새로운 기기 2대에서 접속이 가능해집니다.)")) return;
     try {
@@ -598,12 +623,21 @@ export default function AdminDashboard() {
                     {user.trial_ends_at ? new Date(user.trial_ends_at).toLocaleDateString() : "-"}
                   </td>
                   <td style={{ padding: "1rem 1.5rem", textAlign: "right" }}>
-                    <button 
-                      onClick={() => setEditingUser(user)}
-                      style={{ padding: "0.5rem 1rem", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "500" }}
-                    >
-                      회원 쿼터설정
-                    </button>
+                    <div style={{ display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => handleResetPassword(user.id, user.email)}
+                        style={{ padding: "0.5rem 0.8rem", background: "#fef3c7", color: "#b45309", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "500" }}
+                        title="회원 비밀번호를 새로 지정합니다"
+                      >
+                        비번 재설정
+                      </button>
+                      <button
+                        onClick={() => setEditingUser(user)}
+                        style={{ padding: "0.5rem 1rem", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "500" }}
+                      >
+                        회원 쿼터설정
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

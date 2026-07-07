@@ -75,6 +75,22 @@ async def reset_user_devices(user_id: str, db: Session = Depends(get_db), admin:
     db.commit()
     return {"message": "해당 사용자의 기기 등록이 성공적으로 초기화되었습니다. 이제 새로운 PC에서 로그인할 수 있습니다."}
 
+class PasswordResetRequest(BaseModel):
+    new_password: str
+
+@router.put("/users/{user_id}/password", summary="사용자 비밀번호 재설정 (관리자)")
+async def reset_user_password(user_id: str, req: PasswordResetRequest,
+                              db: Session = Depends(get_db), admin: dict = Depends(verify_admin)):
+    from ..auth import get_password_hash
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="새 비밀번호는 8자 이상이어야 합니다.")
+    user = db.query(Advertiser).filter(Advertiser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    user.password = get_password_hash(req.new_password)
+    db.commit()
+    return {"message": f"{user.email} 회원의 비밀번호가 재설정되었습니다."}
+
 @router.delete("/users/{user_id}", summary="사용자 삭제")
 async def delete_user(user_id: str, db: Session = Depends(get_db), admin: dict = Depends(verify_admin)):
     user = db.query(Advertiser).filter(Advertiser.id == user_id).first()

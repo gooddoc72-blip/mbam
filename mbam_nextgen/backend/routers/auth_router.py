@@ -140,6 +140,60 @@ async def read_users_me(current_user: dict = Depends(get_current_user), db: Sess
             
     return user_info
 
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password", summary="본인 비밀번호 변경 (관리자·회원 공용)")
+async def change_password(req: ChangePasswordRequest,
+                          current_user: dict = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="새 비밀번호는 8자 이상이어야 합니다.")
+    if req.new_password == req.current_password:
+        raise HTTPException(status_code=400, detail="현재 비밀번호와 다른 비밀번호를 입력하세요.")
+
+    role = current_user.get("role")
+    sub = current_user.get("sub")
+
+    # 관리자: DB 계정이 아니라 SUPER_ADMIN_PW 환경변수 인증 → .env + 프로세스 환경 갱신.
+    # Railway 등 클라우드는 재배포 시 대시보드 환경변수로 되돌아가므로 그쪽도 함께 바꿔야 영구 적용.
+    if role == "admin":
+        import secrets as _secrets
+        admin_pw = os.environ.get("SUPER_ADMIN_PW") or ""
+        if not _secrets.compare_digest(req.current_password, admin_pw):
+            raise HTTPException(status_code=401, detail="현재 비밀번호가 올바르지 않습니다.")
+        os.environ["SUPER_ADMIN_PW"] = req.new_password
+        try:
+            from .settings import write_env
+            write_env({"SUPER_ADMIN_PW": req.new_password})
+        except Exception:
+            pass
+        return {"message": "관리자 비밀번호가 변경되었습니다. "
+                           "(클라우드 배포 환경이라면 Railway 대시보드의 SUPER_ADMIN_PW 환경변수도 "
+                           "같은 값으로 바꿔야 재배포 후에도 유지됩니다.)"}
+
+    user = None
+    if role == "advertiser":
+        user = db.query(Advertiser).filter(Advertiser.email == sub).first()
+    elif role == "agency":
+        user = db.query(Agency).filter(Agency.login_id == sub).first()
+    elif role == "distributor":
+        user = db.query(Distributor).filter(Distributor.login_id == sub).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    if not user.password:
+        raise HTTPException(status_code=400, detail="소셜 로그인 계정은 비밀번호 변경을 지원하지 않습니다.")
+    if not verify_password(req.current_password, user.password):
+        raise HTTPException(status_code=401, detail="현재 비밀번호가 올바르지 않습니다.")
+
+    user.password = get_password_hash(req.new_password)
+    db.commit()
+    return {"message": "비밀번호가 성공적으로 변경되었습니다."}
+
+
 @router.get("/login/{provider}", summary="소셜 로그인 시작")
 async def social_login(provider: str, request: Request):
     import secrets as _secrets
