@@ -331,7 +331,16 @@ def _prompt_login(cfg: dict) -> dict:
     tk.Label(frm, text="이메일 / 아이디", anchor="w").pack(fill="x")
     e_email = tk.Entry(frm); e_email.pack(fill="x", pady=(0, 8)); e_email.insert(0, cfg.get("email", "") or "")
     tk.Label(frm, text="비밀번호", anchor="w").pack(fill="x")
-    e_pw = tk.Entry(frm, show="*"); e_pw.pack(fill="x", pady=(0, 8))
+    pw_row = tk.Frame(frm); pw_row.pack(fill="x", pady=(0, 8))
+    e_pw = tk.Entry(pw_row, show="*"); e_pw.pack(side="left", fill="x", expand=True)
+
+    def _toggle_pw():
+        hidden = e_pw.cget("show") == "*"
+        e_pw.config(show="" if hidden else "*")
+        btn_eye.config(text="숨기기" if hidden else "보기")
+
+    btn_eye = tk.Button(pw_row, text="보기", command=_toggle_pw, width=6)
+    btn_eye.pack(side="left", padx=(6, 0))
     tk.Label(frm, text="서버 주소 (기본값 권장)", anchor="w").pack(fill="x")
     e_url = tk.Entry(frm); e_url.pack(fill="x"); e_url.insert(0, cfg.get("cloud_url", "") or "")
     status = tk.Label(root, text="", font=("맑은 고딕", 9), fg="#dc2626")
