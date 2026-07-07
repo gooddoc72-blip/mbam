@@ -89,13 +89,20 @@ def write_env(env_vars):
     with open(ENV_PATH, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
+def env_or_os(env: dict, key: str) -> str:
+    """.env 파일 → os.environ 순으로 조회.
+    클라우드(Railway)는 재배포 시 컨테이너 .env 가 초기화되므로, 대시보드 환경변수로
+    등록한 키도 관리자 화면에 보이도록 폴백한다."""
+    return env.get(key) or os.environ.get(key, "")
+
+
 @router.get("/naver-api", response_model=NaverApiKeys)
 async def get_naver_api_keys():
     env = read_env()
     return NaverApiKeys(
-        customer_id=env.get("NAVER_CUSTOMER_ID", ""),
-        access_license=env.get("NAVER_ACCESS_LICENSE", ""),
-        secret_key=env.get("NAVER_SECRET_KEY", "")
+        customer_id=env_or_os(env, "NAVER_CUSTOMER_ID"),
+        access_license=env_or_os(env, "NAVER_ACCESS_LICENSE"),
+        secret_key=env_or_os(env, "NAVER_SECRET_KEY")
     )
 
 @router.post("/naver-api")
@@ -117,8 +124,8 @@ async def update_naver_api_keys(keys: NaverApiKeys):
 async def get_naver_dev_api_keys():
     env = read_env()
     return NaverDevApiKeys(
-        client_id=env.get("NAVER_CLIENT_ID", ""),
-        client_secret=env.get("NAVER_CLIENT_SECRET", "")
+        client_id=env_or_os(env, "NAVER_CLIENT_ID"),
+        client_secret=env_or_os(env, "NAVER_CLIENT_SECRET")
     )
 
 @router.post("/naver-dev-api")
@@ -139,9 +146,9 @@ async def update_naver_dev_api_keys(keys: NaverDevApiKeys):
 async def get_ai_api_keys():
     env = read_env()
     return AIApiKeys(
-        claude_key=env.get("ANTHROPIC_API_KEY", ""),
-        gemini_key=env.get("GEMINI_API_KEY", ""),
-        openai_key=env.get("OPENAI_API_KEY", "")
+        claude_key=env_or_os(env, "ANTHROPIC_API_KEY"),
+        gemini_key=env_or_os(env, "GEMINI_API_KEY"),
+        openai_key=env_or_os(env, "OPENAI_API_KEY")
     )
 
 @router.post("/ai-api")
@@ -163,8 +170,8 @@ async def update_ai_api_keys(keys: AIApiKeys):
 async def get_telegram_api_keys():
     env = read_env()
     return TelegramApiKeys(
-        bot_token=env.get("TELEGRAM_BOT_TOKEN", ""),
-        chat_id=env.get("TELEGRAM_CHAT_ID", "")
+        bot_token=env_or_os(env, "TELEGRAM_BOT_TOKEN"),
+        chat_id=env_or_os(env, "TELEGRAM_CHAT_ID")
     )
 
 @router.post("/telegram-api")
