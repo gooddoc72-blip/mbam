@@ -1494,3 +1494,64 @@ async def shopping_boost_cancel(task_id: str):
         t["cancel"] = True
         t["status"] = "failed"
     return {"success": True}
+
+
+def persist_shopping_history(db, user_id: str, payload: dict, result: dict):
+    """[방법 B·DB동기화] 에이전트 shopping_analyze 결과 → ShoppingHistory(일자별)에 기록.
+    cloud: jobs.PERSISTERS 훅으로 complete_job 에서 자동 호출 (commit 은 호출측 수행)."""
+    import json as _json
+    from datetime import datetime as _dt
+    from mbam_nextgen.backend.database import ShoppingTrackedItem, ShoppingHistory
+    if not isinstance(result, dict) or not result.get("found"):
+        return
+    places = result.get("places") or []
+    target = next((p for p in places if p.get("is_target")), None)
+    if not target:
+        return
+
+    item = None
+    tracked_id = (payload or {}).get("tracked_id")
+    if tracked_id:
+        item = db.query(ShoppingTrackedItem).filter(ShoppingTrackedItem.id == tracked_id).first()
+    if not item:
+        item = (db.query(ShoppingTrackedItem)
+                .filter(ShoppingTrackedItem.mid == str((payload or {}).get("target_mid") or ""),
+                        ShoppingTrackedItem.keyword == ((payload or {}).get("keyword") or ""))
+                .first())
+    if not item:
+        return
+
+    rank = target.get("rank", 0)
+    rank = rank if isinstance(rank, int) else 0   # "400위 밖" 등 문자열 → 0
+    date_str = _dt.now().strftime("%Y-%m-%d")
+    hist = (db.query(ShoppingHistory)
+            .filter(ShoppingHistory.tracked_id == item.id, ShoppingHistory.date_str == date_str)
+            .first())
+    if not hist:
+        hist = ShoppingHistory(tracked_id=item.id, date_str=date_str)
+        db.add(hist)
+    hist.rank = rank
+    hist.page = (rank - 1) // 40 + 1 if rank > 0 else 1
+    hist.saves = target.get("keeps", 0)
+    hist.visitor_reviews = target.get("reviews", 0)
+    hist.purchases = target.get("purchases", 0)
+    hist.n1 = target.get("n1", 0)
+    hist.n2 = target.get("n2", 0)
+    hist.n3 = target.get("n3", 0)
+    hist.n4 = target.get("n4", 0)
+    hist.n5 = target.get("n5", 0)
+    # 목록 화면의 최신 스냅샷/리포트도 함께 갱신
+    try:
+        item.latest_places = _json.dumps(places, ensure_ascii=False)
+        if result.get("report"):
+            item.latest_report = result["report"]
+    except Exception:
+        pass
+
+
+# 클라우드 모드: 에이전트가 shopping_analyze 결과를 반환하면 자동으로 Postgres에 영속화
+try:
+    from mbam_nextgen.backend import jobs as _jobs
+    _jobs.register_persister("shopping_analyze", persist_shopping_history)
+except Exception:
+    pass

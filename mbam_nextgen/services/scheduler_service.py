@@ -1,8 +1,9 @@
 import asyncio
 import sqlite3
 import os
+import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from mbam_nextgen.backend.routers.place import run_place_analysis
 from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccount, JoinedCafe, ContentSchedule, BlogSchedule, BlogReservation
@@ -17,27 +18,46 @@ class SchedulerService:
         self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ranking.db")
         
     def get_tracked_places(self):
+        """추적 목록 — 웹 '저장' 버튼이 쓰는 메인 DB(PlaceTracked) 기준(유저별).
+        과거 설치형이 쓰던 레거시 sqlite(data/ranking.db tracked_places)도 병합해 호환 유지."""
+        out, seen = [], set()
+        try:
+            from mbam_nextgen.backend.database import PlaceTracked
+            db = SessionLocal()
+            try:
+                for r in db.query(PlaceTracked).all():
+                    key = (r.user_id, r.mid, r.keyword)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append({"mid": r.mid, "keyword": r.keyword, "user_id": r.user_id})
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Error fetching PlaceTracked: {str(e)}")
         try:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             # tracked_places 테이블이 존재하는지 확인 후 조회
             c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tracked_places'")
-            if not c.fetchone():
-                conn.close()
-                return []
-                
-            c.execute("SELECT mid, keyword FROM tracked_places")
-            places = c.fetchall()
+            if c.fetchone():
+                c.execute("SELECT mid, keyword FROM tracked_places")
+                for mid, kw in c.fetchall():
+                    if any(p["mid"] == mid and p["keyword"] == kw for p in out):
+                        continue
+                    out.append({"mid": mid, "keyword": kw, "user_id": None})
             conn.close()
-            return [{"mid": row[0], "keyword": row[1]} for row in places]
         except Exception as e:
             logger.error(f"Error fetching tracked places: {str(e)}")
-            return []
+        return out
 
     async def run_daily_analysis(self):
         """매일 실행되는 플레이스 분석 작업 (새벽 5시 일괄 실행 최적화)"""
+        if self._ran_today("place"):
+            logger.info("플레이스 일괄분석 오늘 이미 실행됨 — 스킵")
+            return
         logger.info(f"[{datetime.now()}] Starting daily scheduled place analysis...")
-        
+
         places = self.get_tracked_places()
         if not places:
             logger.info("No tracked places found to analyze.")
@@ -49,32 +69,50 @@ class SchedulerService:
         # 혹시 모를 동시 실행 이슈 방지를 위해 키워드를 중복 제거 후 순차 실행합니다.
         keyword_groups = {}
         for p in places:
-            keyword_groups.setdefault(p["keyword"], []).append(p["mid"])
+            keyword_groups.setdefault(p["keyword"], []).append(p)
 
         logger.info(f"Found {len(places)} places across {len(keyword_groups)} unique keywords. Beginning processing...")
 
-        for idx, (keyword, mids) in enumerate(keyword_groups.items()):
-            logger.info(f"[{idx+1}/{len(keyword_groups)}] Keyword Group: '{keyword}' with {len(mids)} places")
-            
+        for idx, (keyword, entries) in enumerate(keyword_groups.items()):
+            logger.info(f"[{idx+1}/{len(keyword_groups)}] Keyword Group: '{keyword}' with {len(entries)} places")
+
             # 각 MID별로 히스토리 업데이트를 위해 순차적으로 run_place_analysis 호출
             # 첫 번째 호출에서만 실제 크롤링이 발생하고, 나머지는 로컬 DB 캐시를 즉시 활용함
-            for mid in mids:
+            for entry in entries:
+                mid, user_id = entry["mid"], entry.get("user_id")
                 try:
-                    await asyncio.to_thread(run_place_analysis, keyword, mid)
+                    result = await asyncio.to_thread(run_place_analysis, keyword, mid)
+                    # 웹 '일자별 히스토리' 일관성: 유저 스코프 스냅샷도 메인 DB에 기록
+                    if user_id:
+                        try:
+                            from mbam_nextgen.backend.routers.place import persist_place_snapshot
+                            db = SessionLocal()
+                            try:
+                                persist_place_snapshot(db, user_id,
+                                                       {"keyword": keyword, "target_mid": mid}, result)
+                                db.commit()
+                            finally:
+                                db.close()
+                        except Exception as pe:
+                            logger.error(f"  -> Snapshot persist failed for MID {mid}: {pe}")
                     logger.info(f"  -> Successfully updated history for MID: {mid}")
                 except Exception as e:
                     logger.error(f"  -> Failed to update MID: {mid}. Error: {str(e)}")
-            
+
             # 다음 키워드 분석 전 IP 차단 방지를 위한 20초 대기 (마지막 항목 제외)
             if idx < len(keyword_groups) - 1:
                 logger.info("Waiting 20 seconds to avoid rate limiting before next keyword...")
                 await asyncio.sleep(20)
-                
+
+        self._mark_ran_today("place")
         logger.info(f"[{datetime.now()}] Daily scheduled place analysis completed successfully.")
 
 
     async def run_daily_shopping_analysis(self):
         """매일 실행되는 쇼핑 분석 작업 (새벽 5시 일괄 실행)"""
+        if self._ran_today("shopping"):
+            logger.info("쇼핑 일괄분석 오늘 이미 실행됨 — 스킵")
+            return
         logger.info(f"[{datetime.now()}] Starting daily scheduled shopping analysis...")
         try:
             from mbam_nextgen.backend.database import SessionLocal, ShoppingTrackedItem, ShoppingHistory
@@ -133,9 +171,37 @@ class SchedulerService:
                 import asyncio
                 await asyncio.sleep(10) # 10초 딜레이
             db.close()
+            self._mark_ran_today("shopping")
             logger.info("Daily shopping analysis completed.")
         except Exception as e:
             logger.error(f"Failed in daily shopping analysis: {str(e)}")
+
+    # ── 일괄 배치 실행 기록 (기동 시 보충 실행 판단용) ──────────────────
+    @property
+    def _mark_path(self):
+        return os.path.join(os.path.dirname(self.db_path), "daily_batch_runs.json")
+
+    def _mark_ran_today(self, name: str):
+        try:
+            data = {}
+            if os.path.exists(self._mark_path):
+                with open(self._mark_path, encoding="utf-8") as f:
+                    data = json.load(f) or {}
+            data[name] = datetime.now().strftime("%Y-%m-%d")
+            with open(self._mark_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"배치 실행 기록 실패({name}): {e}")
+
+    def _ran_today(self, name: str) -> bool:
+        try:
+            if os.path.exists(self._mark_path):
+                with open(self._mark_path, encoding="utf-8") as f:
+                    data = json.load(f) or {}
+                return data.get(name) == datetime.now().strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        return False
 
     def _get_scheduled_time(self):
         try:
@@ -696,13 +762,35 @@ class SchedulerService:
             logger.error(f"Error updating content schedule: {e}")
 
     def start(self):
-        """스케줄러 시작 (DB 설정 무시, 매일 새벽 5시 강제 일괄 실행)"""
+        """스케줄러 시작 (DB 설정 무시, 매일 새벽 5시(KST) 강제 일괄 실행)"""
         # hour, minute = self._get_scheduled_time()
         hour, minute = 5, 0 # 새벽 5시 고정
-        self.scheduler.add_job(self.run_daily_analysis, 'cron', hour=hour, minute=minute, id='daily_place_analysis', replace_existing=True)
-        self.scheduler.add_job(self.run_daily_shopping_analysis, 'cron', hour=hour, minute=minute, id='daily_shopping_analysis', replace_existing=True)
-        self.scheduler.add_job(self.run_daily_blogspot_analysis, 'cron', hour=hour, minute=minute, id='daily_blogspot_analysis', replace_existing=True)
-        
+        # misfire_grace_time/coalesce: 정시에 PC가 잠깐 꺼져 놓쳐도 1시간 내 기동하면 발화
+        common = dict(replace_existing=True, misfire_grace_time=3600, coalesce=True, timezone="Asia/Seoul")
+        self.scheduler.add_job(self.run_daily_analysis, 'cron', hour=hour, minute=minute, id='daily_place_analysis', **common)
+        self.scheduler.add_job(self.run_daily_shopping_analysis, 'cron', hour=hour, minute=minute, id='daily_shopping_analysis', **common)
+        self.scheduler.add_job(self.run_daily_blogspot_analysis, 'cron', hour=hour, minute=minute, id='daily_blogspot_analysis', **common)
+
+        # 기동 시 보충: 오늘 5시가 지났는데 아직 안 돌았으면 잠시 후 1회 실행
+        # (설치형은 새벽에 PC가 꺼져 있는 날이 많음 — 켜는 순간 그날 수집을 보충)
+        try:
+            now = datetime.now()
+            sched_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if now >= sched_today:
+                if not self._ran_today("place"):
+                    self.scheduler.add_job(self.run_daily_analysis, 'date',
+                                           run_date=now + timedelta(seconds=60),
+                                           id='daily_place_catchup', replace_existing=True)
+                    logger.info("오늘 플레이스 일괄분석 미실행 감지 → 60초 뒤 보충 실행 예약")
+                if not self._ran_today("shopping"):
+                    self.scheduler.add_job(self.run_daily_shopping_analysis, 'date',
+                                           run_date=now + timedelta(seconds=90),
+                                           id='daily_shopping_catchup', replace_existing=True)
+                    logger.info("오늘 쇼핑 일괄분석 미실행 감지 → 90초 뒤 보충 실행 예약")
+        except Exception as e:
+            logger.error(f"보충 실행 체크 실패: {e}")
+
+
         # Load Cafe Nurturing Schedules
         self.load_cafe_schedules()
 

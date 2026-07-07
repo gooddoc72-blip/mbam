@@ -158,6 +158,30 @@ async def _handle_auto_post(payload: dict) -> dict:
     return {"success": True, "logs": [str(l) for l in st.get("logs", [])[-6:]]}
 
 
+async def _handle_shopping_analyze(payload: dict) -> dict:
+    # 쇼핑 순위 분석: 사용자 PC(집 IP)에서 Playwright 스크레이핑 실행.
+    # 결과는 클라우드의 persist_shopping_history 훅이 ShoppingHistory 에 기록한다.
+    from mbam_nextgen.backend.database import SessionLocal
+    from mbam_nextgen.backend.routers.shopping_router import analyze_keyword_shopping, AnalyzeRequest
+    req = AnalyzeRequest(
+        keyword=payload.get("keyword", ""),
+        target_mid=payload.get("target_mid", "") or "",
+        store_name=payload.get("store_name", "") or "",
+        product_name=payload.get("product_name", "") or "",
+    )
+    db = SessionLocal()
+    try:
+        # role=admin → increment_quota 는 no-op (시스템 배치는 쿼터 미차감)
+        res = await analyze_keyword_shopping(req, db, {"sub": "agent_batch", "role": "admin"})
+    finally:
+        db.close()
+    if not isinstance(res, dict):
+        raise RuntimeError("쇼핑 분석 결과 형식 오류")
+    if not res.get("found"):
+        raise RuntimeError(res.get("message") or "타겟 상품을 찾지 못했습니다.")
+    return res
+
+
 async def _handle_register_account(payload: dict) -> dict:
     # 기기 인증: 사용자 PC에서 브라우저를 열어 수동 로그인+2FA → 영구 프로필 저장
     from mbam_nextgen.orchestrator import WorkflowOrchestrator
@@ -179,6 +203,7 @@ HANDLERS = {
     "seo_cafe_post": _handle_seo_cafe_post,
     "blog_index": _handle_blog_index,
     "place_analyze": _handle_place_analyze,
+    "shopping_analyze": _handle_shopping_analyze,
     "place_fetch_mid": _handle_place_fetch_mid,
     "place_fetch_reviews": _handle_place_fetch_reviews,
 }
