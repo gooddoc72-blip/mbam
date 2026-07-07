@@ -287,9 +287,27 @@ class AgentClient:
             print(f"[agent] 결과 전송 실패: {e}")
 
 
+def _try_login(cloud_url: str, email: str, password: str):
+    """동기 로그인 검증. 반환: (ok, msg) — ok True=성공 / False=계정 오류 / None=서버 연결 불가."""
+    try:
+        r = httpx.post(f"{(cloud_url or '').rstrip('/')}/api/auth/login",
+                       json={"email": email, "password": password, "hwid": _agent_id()},
+                       timeout=15)
+        if r.status_code == 200:
+            return True, ""
+        try:
+            detail = (r.json() or {}).get("detail") or ""
+        except Exception:
+            detail = r.text[:120]
+        return False, detail or "이메일 또는 비밀번호가 올바르지 않습니다."
+    except Exception as e:
+        return None, f"서버 연결 실패: {e}"
+
+
 def _prompt_login(cfg: dict) -> dict:
     """설정에 계정이 없으면 창을 띄워 marketlabs 계정을 입력받아 agent_config.json 에 저장.
-    (설치형: 설치→부팅→최초 1회 로그인 후 이후 자동)"""
+    저장 전 서버에 실제 로그인해 검증 — 오타로 저장되면 백그라운드 에이전트가 조용히
+    영영 실패하므로 반드시 여기서 걸러낸다. (설치형: 설치→최초 1회 로그인 후 이후 자동)"""
     try:
         import tkinter as tk
     except Exception:
@@ -298,7 +316,7 @@ def _prompt_login(cfg: dict) -> dict:
     root = tk.Tk()
     root.title("마케팅연구소 에이전트 - 로그인")
     root.resizable(False, False)
-    W, H = 400, 300
+    W, H = 400, 330
     try:
         root.update_idletasks()
         x = (root.winfo_screenwidth() - W) // 2
@@ -316,11 +334,24 @@ def _prompt_login(cfg: dict) -> dict:
     e_pw = tk.Entry(frm, show="*"); e_pw.pack(fill="x", pady=(0, 8))
     tk.Label(frm, text="서버 주소 (기본값 권장)", anchor="w").pack(fill="x")
     e_url = tk.Entry(frm); e_url.pack(fill="x"); e_url.insert(0, cfg.get("cloud_url", "") or "")
+    status = tk.Label(root, text="", font=("맑은 고딕", 9), fg="#dc2626")
+    status.pack()
 
     def _save():
-        result["email"] = e_email.get().strip()
-        result["password"] = e_pw.get().strip()
-        result["cloud_url"] = (e_url.get().strip() or cfg.get("cloud_url"))
+        email, pw = e_email.get().strip(), e_pw.get().strip()
+        url = (e_url.get().strip() or cfg.get("cloud_url"))
+        if not email or not pw:
+            status.config(text="이메일과 비밀번호를 입력해주세요.", fg="#dc2626")
+            return
+        status.config(text="로그인 확인 중...", fg="#2563eb")
+        root.update()
+        ok, msg = _try_login(url, email, pw)
+        if ok is False:
+            status.config(text=msg, fg="#dc2626")
+            return
+        # ok is None(서버 연결 불가)이면 일단 저장 — 에이전트가 이후 자동 재시도
+        result["email"], result["password"], result["cloud_url"] = email, pw, url
+        result["verified"] = bool(ok)
         root.destroy()
 
     tk.Button(root, text="로그인 · 저장", command=_save, bg="#2563eb", fg="white",
@@ -337,6 +368,17 @@ def _prompt_login(cfg: dict) -> dict:
                           f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[agent] 설정 저장 실패: {e}")
+        if result.get("verified"):
+            try:
+                import tkinter as tk
+                import tkinter.messagebox as mb
+                _r = tk.Tk(); _r.withdraw()
+                mb.showinfo("마케팅연구소 에이전트",
+                            "로그인 성공! 설정이 저장되었습니다.\n"
+                            "이제 컴퓨터를 켜면 에이전트가 자동으로 실행됩니다.")
+                _r.destroy()
+            except Exception:
+                pass
     return cfg
 
 
@@ -349,6 +391,11 @@ def main():
     cfg = _load_config()
     if not cfg["email"] or not cfg["password"]:
         cfg = _prompt_login(cfg)   # 최초 실행: 로그인 창
+    else:
+        # 저장된 계정이 더 이상 유효하지 않으면(비밀번호 변경 등) 재로그인 창
+        ok, _ = _try_login(cfg["cloud_url"], cfg["email"], cfg["password"])
+        if ok is False:
+            cfg = _prompt_login(cfg)
     if not cfg["email"] or not cfg["password"]:
         print("[agent] 계정 미설정. 종료.")
         return
