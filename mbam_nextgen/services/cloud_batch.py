@@ -61,7 +61,7 @@ def enqueue_daily_batch():
             jobsvc.enqueue_job(db, r.user_id, "place_analyze", {
                 "keyword": r.keyword, "target_mid": r.mid,
                 "compare_days": 1, "force_refresh": True,
-            })
+            }, priority=9)  # 배치는 후순위 — 사용자 실시간 요청(5)이 항상 먼저
             pend.add((r.keyword, r.mid))
             n_place += 1
 
@@ -80,7 +80,7 @@ def enqueue_daily_batch():
                         continue
                     jobsvc.enqueue_job(db, owner, "shopping_analyze", {
                         "keyword": it.keyword, "target_mid": it.mid, "tracked_id": it.id,
-                    })
+                    }, priority=9)
                     pend.add((it.keyword, it.mid))
                     n_shop += 1
         logger.info(f"[CloudBatch] 일괄 적재 완료 — 플레이스 {n_place}건, 쇼핑 {n_shop}건")

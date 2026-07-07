@@ -72,7 +72,7 @@ export default function BlogCheckPage() {
       });
       let data = await res.json();
       if (!res.ok) throw new Error(data.detail || "진단 실패");
-      data = await resolveMaybeAgent(data, { tries: 60, intervalMs: 2500 });
+      data = await resolveMaybeAgent(data, { tries: 120, intervalMs: 1000 });
       setIdxResult(data);
       try { addHistory("blog-check", { summary: `블로그 지수 진단 · ${idxInput || ''}` }); } catch (e) {}
     } catch (err) {
@@ -221,7 +221,7 @@ export default function BlogCheckPage() {
             disabled={idxLoading}
           />
           <button type="submit" className="btn-primary" style={{ padding: "0.8rem 1.6rem", fontSize: "1rem" }} disabled={idxLoading || !idxInput.trim()}>
-            {idxLoading ? "진단 중... (10~20초)" : "🩺 지수 진단"}
+            {idxLoading ? "진단 중... (5~10초)" : "🩺 지수 진단"}
           </button>
         </form>
 

@@ -359,6 +359,7 @@ class AgentJob(Base):
     user_id = Column(String, index=True)                 # 작업 소유자(=에이전트 로그인 유저, JWT sub)
     job_type = Column(String, index=True)                # "seo_search" | "seo_analyze" | ...
     payload = Column(Text, nullable=True)                # JSON 문자열(입력)
+    priority = Column(Integer, default=5, index=True)    # 낮을수록 먼저 처리 (실시간 5 / 새벽배치 9)
     status = Column(String, default="queued", index=True)  # queued | running | done | error
     result = Column(Text, nullable=True)                 # JSON 문자열(결과)
     error = Column(Text, nullable=True)

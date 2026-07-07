@@ -97,8 +97,9 @@ async def _fetch_search_exposure(client: httpx.AsyncClient, blog_id: str, titles
     sample = [t for t in sample if len(t) >= 4][:3]
     if not sample:
         return None
-    checked = hits = 0
-    for q in sample:
+
+    # 공식 API(키 인증)라 봇 회피 지터 불필요 → 3건 동시 조회로 단축
+    async def _check(q: str):
         try:
             res = await client.get(
                 "https://openapi.naver.com/v1/search/blog.json",
@@ -108,21 +109,20 @@ async def _fetch_search_exposure(client: httpx.AsyncClient, blog_id: str, titles
             )
             if res.status_code >= 400:
                 return None
-            data = res.json()
-            checked += 1
-            items = data.get("items", []) or []
-            found = any(
+            items = res.json().get("items", []) or []
+            return any(
                 blog_id in str(it.get("bloggerlink", ""))
                 or f"blog.naver.com/{blog_id}" in str(it.get("link", ""))
                 or f"/{blog_id}/" in str(it.get("link", ""))
                 for it in items
             )
-            if found:
-                hits += 1
         except Exception:
             return None
-        await _jitter(150, 400)
-    return (hits / checked) if checked > 0 else None
+
+    results = await asyncio.gather(*[_check(q) for q in sample])
+    if any(r is None for r in results):
+        return None
+    return sum(1 for r in results if r) / len(results)
 
 
 async def _fetch_rss_meta(client: httpx.AsyncClient, blog_id: str) -> dict:
@@ -153,42 +153,51 @@ def _parse_rfc822_ms(s: str) -> Optional[int]:
 
 
 async def _fetch_posts(client: httpx.AsyncClient, blog_id: str, max_pages: int = 6) -> dict:
-    """모바일 글목록 JSON API를 페이지네이션해 글 메타 수집."""
-    posts = []
-    blog_no = None
-    for page in range(1, max_pages + 1):
+    """모바일 글목록 JSON API를 페이지네이션해 글 메타 수집.
+    1페이지가 가득 차면(30개) 나머지 페이지는 랜덤 지연(0~0.5초)만 두고 동시 요청 —
+    순차+지터 방식 대비 4~5초 단축(브라우저도 리소스를 병렬 로드하므로 탐지 위험 낮음)."""
+    import json as _json
+
+    async def _page(page: int, delay: float = 0.0) -> list:
+        if delay:
+            await asyncio.sleep(delay)
         url = f"https://m.blog.naver.com/api/blogs/{blog_id}/post-list?categoryNo=0&itemCount=30&page={page}"
         body = await _safe_fetch(client, url, blog_id, json_=True)
         if not body:
-            break
+            return []
         try:
-            import json as _json
             data = _json.loads(body)
         except Exception:
-            break
-        items = (data.get("result") or {}).get("items") or []
-        if not items:
-            break
-        for it in items:
-            if blog_no is None and isinstance(it.get("blogNo"), int):
-                blog_no = it["blogNo"]
-            ms = it.get("addDate")
-            try:
-                ms = int(ms)
-            except (TypeError, ValueError):
-                continue
-            if not ms:
-                continue
-            posts.append({
-                "date": ms,
-                "comments": int(it.get("commentCnt") or 0),
-                "sympathy": int(it.get("sympathyCnt") or 0),
-                "category": str(it.get("categoryName") or "").strip(),
-                "title": str(it.get("titleWithInspectMessage") or it.get("title") or "").strip(),
-            })
-        if len(items) < 30:
-            break
-        await _jitter(300, 800)
+            return []
+        return (data.get("result") or {}).get("items") or []
+
+    all_items = await _page(1)
+    if len(all_items) == 30 and max_pages > 1:
+        rest = await asyncio.gather(*[
+            _page(p, delay=random.random() * 0.5) for p in range(2, max_pages + 1)
+        ])
+        for items in rest:
+            all_items.extend(items)
+
+    posts = []
+    blog_no = None
+    for it in all_items:
+        if blog_no is None and isinstance(it.get("blogNo"), int):
+            blog_no = it["blogNo"]
+        ms = it.get("addDate")
+        try:
+            ms = int(ms)
+        except (TypeError, ValueError):
+            continue
+        if not ms:
+            continue
+        posts.append({
+            "date": ms,
+            "comments": int(it.get("commentCnt") or 0),
+            "sympathy": int(it.get("sympathyCnt") or 0),
+            "category": str(it.get("categoryName") or "").strip(),
+            "title": str(it.get("titleWithInspectMessage") or it.get("title") or "").strip(),
+        })
     return {"posts": posts, "blog_no": blog_no}
 
 
@@ -266,10 +275,17 @@ async def fetch_blog_stats(blog_url_or_id: str) -> Optional[dict]:
         first_post_date = merged[0]
         last_post_date = merged[-1]
 
+        # 개설일(마지막 페이지)과 검색노출은 서로 독립 → 동시 실행으로 단축
+        recent_titles_early = [p["title"] for p in sorted(posts, key=lambda x: x["date"], reverse=True) if p["title"]]
         if home["total_post_count"] and home["total_post_count"] > len(posts):
-            oldest = await _fetch_oldest_post_date(client, blog_id, home["total_post_count"])
+            oldest, search_exposure = await asyncio.gather(
+                _fetch_oldest_post_date(client, blog_id, home["total_post_count"]),
+                _fetch_search_exposure(client, blog_id, recent_titles_early),
+            )
             if oldest and oldest < first_post_date:
                 first_post_date = oldest
+        else:
+            search_exposure = await _fetch_search_exposure(client, blog_id, recent_titles_early)
 
         recent_30 = len([ms for ms in merged if now - ms <= 30 * DAY])
         recent_90 = len([ms for ms in merged if now - ms <= 90 * DAY])
@@ -286,9 +302,6 @@ async def fetch_blog_stats(blog_url_or_id: str) -> Optional[dict]:
             if cnt > top_count:
                 top_count, top_category = cnt, cat
         category_concentration = (top_count / len(posts)) if posts else 0.0
-
-        recent_titles = [p["title"] for p in sorted(posts, key=lambda x: x["date"], reverse=True) if p["title"]]
-        search_exposure = await _fetch_search_exposure(client, blog_id, recent_titles)
 
         return {
             "blog_id": blog_id,

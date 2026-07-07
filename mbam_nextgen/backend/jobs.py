@@ -40,13 +40,16 @@ def is_cloud_mode() -> bool:
     return execution_mode() == "cloud"
 
 
-def enqueue_job(db: Session, user_id: str, job_type: str, payload: dict) -> str:
-    """작업을 queued 상태로 적재하고 job_id 반환."""
+def enqueue_job(db: Session, user_id: str, job_type: str, payload: dict, priority: int = 5) -> str:
+    """작업을 queued 상태로 적재하고 job_id 반환.
+    priority: 낮을수록 먼저 처리 — 실시간(사용자 클릭) 5, 새벽 일괄배치 9.
+    배치가 큐를 채워도 실시간 요청이 항상 먼저 실행되게 한다."""
     job = AgentJob(
         id=str(uuid.uuid4()),
         user_id=user_id,
         job_type=job_type,
         payload=json.dumps(payload or {}, ensure_ascii=False),
+        priority=priority,
         status="queued",
         created_at=datetime.utcnow(),
     )
@@ -61,7 +64,7 @@ def claim_next_job(db: Session, user_id: str, agent_id: str = None) -> Optional[
     job = (
         db.query(AgentJob)
         .filter(AgentJob.user_id == user_id, AgentJob.status == "queued")
-        .order_by(AgentJob.created_at.asc())
+        .order_by(AgentJob.priority.asc(), AgentJob.created_at.asc())
         .first()
     )
     if not job:

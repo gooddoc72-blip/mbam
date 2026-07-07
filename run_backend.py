@@ -27,6 +27,7 @@ def run_migrations():
         'ALTER TABLE cafe_schedules ADD COLUMN visit_interval_min INTEGER DEFAULT 30;',
         'ALTER TABLE blog_schedules ADD COLUMN generate_card_news INTEGER DEFAULT 1;',
         'ALTER TABLE advertisers ADD COLUMN custom_limits TEXT;',
+        'ALTER TABLE agent_jobs ADD COLUMN priority INTEGER DEFAULT 5;',
     ]
     for stmt in statements:
         try:
