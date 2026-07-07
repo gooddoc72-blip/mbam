@@ -12,11 +12,12 @@ export default function BlogCheckPage() {
   const [loading, setLoading] = usePersistentState("blog-check:loading", false);
   const [error, setError] = usePersistentState("blog-check:error", null);
 
-  // 블로그 지수 진단
-  const [idxInput, setIdxInput] = useState("");
-  const [idxLoading, setIdxLoading] = useState(false);
-  const [idxError, setIdxError] = useState(null);
-  const [idxResult, setIdxResult] = useState(null);
+  // 블로그 지수 진단 — 전역 보관: 메뉴 이동 후 돌아와도 결과 유지 (F5 새로고침 시에만 초기화)
+  // 진단 도중 다른 메뉴에 다녀와도 완료되면 결과가 채워진다 (setter가 언마운트 상태에서도 동작).
+  const [idxInput, setIdxInput] = usePersistentState("blog-check:idxInput", "");
+  const [idxLoading, setIdxLoading] = usePersistentState("blog-check:idxLoading", false);
+  const [idxError, setIdxError] = usePersistentState("blog-check:idxError", null);
+  const [idxResult, setIdxResult] = usePersistentState("blog-check:idxResult", null);
   const [idxSaving, setIdxSaving] = useState(false);
   const [savedList, setSavedList] = useState([]);
 
@@ -74,7 +75,13 @@ export default function BlogCheckPage() {
       if (!res.ok) throw new Error(data.detail || "진단 실패");
       data = await resolveMaybeAgent(data, { tries: 120, intervalMs: 1000 });
       setIdxResult(data);
-      try { addHistory("blog-check", { summary: `블로그 지수 진단 · ${idxInput || ''}` }); } catch (e) {}
+      try {
+        // payload 저장 → 이전 작업내역에서 '다시 보기'로 분석 결과 복원 가능
+        addHistory("blog-check", {
+          summary: `블로그 지수 진단 · ${idxInput || ''}`,
+          payload: { input: idxInput, result: data },
+        });
+      } catch (e) {}
     } catch (err) {
       setIdxError(err.message);
     } finally {
@@ -431,7 +438,15 @@ export default function BlogCheckPage() {
           )}
         </div>
       </div>
-      <WorkHistory menuKey="blog-check" />
+      <WorkHistory menuKey="blog-check" onRestore={(entry) => {
+        const p = entry.payload || {};
+        if (p.result) {
+          setIdxResult(p.result);
+          setIdxInput(p.input || "");
+          setIdxError(null);
+          try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
+        }
+      }} />
     </main>
   );
 }
