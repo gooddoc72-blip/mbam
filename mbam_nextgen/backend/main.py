@@ -78,6 +78,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# 헬스체크 — 배포/재기동 확인용 (started_at 이 바뀌면 새 컨테이너)
+from datetime import datetime as _dt
+_STARTED_AT = _dt.utcnow().isoformat() + "Z"
+
+
+@app.get("/api/health", tags=["Health"])
+async def health():
+    return {"status": "ok", "started_at": _STARTED_AT}
+
+
 # CORS Middleware (SaaS 보안 강화: 특정 프론트엔드 도메인만 허용)
 origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
 allowed_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
