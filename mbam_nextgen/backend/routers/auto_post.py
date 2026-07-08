@@ -419,18 +419,35 @@ async def focus_running():
 
 
 @router.get("/registered-accounts", summary="기기 인증(영구 프로필) 완료된 계정 ID 목록")
-async def registered_accounts():
+async def registered_accounts(current_user: dict = Depends(get_current_user)):
     import os
     from mbam_nextgen.infrastructure.session import is_registered, PROFILES_DIR
-    ids = []
+    ids = set()
+    # 1) 로컬(설치형): 이 머신의 프로필 마커
     try:
         if os.path.isdir(PROFILES_DIR):
             for name in os.listdir(PROFILES_DIR):
                 if is_registered(name):
-                    ids.append(name)
+                    ids.add(name)
     except Exception:
         pass
-    return {"registered": ids}
+    # 2) 클라우드(방법 B): 에이전트가 인증을 마치면 app_settings(DB)에 기록됨 — 그 기록도 포함
+    #    (인증은 사용자 PC에서 실행돼 마커가 클라우드 컨테이너엔 없기 때문)
+    try:
+        from mbam_nextgen.backend.database import SessionLocal, AppSetting
+        uid = current_user.get("sub")
+        prefix = f"device_reg:{uid}:"
+        db = SessionLocal()
+        try:
+            rows = db.query(AppSetting).filter(AppSetting.key.like(prefix + "%")).all()
+            for r in rows:
+                if r.value == "1":
+                    ids.add(r.key[len(prefix):])
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[auto_post] KV 인증목록 조회 실패: {e}")
+    return {"registered": sorted(ids)}
 
 
 @router.post("/cancel/{task_id}")
