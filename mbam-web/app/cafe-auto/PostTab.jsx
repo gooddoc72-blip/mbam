@@ -165,8 +165,11 @@ export default function PostTab({ s }) {
 
   return (
             <>
+            {/* 블로그 발행과 동일한 2단 레이아웃: 좌측 = 설정(계정→카페→원고→발행), 우측 = 원고 검토·수정 */}
+            <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ flex: "1.5 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "0.5rem", color: "#334155" }}>발행 계정 선택</h2>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "0.5rem", color: "#334155" }}>1. 발행 계정 선택</h2>
                 <p style={{ margin: "0 0 0.8rem", fontSize: "0.82rem", color: "#64748b" }}>하단 <b>1. 네이버 아이디 풀</b>에서 등록·기기 인증한 계정 중 발행에 사용할 계정을 고르세요. (인증된 계정은 자동 로그인)</p>
                 {/* 계정이 많을 때: 검색 + 전체선택/해제 + 선택 수 */}
                 {accounts.length > 0 && (() => {
@@ -205,7 +208,7 @@ export default function PostTab({ s }) {
               {selectedAccounts.length > 0 && (
                 <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
-                    <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>계정별 타겟 카페·게시판 매칭</h2>
+                    <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>2. 계정별 타겟 카페·게시판 매칭</h2>
                     <button onClick={prefillTargets} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>📥 가입 카페 매핑 불러오기</button>
                   </div>
 
@@ -258,7 +261,7 @@ export default function PostTab({ s }) {
 
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>원고 (키워드)</h2>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>3. 원고 만들기</h2>
                   <button onClick={() => setIsModalOpen(true)} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
                     ☁️ 웹에서 불러오기
                   </button>
@@ -296,27 +299,9 @@ export default function PostTab({ s }) {
                     <span style={{ fontSize: "0.78rem", color: "#64748b" }}>* 선택하면 아래 제목·본문에 채워집니다(이후 AI 원고 생성도 가능).</span>
                   </div>
                 )}
-                {actionType === "post" && cafeGenerated.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                    <p style={{ margin: 0, fontSize: "0.85rem", color: "#7c3aed", fontWeight: "bold" }}>✨ 선택한 계정 수만큼 원고를 생성했습니다. 계정별로 검토·수정 후 발행하세요.</p>
-                    {cafeGenerated.map((g, idx) => (
-                      <div key={idx} style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1rem", background: "#faf5ff" }}>
-                        <div style={{ fontWeight: "bold", color: "#2563eb", marginBottom: "0.5rem" }}>📝 {g.account_id} 계정 원고</div>
-                        <input type="text" value={g.title || ""} placeholder="제목"
-                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, title: e.target.value } : x))}
-                          style={{ width: "100%", padding: "0.6rem", marginBottom: "0.5rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                        <textarea value={g.content || ""}
-                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, content: e.target.value } : x))}
-                          style={{ width: "100%", height: "240px", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <>
-                    {actionType === "post" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => setTitle(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />}
-                    <textarea placeholder="직접 본문 작성 시 (또는 'AI 원고 생성'으로 미리보기 후 검토)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: content ? "260px" : "100px", padding: "0.8rem" }} />
-                  </>
-                )}
+                {/* 제목/본문(글감) — 생성된 원고 검토는 우측 패널에서 (블로그 발행과 동일) */}
+                {actionType === "post" && sourceMode !== "image" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => setTitle(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem", boxSizing: "border-box" }} />}
+                {sourceMode !== "image" && <textarea placeholder="직접 본문 작성 시 (또는 'AI 원고 생성'으로 미리보기 후 검토)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: content ? "260px" : "100px", padding: "0.8rem", boxSizing: "border-box" }} />}
                 {actionType === "post" && sourceMode === "image" && (
                   <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
                     <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 이미지 + 키워드로 글감 만들기</div>
@@ -374,6 +359,45 @@ export default function PostTab({ s }) {
                 )}
               </div>
 
+              {/* 발행 시작 (좌측 하단) */}
+              <div style={{ display: "flex", gap: "1rem" }}>
+                <button onClick={handleStartSingle} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
+                  {loading ? "작업 중..." : "🚀 발행 시작하기"}
+                </button>
+                {loading && (
+                  <button onClick={handleCancelTask} style={{ padding: "1rem 2rem", background: "#ef4444", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer" }}>
+                    ■ 작업 강제 중지
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── 우측: 생성된 계정별 원고 검토·수정 + 발행 대기열 (블로그 발행과 동일 위치) ── */}
+            <div style={{ flex: "1 1 380px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: "0 0 1rem" }}>✅ 생성된 계정별 원고 검토·수정</h2>
+                {cafeGenerated.length === 0 ? (
+                  <div style={{ padding: "2.5rem 1rem", textAlign: "center", color: "#94a3b8", border: "2px dashed #cbd5e1", borderRadius: "8px", fontSize: "0.9rem" }}>
+                    좌측에서 '✨ AI 원고 생성'을 누르면<br />선택한 계정 수만큼 원고가 생성되어 여기에 표시됩니다.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <p style={{ margin: 0, fontSize: "0.85rem", color: "#7c3aed", fontWeight: "bold" }}>✨ 계정별로 검토·수정한 뒤 저장·발행하세요.</p>
+                    {cafeGenerated.map((g, idx) => (
+                      <div key={idx} style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1rem", background: "#faf5ff" }}>
+                        <div style={{ fontWeight: "bold", color: "#2563eb", marginBottom: "0.5rem" }}>📝 {g.account_id} 계정 원고</div>
+                        <input type="text" value={g.title || ""} placeholder="제목"
+                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, title: e.target.value } : x))}
+                          style={{ width: "100%", padding: "0.6rem", marginBottom: "0.5rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                        <textarea value={g.content || ""}
+                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, content: e.target.value } : x))}
+                          style={{ width: "100%", height: "240px", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* 저장된 원고 / 일괄 작업 시작 */}
               {actionType === "post" && savedManuscripts.length > 0 && (
                 <div style={{ background: "white", padding: "1.5rem", border: "2px solid #0ea5e9", borderRadius: "8px" }}>
@@ -407,6 +431,8 @@ export default function PostTab({ s }) {
                   <p style={{ margin: "0.6rem 0 0", fontSize: "0.8rem", color: "#64748b" }}>* 각 계정의 저장된 카페·게시판으로 순차 발행됩니다(계정 간 {accountDelay}분 텀{useTethering ? ", 테더링 IP 회전" : ""}).</p>
                 </div>
               )}
+            </div>
+            </div>
 
               {/* 저장 원고 수정 모달 */}
               {editMs && (
@@ -427,16 +453,6 @@ export default function PostTab({ s }) {
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: "1rem" }}>
-                <button onClick={handleStartSingle} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
-                  {loading ? "작업 중..." : "일반 작업 시작하기"}
-                </button>
-                {loading && (
-                  <button onClick={handleCancelTask} style={{ padding: "1rem 2rem", background: "#ef4444", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer" }}>
-                    ■ 작업 강제 중지
-                  </button>
-                )}
-              </div>
             </>
   );
 }
