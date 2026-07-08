@@ -10,7 +10,8 @@ export default function BlogSchedulePage() {
   const [loading, setLoading] = useState(false);
 
   // form state
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState("");        // (레거시) 예약 포스팅 서브탭에서 사용
+  const [selectedAccIds, setSelectedAccIds] = useState(() => new Set());  // 매일 자동발행: 다중 계정
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [category, setCategory] = useState("");
   const [count, setCount] = useState(1);
@@ -59,6 +60,8 @@ export default function BlogSchedulePage() {
       setReservations(resvData || []);
       if (!accountId && accData && accData.length > 0) setAccountId(accData[0].id);
       if (!rAccountId && accData && accData.length > 0) setRAccountId(accData[0].id);
+      // 매일 자동발행: 첫 로드 시 등록 계정을 전체 선택(원하면 해제)
+      setSelectedAccIds(prev => prev.size === 0 ? new Set((accData || []).map(a => a.id)) : prev);
       if (!category && catData.categories && catData.categories.length > 0) setCategory(catData.categories[0]);
     } catch (e) {
       console.error(e);
@@ -115,8 +118,11 @@ export default function BlogSchedulePage() {
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, []);
 
+  const toggleAcc = (id) => setSelectedAccIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
   const handleAdd = async () => {
-    if (!accountId) { alert("발행할 네이버 계정을 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)"); return; }
+    const accIds = Array.from(selectedAccIds);
+    if (accIds.length === 0) { alert("발행할 네이버 계정을 1개 이상 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)"); return; }
     if (!category) { alert("글감 카테고리를 선택하세요. (글감 수집 메뉴에서 먼저 수집해야 글감이 생깁니다)"); return; }
     setLoading(true);
     try {
@@ -124,7 +130,7 @@ export default function BlogSchedulePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          account_id: accountId,
+          account_ids: accIds,
           schedule_time: scheduleTime,
           content_category: category,
           post_count_per_day: Number(count) || 1,
@@ -135,7 +141,7 @@ export default function BlogSchedulePage() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert("✅ 매일 자동발행 예약이 등록되었습니다!\n매일 " + scheduleTime + "에 '" + category + "' 글감으로 자동 발행됩니다.");
+        alert(`✅ ${accIds.length}개 계정에 매일 자동발행 예약이 등록되었습니다!\n매일 ${scheduleTime}에 '${category}' 글감으로 자동 발행됩니다.\n(계정마다 서로 다른 인기 글감이 배분됩니다)`);
         loadAll();
       } else {
         alert("등록 실패: " + (data.detail || data.message || "알 수 없는 오류"));
@@ -198,16 +204,28 @@ export default function BlogSchedulePage() {
           {/* 등록 폼 */}
           <div style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "1.5rem" }}>
             <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1.2rem" }}>새 예약 추가</h2>
+            <div style={{ marginBottom: "1.1rem" }}>
+              <label style={labelStyle}>발행 계정 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(여러 개 선택 가능 · 계정마다 다른 인기 글감으로 발행)</span></label>
+              {accounts.length === 0 ? (
+                <div style={{ padding: "0.9rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "6px", color: "#94a3b8", fontSize: "0.88rem" }}>
+                  등록된 네이버 계정이 없습니다. 계정관리에서 기기 인증 후 이용하세요.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  {accounts.map((a) => {
+                    const on = selectedAccIds.has(a.id);
+                    return (
+                      <button key={a.id} type="button" onClick={() => toggleAcc(a.id)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.5rem 0.9rem", borderRadius: "999px", border: on ? "1px solid #2563eb" : "1px solid #cbd5e1", background: on ? "#eff6ff" : "white", color: on ? "#1d4ed8" : "#475569", fontWeight: "bold", fontSize: "0.88rem", cursor: "pointer" }}>
+                        <span style={{ width: 16, height: 16, borderRadius: 4, border: on ? "none" : "1px solid #cbd5e1", background: on ? "#2563eb" : "white", color: "white", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem" }}>{on ? "✓" : ""}</span>
+                        {a.naver_id}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.1rem" }}>
-              <div>
-                <label style={labelStyle}>발행 계정</label>
-                <select value={accountId} onChange={(e) => setAccountId(e.target.value)} style={inputStyle}>
-                  <option value="">계정 선택</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.naver_id}</option>
-                  ))}
-                </select>
-              </div>
               <div>
                 <label style={labelStyle}>발행 시각 (매일)</label>
                 <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} style={inputStyle} />

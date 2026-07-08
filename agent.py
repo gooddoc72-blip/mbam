@@ -158,6 +158,26 @@ async def _handle_auto_post(payload: dict) -> dict:
     return {"success": True, "logs": [str(l) for l in st.get("logs", [])[-6:]]}
 
 
+async def _handle_blog_daily_post(payload: dict) -> dict:
+    # 매일 자동발행: 클라우드가 예약 시각에 적재한 잡을 집 IP에서 생성+발행.
+    # 로컬 스케줄러(run_blog_post_job)와 동일하게 execute_blog_workflow 로 글감→원고→발행.
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+    result = await WorkflowOrchestrator().execute_blog_workflow(
+        account_id=payload.get("naver_id", ""),
+        account_pw=payload.get("naver_pw", ""),
+        keyword=payload.get("keyword", "정보"),
+        source_data=payload.get("source_data", ""),
+        publish_mode="instant",
+        ai_provider=payload.get("ai_provider", "claude"),
+        distribution_mode=payload.get("distribution_mode", "normal"),
+        generate_card_news=bool(payload.get("generate_card_news", True)),
+        blog_id=payload.get("blog_addr") or None,
+    )
+    if not (result and result.get("success")):
+        raise RuntimeError("발행 실패: " + str((result or {}).get("error", "원인 미상")))
+    return {"success": True, "result_url": result.get("result_url", "")}
+
+
 async def _handle_shopping_analyze(payload: dict) -> dict:
     # 쇼핑 순위 분석: 사용자 PC(집 IP)에서 Playwright 스크레이핑 실행.
     # 결과는 클라우드의 persist_shopping_history 훅이 ShoppingHistory 에 기록한다.
@@ -206,6 +226,7 @@ HANDLERS = {
     "shopping_analyze": _handle_shopping_analyze,
     "place_fetch_mid": _handle_place_fetch_mid,
     "place_fetch_reviews": _handle_place_fetch_reviews,
+    "blog_daily_post": _handle_blog_daily_post,
 }
 
 

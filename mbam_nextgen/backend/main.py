@@ -57,19 +57,26 @@ async def lifespan(app: FastAPI):
     from mbam_nextgen.backend import jobs as jobsvc
     scheduler_on = not jobsvc.is_cloud_mode()
     cloud_batch = None
+    blog_daily = None
     if scheduler_on:
         scheduler_service.start()
     else:
         # cloud 모드: 스크래핑은 못 하지만 '적재'는 가능 — 새벽 5시(KST)에
-        # 추적목록(플레이스/쇼핑)을 에이전트 작업 큐에 넣는 경량 스케줄러만 기동.
+        # 추적목록(플레이스/쇼핑)을 에이전트 작업 큐에 넣는 경량 스케줄러.
         from mbam_nextgen.services.cloud_batch import cloud_batch_scheduler
         cloud_batch = cloud_batch_scheduler
         cloud_batch.start()
+        # 매일 자동발행(BlogSchedule)도 예약 시각마다 에이전트 잡으로 적재.
+        from mbam_nextgen.services.blog_daily_scheduler import blog_daily_scheduler
+        blog_daily = blog_daily_scheduler
+        blog_daily.start()
     yield
     if scheduler_on:
         scheduler_service.shutdown()
     if cloud_batch:
         cloud_batch.shutdown()
+    if blog_daily:
+        blog_daily.shutdown()
 
 app = FastAPI(
     title="SEO Analysis Platform API",

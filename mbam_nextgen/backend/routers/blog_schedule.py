@@ -14,7 +14,8 @@ def get_user_id(current_user: dict):
 
 
 class BlogScheduleCreate(BaseModel):
-    account_id: str
+    account_id: Optional[str] = None                 # 단일 계정(레거시 호환)
+    account_ids: Optional[list] = None               # 다중 계정 — 계정마다 예약 1건씩 생성
     schedule_time: str                      # "HH:MM"
     content_category: Optional[str] = None
     post_count_per_day: Optional[int] = 1
@@ -23,42 +24,50 @@ class BlogScheduleCreate(BaseModel):
     generate_card_news: Optional[bool] = True
 
 
-@router.post("/schedules", summary="블로그 매일 자동발행 예약 추가")
+@router.post("/schedules", summary="블로그 매일 자동발행 예약 추가 (다중 계정 지원)")
 async def add_blog_schedule(
     req: BlogScheduleCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     user_id = get_user_id(current_user)
-    # 소유권 검증: 본인 계정으로만 예약 가능 (IDOR 방지)
-    acc = db.query(NaverAccount).filter(
-        NaverAccount.id == req.account_id, NaverAccount.user_id == user_id
-    ).first()
-    if not acc:
-        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    # 단일/다중 계정 통합 — account_ids 우선, 없으면 account_id 하나
+    acc_ids = [a for a in (req.account_ids or []) if a] or ([req.account_id] if req.account_id else [])
+    if not acc_ids:
+        raise HTTPException(status_code=400, detail="발행 계정을 1개 이상 선택하세요.")
 
-    new_sch = BlogSchedule(
-        user_id=user_id,
-        account_id=req.account_id,
-        schedule_time=req.schedule_time,
-        content_category=req.content_category,
-        post_count_per_day=req.post_count_per_day or 1,
-        ai_provider=req.ai_provider or "claude",
-        distribution_mode=req.distribution_mode or "normal",
-        generate_card_news=1 if req.generate_card_news else 0,
-    )
-    db.add(new_sch)
-    db.commit()
-    db.refresh(new_sch)
+    created = []
+    for aid in acc_ids:
+        # 소유권 검증: 본인 계정으로만 예약 가능 (IDOR 방지)
+        acc = db.query(NaverAccount).filter(
+            NaverAccount.id == aid, NaverAccount.user_id == user_id
+        ).first()
+        if not acc:
+            continue  # 남의 계정/없는 계정은 건너뜀
+        new_sch = BlogSchedule(
+            user_id=user_id,
+            account_id=aid,
+            schedule_time=req.schedule_time,
+            content_category=req.content_category,
+            post_count_per_day=req.post_count_per_day or 1,
+            ai_provider=req.ai_provider or "claude",
+            distribution_mode=req.distribution_mode or "normal",
+            generate_card_news=1 if req.generate_card_news else 0,
+        )
+        db.add(new_sch)
+        db.commit()
+        db.refresh(new_sch)
+        created.append(new_sch.id)
+        # 로컬(설치형) 스케줄러에 즉시 등록 — 클라우드는 blog_daily_scheduler가 처리
+        try:
+            from mbam_nextgen.services.scheduler_service import scheduler_service
+            scheduler_service.add_blog_schedule_job(new_sch.id, new_sch.schedule_time)
+        except Exception as e:
+            print(f"[blog_schedule] 스케줄러 즉시 등록 실패: {e}")
 
-    # 실행 중인 스케줄러에 즉시 등록 (서버 재시작 없이 바로 예약 동작)
-    try:
-        from mbam_nextgen.services.scheduler_service import scheduler_service
-        scheduler_service.add_blog_schedule_job(new_sch.id, new_sch.schedule_time)
-    except Exception as e:
-        print(f"[blog_schedule] 스케줄러 즉시 등록 실패: {e}")
-
-    return {"message": "블로그 매일 발행 예약이 등록되었습니다.", "id": new_sch.id}
+    if not created:
+        raise HTTPException(status_code=404, detail="등록 가능한 계정을 찾을 수 없습니다.")
+    return {"message": f"블로그 매일 발행 예약이 {len(created)}건 등록되었습니다.", "ids": created}
 
 
 @router.get("/schedules", summary="블로그 매일 발행 예약 목록")
