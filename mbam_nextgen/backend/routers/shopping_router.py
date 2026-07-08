@@ -464,12 +464,16 @@ async def analyze_and_suggest_title(req: TitleSuggestRequest):
     # Load env dynamically to get the latest keys without server restart
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
     env = dotenv_values(env_path)
-    
+
+    def _key(k):
+        # 클라우드는 재배포 시 .env 파일이 초기화됨 → os.environ(DB 주입 포함) 폴백 필수
+        return env.get(k) or os.environ.get(k, "")
+
     seed = req.seed_keyword.strip()
     brand = req.brand_name.strip() if req.brand_name else ""
-    
-    client_id = env.get("NAVER_CLIENT_ID", "")
-    client_secret = env.get("NAVER_CLIENT_SECRET", "")
+
+    client_id = _key("NAVER_CLIENT_ID")
+    client_secret = _key("NAVER_CLIENT_SECRET")
     headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     
     # 1. 네이버 쇼핑 검색결과 (1~40위 상품명 수집)
@@ -490,9 +494,9 @@ async def analyze_and_suggest_title(req: TitleSuggestRequest):
     # 2. 연관 키워드 및 검색량 수집 (네이버 검색광고 API)
     related_keywords = []
     volume_dict = {} # keyword -> volume mapping
-    ad_customer_id = env.get("NAVER_CUSTOMER_ID", "")
-    ad_access_license = env.get("NAVER_ACCESS_LICENSE", "")
-    ad_secret_key = env.get("NAVER_SECRET_KEY", "")
+    ad_customer_id = _key("NAVER_CUSTOMER_ID")
+    ad_access_license = _key("NAVER_ACCESS_LICENSE")
+    ad_secret_key = _key("NAVER_SECRET_KEY")
     
     if ad_customer_id and ad_access_license and ad_secret_key:
         import time, urllib.parse, hmac, hashlib, base64
