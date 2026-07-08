@@ -23,8 +23,7 @@ import {
     BarChart3,
     KeyRound,
     Image,
-    Folder,
-    ShoppingBag
+    Folder
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
 
@@ -37,7 +36,6 @@ const MENU_ITEMS = [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
             { name: "형태소 분석", path: "/blog-analysis", icon: Search },
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
-            { name: "쇼핑파트너스 블로그", path: "/shopping-partners-blog", icon: ShoppingBag },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
             { name: "구글 블로그스팟", path: "/blogspot", icon: FileText }

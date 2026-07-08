@@ -149,7 +149,7 @@ export default function BlogSchedulePage() {
   const inputStyle = { width: "100%", padding: "0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" };
 
   return (
-    <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "2rem 1rem" }}>
+    <div style={{ padding: "2rem", boxSizing: "border-box" }}>
       {/* 발행 모드 탭 (블로그 발행 페이지와 동일 구성) */}
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "2px solid #e2e8f0" }}>
         {[
