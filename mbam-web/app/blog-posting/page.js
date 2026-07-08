@@ -691,6 +691,7 @@ function BlogPostingContent() {
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", marginBottom: "-1rem" }}>
         {[
           { href: "/blog-posting", label: "✍️ 블로그 발행 (수동·예약)" },
+          { href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" },
           { href: "/hospital-blog", label: "🏥 병원 블로그" },
           { href: "/blog-schedule", label: "🗓️ 매일 자동 포스팅" },
         ].map(t => {

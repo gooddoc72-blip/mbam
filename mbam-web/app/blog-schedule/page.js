@@ -2,8 +2,10 @@
 import { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export default function BlogSchedulePage() {
+  const pathname = usePathname();
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -168,10 +170,19 @@ export default function BlogSchedulePage() {
 
   return (
     <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "2rem 1rem" }}>
-      {/* 발행 모드 탭 */}
+      {/* 발행 모드 탭 (블로그 발행 페이지와 동일 구성) */}
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "2px solid #e2e8f0" }}>
-        <Link href="/blog-posting" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#64748b", fontWeight: "bold", borderBottom: "3px solid transparent", marginBottom: "-2px" }}>✍️ 블로그 발행 (수동·예약)</Link>
-        <Link href="/blog-schedule" style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: "#2563eb", fontWeight: "bold", borderBottom: "3px solid #2563eb", marginBottom: "-2px" }}>🗓️ 매일 자동 포스팅</Link>
+        {[
+          { href: "/blog-posting", label: "✍️ 블로그 발행 (수동·예약)" },
+          { href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" },
+          { href: "/hospital-blog", label: "🏥 병원 블로그" },
+          { href: "/blog-schedule", label: "🗓️ 매일 자동 포스팅" },
+        ].map(t => {
+          const active = pathname === t.href;
+          return (
+            <Link key={t.href} href={t.href} style={{ padding: "0.7rem 1.2rem", textDecoration: "none", color: active ? "#2563eb" : "#64748b", fontWeight: "bold", borderBottom: active ? "3px solid #2563eb" : "3px solid transparent", marginBottom: "-2px" }}>{t.label}</Link>
+          );
+        })}
       </div>
       <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.6rem" }}>🗓️ 블로그 매일 포스팅</h1>
 
