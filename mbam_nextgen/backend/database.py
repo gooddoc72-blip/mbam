@@ -369,6 +369,17 @@ class AgentJob(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class AppSetting(Base):
+    """전역 설정 KV 저장소 — 관리자 설정 화면의 API 키/프롬프트 영속화.
+    클라우드(Railway)는 재배포 시 컨테이너 파일(.env, prompts.json)이 초기화되므로
+    반드시 DB에 저장해야 재배포 후에도 유지된다. (.env 기록은 로컬 설치형 호환용으로 병행)"""
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:

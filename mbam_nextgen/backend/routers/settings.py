@@ -28,9 +28,16 @@ class TelegramApiKeys(BaseModel):
 PROMPTS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "prompts.json")
 
 def read_prompts():
+    import json
+    # DB 우선 — 클라우드 재배포 시 prompts.json(컨테이너 파일)은 초기화되므로
+    raw = db_get_settings(["BLOG_PROMPTS_JSON"]).get("BLOG_PROMPTS_JSON")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
     if not os.path.exists(PROMPTS_PATH):
         return {}
-    import json
     with open(PROMPTS_PATH, "r", encoding="utf-8") as f:
         try:
             return json.load(f)
@@ -39,6 +46,7 @@ def read_prompts():
 
 def write_prompts(data):
     import json
+    db_set_settings({"BLOG_PROMPTS_JSON": json.dumps(data, ensure_ascii=False)})
     with open(PROMPTS_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
@@ -96,95 +104,142 @@ def env_or_os(env: dict, key: str) -> str:
     return env.get(key) or os.environ.get(key, "")
 
 
+# ── DB 영속 설정(KV) ────────────────────────────────────────────────
+# 설정 화면에서 저장한 API 키는 .env(컨테이너 파일)가 아니라 DB에 저장해야
+# 재배포 후에도 유지된다. 조회 우선순위: DB > .env > os.environ
+def db_get_settings(keys: list) -> dict:
+    from ..database import SessionLocal, AppSetting
+    try:
+        db = SessionLocal()
+        try:
+            rows = db.query(AppSetting).filter(AppSetting.key.in_(keys)).all()
+            return {r.key: r.value for r in rows if r.value}
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[settings] DB 조회 실패: {e}")
+        return {}
+
+
+def db_set_settings(kv: dict):
+    from ..database import SessionLocal, AppSetting
+    try:
+        db = SessionLocal()
+        try:
+            for k, v in kv.items():
+                row = db.query(AppSetting).filter(AppSetting.key == k).first()
+                if row:
+                    row.value = v
+                else:
+                    db.add(AppSetting(key=k, value=v))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[settings] DB 저장 실패: {e}")
+
+
+# 재기동/재배포 직후 서비스들이 os.environ 으로 키를 읽으므로 DB 값을 주입한다.
+HYDRATE_KEYS = [
+    "NAVER_CUSTOMER_ID", "NAVER_ACCESS_LICENSE", "NAVER_SECRET_KEY",
+    "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+    "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+]
+
+
+def hydrate_env_from_db():
+    """DB에 저장된 설정을 os.environ 에 반영 — main.py lifespan 시작 시 호출."""
+    vals = db_get_settings(HYDRATE_KEYS)
+    for k, v in vals.items():
+        if v:
+            os.environ[k] = v
+    if vals:
+        print(f"[settings] DB 설정 {len(vals)}건을 환경변수로 주입했습니다.")
+
+
+def resolve_keys(keys: list) -> dict:
+    """설정 화면 표시용 조회 — DB > .env > os.environ."""
+    env = read_env()
+    dbv = db_get_settings(keys)
+    return {k: (dbv.get(k) or env_or_os(env, k)) for k in keys}
+
+
+def save_keys(env_vars: dict):
+    """설정 저장 — DB(영속) + .env(로컬 설치형 호환) + os.environ(즉시 반영)."""
+    db_set_settings(env_vars)
+    write_env(env_vars)
+    for k, v in env_vars.items():
+        if v:
+            os.environ[k] = v
+
+
 @router.get("/naver-api", response_model=NaverApiKeys)
 async def get_naver_api_keys():
-    env = read_env()
+    v = resolve_keys(["NAVER_CUSTOMER_ID", "NAVER_ACCESS_LICENSE", "NAVER_SECRET_KEY"])
     return NaverApiKeys(
-        customer_id=env_or_os(env, "NAVER_CUSTOMER_ID"),
-        access_license=env_or_os(env, "NAVER_ACCESS_LICENSE"),
-        secret_key=env_or_os(env, "NAVER_SECRET_KEY")
+        customer_id=v["NAVER_CUSTOMER_ID"],
+        access_license=v["NAVER_ACCESS_LICENSE"],
+        secret_key=v["NAVER_SECRET_KEY"]
     )
 
 @router.post("/naver-api")
 async def update_naver_api_keys(keys: NaverApiKeys):
-    env_vars = {
+    save_keys({
         "NAVER_CUSTOMER_ID": keys.customer_id,
         "NAVER_ACCESS_LICENSE": keys.access_license,
         "NAVER_SECRET_KEY": keys.secret_key
-    }
-    write_env(env_vars)
-
-    # Reload env into os.environ (재시작 없이 즉시 반영)
-    for k, v in env_vars.items():
-        if v: os.environ[k] = v
-
+    })
     return {"message": "네이버 검색광고 API 키가 성공적으로 저장되었습니다."}
 
 @router.get("/naver-dev-api", response_model=NaverDevApiKeys)
 async def get_naver_dev_api_keys():
-    env = read_env()
+    v = resolve_keys(["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"])
     return NaverDevApiKeys(
-        client_id=env_or_os(env, "NAVER_CLIENT_ID"),
-        client_secret=env_or_os(env, "NAVER_CLIENT_SECRET")
+        client_id=v["NAVER_CLIENT_ID"],
+        client_secret=v["NAVER_CLIENT_SECRET"]
     )
 
 @router.post("/naver-dev-api")
 async def update_naver_dev_api_keys(keys: NaverDevApiKeys):
-    env_vars = {
+    save_keys({
         "NAVER_CLIENT_ID": keys.client_id,
         "NAVER_CLIENT_SECRET": keys.client_secret
-    }
-    write_env(env_vars)
-    
-    # Reload env into os.environ
-    for k, v in env_vars.items():
-        if v: os.environ[k] = v
-        
+    })
     return {"message": "네이버 개발자센터 API 키가 성공적으로 저장되었습니다."}
 
 @router.get("/ai-api", response_model=AIApiKeys)
 async def get_ai_api_keys():
-    env = read_env()
+    v = resolve_keys(["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"])
     return AIApiKeys(
-        claude_key=env_or_os(env, "ANTHROPIC_API_KEY"),
-        gemini_key=env_or_os(env, "GEMINI_API_KEY"),
-        openai_key=env_or_os(env, "OPENAI_API_KEY")
+        claude_key=v["ANTHROPIC_API_KEY"],
+        gemini_key=v["GEMINI_API_KEY"],
+        openai_key=v["OPENAI_API_KEY"]
     )
 
 @router.post("/ai-api")
 async def update_ai_api_keys(keys: AIApiKeys):
-    env_vars = {
+    save_keys({
         "ANTHROPIC_API_KEY": keys.claude_key,
         "GEMINI_API_KEY": keys.gemini_key,
         "OPENAI_API_KEY": keys.openai_key
-    }
-    write_env(env_vars)
-    
-    # Reload env into os.environ so SoulRewriter uses it immediately without full restart
-    for k, v in env_vars.items():
-        if v: os.environ[k] = v
-        
+    })
     return {"message": "AI 생성 엔진 API 키가 성공적으로 저장되었습니다."}
 
 @router.get("/telegram-api", response_model=TelegramApiKeys)
 async def get_telegram_api_keys():
-    env = read_env()
+    v = resolve_keys(["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"])
     return TelegramApiKeys(
-        bot_token=env_or_os(env, "TELEGRAM_BOT_TOKEN"),
-        chat_id=env_or_os(env, "TELEGRAM_CHAT_ID")
+        bot_token=v["TELEGRAM_BOT_TOKEN"],
+        chat_id=v["TELEGRAM_CHAT_ID"]
     )
 
 @router.post("/telegram-api")
 async def update_telegram_api_keys(keys: TelegramApiKeys):
-    env_vars = {
+    save_keys({
         "TELEGRAM_BOT_TOKEN": keys.bot_token,
         "TELEGRAM_CHAT_ID": keys.chat_id
-    }
-    write_env(env_vars)
-    
-    for k, v in env_vars.items():
-        if v: os.environ[k] = v
-        
+    })
     return {"message": "텔레그램 봇 연동 설정이 성공적으로 저장되었습니다."}
 
 @router.get("/blog-prompts")

@@ -45,6 +45,12 @@ from mbam_nextgen.services.scheduler_service import scheduler_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 설정 화면에서 저장한 API 키(DB 영속)를 os.environ 에 주입 — 재배포 후에도 유지
+    try:
+        from mbam_nextgen.backend.routers.settings import hydrate_env_from_db
+        hydrate_env_from_db()
+    except Exception as e:
+        print(f"[startup] DB 설정 주입 실패: {e}")
     # [방법 B] 스케줄러 잡(콘텐츠 동기화·플레이스 소식·순위분석)은 전부 네이버 스크래핑이라
     # 클라우드(cloud 모드)에선 돌 수 없다(데이터센터 IP). 클라우드에서 켜면 startup이 막혀
     # 크래시 루프가 발생 → cloud 모드에선 스케줄러를 기동하지 않는다(스케줄 실행은 로컬/에이전트 몫).

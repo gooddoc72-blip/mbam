@@ -214,7 +214,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                 setAnalyzeErrors(data.errors || []);
                 if (data.items.length === 0) setError('분석된 글이 없습니다. URL을 확인해주세요.');
                 else addHistory(menuKey, {
-                    summary: `본문 해부 ${data.items.length}건${keyword ? ' · ' + keyword : ''}`,
+                    summary: `형태소 분석 ${data.items.length}건${keyword ? ' · ' + keyword : ''}`,
                     payload: { cafeUrls, keyword, result: data.items, analyzeErrors: data.errors || [], mode: 'content' }
                 });
             } else {
@@ -303,15 +303,19 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
     const [urlErrors, setUrlErrors] = usePersistentState(`${menuKey}:urlErrors`, []);
 
     const handleUrlAnalyze = async () => {
-        const urls = urlsText.split(/\r?\n/).map(s => s.trim()).filter(s => s.startsWith('http'));
-        if (urls.length === 0) { alert(`${chName} URL을 1개 이상 입력해주세요. (한 줄에 한 개)`); return; }
+        // 블로그 채널은 ID 분석: 블로그 ID 단독 입력도 허용 (URL이면 ID를 추출해 진단)
+        const lines = urlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        const urls = isBlog
+            ? lines.filter(s => s.startsWith('http') || /^[a-zA-Z0-9_-]+$/.test(s))
+            : lines.filter(s => s.startsWith('http'));
+        if (urls.length === 0) { alert(isBlog ? '블로그 ID 또는 URL을 1개 이상 입력해주세요. (한 줄에 한 개)' : `${chName} URL을 1개 이상 입력해주세요. (한 줄에 한 개)`); return; }
         if (urls.length > 5) { alert('한 번에 최대 5개까지 분석할 수 있습니다.'); return; }
-        const wrong = urls.filter(u => !domainOk(u));
+        const wrong = urls.filter(u => u.startsWith('http') && !domainOk(u));
         if (wrong.length) { alert(`이 메뉴는 ${chName} 전용입니다. ${chDomain} 형식의 URL만 입력해주세요.\n(잘못된 URL: ${wrong[0]})`); return; }
         setUrlLoading(true); setUrlError(''); setUrlItems(null); setUrlErrors([]);
         try {
             if (isBlog) {
-                // 블로그: URL별 블로그 지수 진단 (같은 블로그가 중복되면 1회만)
+                // 블로그: ID별 블로그 지수 진단 (같은 블로그가 중복되면 1회만)
                 const seen = new Set();
                 const items = [], errs = [];
                 for (const u of urls) {
@@ -328,14 +332,14 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                         let data = await res.json();
                         if (!res.ok) throw new Error(data.detail || `서버 오류 (${res.status})`);
                         data = await resolveMaybeAgent(data, { tries: 90, intervalMs: 2000 });
-                        items.push({ url: u, title: data.stats?.title || blogId, blog: data });
+                        items.push({ url: u.startsWith('http') ? u : `https://blog.naver.com/${u}`, title: data.stats?.title || blogId, blog: data });
                     } catch (err) {
                         errs.push({ url: u, error: err.message || '분석 실패' });
                     }
                 }
                 setUrlItems(items); setUrlErrors(errs);
                 if (items.length) addHistory(menuKey, {
-                    summary: `블로그 권위 분석 ${items.length}건`,
+                    summary: `블로그 ID 분석 ${items.length}건`,
                     payload: { urlsText, urlItems: items, urlErrors: errs, mode: 'url' }
                 });
                 return;
@@ -354,7 +358,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
             setUrlItems(data.items || []);
             setUrlErrors(data.errors || []);
             if ((data.items || []).length) addHistory(menuKey, {
-                summary: `URL 권위 분석 ${data.items.length}건`,
+                summary: `ID 분석 ${data.items.length}건`,
                 payload: { urlsText, urlItems: data.items, urlErrors: data.errors || [], mode: 'url' }
             });
         } catch (err) {
@@ -385,15 +389,15 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                 <h1 style={{ fontSize: "2rem", color: "#1e293b", margin: "0 0 0.5rem 0" }}>{chName} 분석</h1>
                 <p style={{ color: "#64748b", margin: 0 }}>
                     {isBlog
-                        ? '네이버 검색 인기 블로그글을 분석합니다 — URL 권위 분석(블로그 지수·등급) + 본문 해부 분석(블로그글 전용).'
-                        : '네이버 검색 인기 카페글을 분석합니다 — URL 권위 분석(카페 작성자/카페 권위) + 본문 해부 분석(카페글 전용).'}
+                        ? '네이버 검색 인기 블로그글을 분석합니다 — ID 분석(블로그 지수·등급) + 형태소 분석(블로그글 전용).'
+                        : '네이버 검색 인기 카페글을 분석합니다 — ID 분석(카페 작성자/카페 권위) + 형태소 분석(카페글 전용).'}
                 </p>
             </div>
 
             {/* 탭 */}
             <div style={{ display: 'flex', gap: '0.2rem', borderBottom: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
-                {tabBtn('url', 'URL 권위 분석', Link2)}
-                {tabBtn('content', '본문 해부 분석', FileText)}
+                {tabBtn('url', 'ID 분석', Link2)}
+                {tabBtn('content', '형태소 분석', FileText)}
             </div>
 
             {/* ───────── URL 권위 분석 ───────── */}
@@ -401,13 +405,13 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 380px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
                     {/* 입력 */}
                     <div className="glass-card" style={{ padding: '1.5rem' }}>
-                        <h3 style={{ margin: '0 0 0.6rem 0', fontSize: '1rem', color: '#334155' }}>분석할 {chName} URL</h3>
-                        <p style={{ margin: '0 0 0.8rem 0', fontSize: '0.8rem', color: '#94a3b8' }}>한 줄에 한 개씩, 최대 5개. <code>{chDomain}/...</code> 형식</p>
+                        <h3 style={{ margin: '0 0 0.6rem 0', fontSize: '1rem', color: '#334155' }}>{isBlog ? '분석할 블로그 ID / URL' : `분석할 ${chName} URL`}</h3>
+                        <p style={{ margin: '0 0 0.8rem 0', fontSize: '0.8rem', color: '#94a3b8' }}>{isBlog ? <>한 줄에 한 개씩, 최대 5개. 블로그 ID 또는 <code>blog.naver.com/...</code> URL</> : <>한 줄에 한 개씩, 최대 5개. <code>{chDomain}/...</code> 형식</>}</p>
                         <textarea
                             value={urlsText}
                             onChange={(e) => setUrlsText(e.target.value)}
                             placeholder={isBlog
-                                ? "https://blog.naver.com/blogid/223938928244\nhttps://blog.naver.com/another"
+                                ? "blogid\nhttps://blog.naver.com/another/223938928244"
                                 : "https://cafe.naver.com/example/12345\nhttps://cafe.naver.com/another/6789"}
                             rows={8}
                             style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', boxSizing: 'border-box', fontFamily: 'monospace', lineHeight: '1.5' }}
@@ -462,7 +466,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                         {!urlItems && !urlLoading && (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', border: '2px dashed #cbd5e1', borderRadius: '16px', color: '#94a3b8' }}>
                                 <Users size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                                <p style={{ fontSize: '1rem', margin: 0 }}>{isBlog ? '블로그 글 URL을 입력하면 블로그 지수·등급을 분석합니다.' : '카페 URL을 입력하면 작성자/카페 권위 지수를 분석합니다.'}</p>
+                                <p style={{ fontSize: '1rem', margin: 0 }}>{isBlog ? '블로그 ID(또는 URL)를 입력하면 블로그 지수·등급을 분석합니다.' : '카페글 URL을 입력하면 작성자/카페 권위 지수를 분석합니다.'}</p>
                                 <p style={{ fontSize: '0.85rem', marginTop: '0.4rem' }}>{isBlog ? '지수 · 등급(최적~저품질) · 이웃수 · 방문자 · 발행 활성도' : '닉네임 · 등급 · 인기멤버 · 글 호응도 · 카페 회원수'}</p>
                             </div>
                         )}
@@ -513,7 +517,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                         <div style={{ marginBottom: '1.2rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#334155' }}>{chName} URL <span style={{ fontWeight: 'normal', color: '#94a3b8', fontSize: '0.85rem' }}>(한 줄에 하나, 최대 10개)</span></label>
                             <textarea value={cafeUrls} onChange={(e) => setCafeUrls(e.target.value)} placeholder={isBlog ? "https://blog.naver.com/블로그아이디/글번호\n..." : "https://cafe.naver.com/카페주소/글번호\n..."} rows={5} style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.95rem', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.6' }} />
-                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.83rem', color: '#94a3b8' }}>네이버 검색 인기글의 <b>{chName} URL</b>({chDomain})을 넣으면 {chName}에 맞는 지표로 해부합니다. (현재 {cafeUrls.split(/\r?\n/).filter(s => s.trim().startsWith('http')).length}개)</p>
+                            <p style={{ margin: '0.4rem 0 0', fontSize: '0.83rem', color: '#94a3b8' }}>네이버 검색 인기글의 <b>{chName} URL</b>({chDomain})을 넣으면 {chName}에 맞는 지표로 형태소 분석합니다. (현재 {cafeUrls.split(/\r?\n/).filter(s => s.trim().startsWith('http')).length}개)</p>
                         </div>
                         {/* 타겟 키워드 + 분석 시작 버튼 한 줄 */}
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
@@ -522,7 +526,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                                 <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAnalyze()} placeholder="예: 강남역 맛집" style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box' }} />
                             </div>
                             <button onClick={handleAnalyze} disabled={loading} className="btn-primary" style={{ padding: '0.8rem 1.6rem', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                                {loading ? <>분석 중... (10~20초)</> : <><Search size={18} />AI 해부 분석 시작</>}
+                                {loading ? <>분석 중... (10~20초)</> : <><Search size={18} />형태소 분석 시작</>}
                             </button>
                         </div>
                         {error && (<div style={{ marginTop: '1rem', padding: '1rem', background: '#fef2f2', color: '#b91c1c', borderRadius: '8px', border: '1px solid #fecaca' }}>{error}</div>)}
@@ -532,7 +536,7 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '220px', border: '2px dashed #cbd5e1', borderRadius: '16px', color: '#94a3b8' }}>
                             <Activity size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
                             <p style={{ fontSize: '1.1rem', margin: 0 }}>{chName} URL을 입력하고 분석을 시작해보세요.</p>
-                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>AI가 5가지 주요 알고리즘 지표를 통해 {chName}을 해부합니다.</p>
+                            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>AI가 5가지 주요 알고리즘 지표로 {chName}을 형태소 단위까지 분석합니다.</p>
                         </div>
                     )}
                     {loading && (
