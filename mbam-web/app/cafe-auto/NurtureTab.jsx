@@ -165,11 +165,13 @@ export default function NurtureTab({ s }) {
 
   return (
     <>
-            <>
+            {/* 블로그·카페 포스팅과 동일한 2단 레이아웃: 좌측 = 작업 실행(댓글·예약 등록), 우측 = 관리 목록 */}
+            <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ flex: "1.5 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               <div style={{ padding: "1rem", background: "#eff6ff", color: "#1e3a8a", border: "1px solid #bfdbfe", borderRadius: "8px" }}>
-                💬 <b>댓글 작업(여론 형성·품앗이)</b>: 입력된 게시글 URL들을 선택한 여러 네이버 아이디로 차례대로 방문하여, 지정된 키워드의 뉘앙스로 자연스러운 호응 댓글을 작성합니다. <span style={{ color: "#64748b" }}>(아래에 좋아요·조회수 부스트 / 가입 카페 매핑 / 예약 육성도 함께 있습니다)</span>
+                💬 <b>댓글 작업(여론 형성·품앗이)</b>: 입력된 게시글 URL들을 선택한 여러 네이버 아이디로 차례대로 방문하여, 지정된 키워드의 뉘앙스로 자연스러운 호응 댓글을 작성합니다.
               </div>
-              
+
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>1. 참여할 계정 선택</h2>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -213,7 +215,7 @@ export default function NurtureTab({ s }) {
               
               <div style={{ display: "flex", gap: "1rem" }}>
                 <button onClick={handleStartTargetMulti} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#0f172a", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
-                  {loading ? "작업 중..." : "다중 타겟 댓글 작업 시작"}
+                  {loading ? "작업 중..." : "🚀 다중 타겟 댓글 작업 시작"}
                 </button>
                 {loading && (
                   <button onClick={handleCancelTask} style={{ padding: "1rem 2rem", background: "#ef4444", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: "pointer" }}>
@@ -221,16 +223,59 @@ export default function NurtureTab({ s }) {
                   </button>
                 )}
               </div>
-            </>
-            <>
+
               <div style={{ padding: "1rem", background: "#fdf2f8", color: "#831843", border: "1px solid #fbcfe8", borderRadius: "8px" }}>
-⚙️ <b>육성 설정 & 예약</b>: 아래에서 네이버 아이디 풀을 관리하고 가입 카페를 매핑한 뒤, 예약을 등록하면 백그라운드 서버가 매일 자동으로 게시글 방문(조회수)·좋아요 등 육성 작업을 수행합니다.
+⚙️ <b>육성 예약</b>: 예약을 등록하면 백그라운드 서버가 매일 자동으로 게시글 방문(조회수) 등 육성 작업을 수행합니다. (아이디 풀·카페 매핑은 우측에서 관리)
               </div>
 
+              {/* 육성 예약 등록 (폼) */}
+              <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>4. 일일 자동 방문(육성) 예약 등록</h2>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                  <select value={newSchAccId} onChange={e => {
+                    setNewSchAccId(e.target.value); setNewSchCafeId("");
+                  }} style={{ padding: "0.5rem" }}>
+                    <option value="">계정 선택</option>
+                    {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.naver_id}</option>)}
+                  </select>
+
+                  <select value={newSchCafeId} onChange={e => setNewSchCafeId(e.target.value)} style={{ padding: "0.5rem", flex: 1, minWidth: "180px" }} disabled={!newSchAccId}>
+                    <option value="">매핑된 카페 선택</option>
+                    {accounts.find(a => a.id === newSchAccId)?.cafes.map(cafe => (
+                      <option key={cafe.id} value={cafe.id}>{cafe.cafe_url}</option>
+                    ))}
+                  </select>
+
+                  <input type="time" value={newSchTime} onChange={e => setNewSchTime(e.target.value)} style={{ padding: "0.5rem" }} />
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <input type="text" placeholder="대상 게시글 URL (비우면 카페 방문만 = 방문횟수 증가)" value={newSchPostUrl} onChange={e => setNewSchPostUrl(e.target.value)} style={{ padding: "0.5rem", flex: 1, minWidth: "200px" }} />
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
+                    <span style={{fontSize: '0.9rem'}}>일일 방문수</span>
+                    <input type="number" min="1" value={newSchCount} onChange={e => setNewSchCount(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
+                  </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
+                    <span style={{fontSize: '0.9rem'}}>방문 간격</span>
+                    <input type="number" min="0" value={newSchInterval} onChange={e => setNewSchInterval(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
+                    <span style={{fontSize: '0.9rem'}}>분</span>
+                  </div>
+                  <button onClick={handleAddSchedule} style={{ padding: "0.5rem 1rem", background: "#0f172a", color: "white", border: "none" }}>예약</button>
+                </div>
+                <div style={{ display: "flex", gap: "1.2rem", alignItems: "center", fontSize: "0.9rem", color: "#475569" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontWeight: "bold" }}>
+                    <input type="checkbox" checked={newSchDoView} onChange={e => setNewSchDoView(e.target.checked)} /> 👁️ 조회수 올리기(방문)
+                  </label>
+                  <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>* URL이 있으면 그 글을 방문(조회수). 없으면 카페만 방문(육성). 좋아요는 댓글 작업에서 처리됩니다.</span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── 우측: 관리 목록 (아이디 풀 / 카페 매핑 / 등록된 예약) ── */}
+            <div style={{ flex: "1 1 380px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               {/* 1. Account Management */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0 }}>1. 네이버 아이디 풀 관리</h2>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0 }}>네이버 아이디 풀 관리</h2>
                   <button onClick={fetchAccounts} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>📥 계정관리에서 불러오기</button>
                 </div>
                 <p style={{ margin: "0 0 0.8rem", fontSize: "0.82rem", color: "#64748b" }}>여기 목록은 <b>계정관리(전체 계정)</b>와 동일합니다. 여기서 추가/삭제하면 계정관리에도 반영됩니다.</p>
@@ -273,7 +318,7 @@ export default function NurtureTab({ s }) {
 
               {/* 2. Cafe Mapping */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>2. 아이디별 가입 카페 매핑</h2>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>아이디별 가입 카페 매핑</h2>
                 <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
                   <select value={newCafeAccId} onChange={e => setNewCafeAccId(e.target.value)} style={{ padding: "0.5rem" }}>
                     <option value="">계정 선택</option>
@@ -293,46 +338,14 @@ export default function NurtureTab({ s }) {
                 </ul>
               </div>
 
-              {/* 3. Scheduling */}
+              {/* 등록된 예약 목록 */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>3. 일일 자동 방문(육성) 스케줄</h2>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                  <select value={newSchAccId} onChange={e => {
-                    setNewSchAccId(e.target.value); setNewSchCafeId("");
-                  }} style={{ padding: "0.5rem" }}>
-                    <option value="">계정 선택</option>
-                    {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.naver_id}</option>)}
-                  </select>
-                  
-                  <select value={newSchCafeId} onChange={e => setNewSchCafeId(e.target.value)} style={{ padding: "0.5rem", flex: 1 }} disabled={!newSchAccId}>
-                    <option value="">매핑된 카페 선택</option>
-                    {accounts.find(a => a.id === newSchAccId)?.cafes.map(cafe => (
-                      <option key={cafe.id} value={cafe.id}>{cafe.cafe_url}</option>
-                    ))}
-                  </select>
-
-                  <input type="time" value={newSchTime} onChange={e => setNewSchTime(e.target.value)} style={{ padding: "0.5rem" }} />
-                </div>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.6rem", alignItems: "center" }}>
-                  <input type="text" placeholder="대상 게시글 URL (비우면 카페 방문만 = 방문횟수 증가)" value={newSchPostUrl} onChange={e => setNewSchPostUrl(e.target.value)} style={{ padding: "0.5rem", flex: 1 }} />
-                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
-                    <span style={{fontSize: '0.9rem'}}>일일 방문수</span>
-                    <input type="number" min="1" value={newSchCount} onChange={e => setNewSchCount(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>등록된 육성 예약 ({schedules.length})</h2>
+                {schedules.length === 0 && (
+                  <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", border: "2px dashed #cbd5e1", borderRadius: "8px", fontSize: "0.9rem", marginBottom: "0.5rem" }}>
+                    아직 예약이 없습니다. 좌측 '일일 자동 방문(육성) 예약 등록'에서 추가하세요.
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: '0.2rem'}}>
-                    <span style={{fontSize: '0.9rem'}}>방문 간격</span>
-                    <input type="number" min="0" value={newSchInterval} onChange={e => setNewSchInterval(e.target.value)} style={{ padding: "0.5rem", width: "60px" }} />
-                    <span style={{fontSize: '0.9rem'}}>분</span>
-                  </div>
-                  <button onClick={handleAddSchedule} style={{ padding: "0.5rem 1rem", background: "#0f172a", color: "white", border: "none" }}>예약</button>
-                </div>
-                <div style={{ display: "flex", gap: "1.2rem", marginBottom: "1rem", alignItems: "center", fontSize: "0.9rem", color: "#475569" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontWeight: "bold" }}>
-                    <input type="checkbox" checked={newSchDoView} onChange={e => setNewSchDoView(e.target.checked)} /> 👁️ 조회수 올리기(방문)
-                  </label>
-                  <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>* URL이 있으면 그 글을 방문(조회수). 없으면 카페만 방문(육성). 좋아요는 댓글 작업에서 처리됩니다.</span>
-                </div>
-                
+                )}
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
@@ -370,7 +383,8 @@ export default function NurtureTab({ s }) {
                   </tbody>
                 </table>
               </div>
-            </>
+            </div>
+            </div>
     </>
   );
 }
