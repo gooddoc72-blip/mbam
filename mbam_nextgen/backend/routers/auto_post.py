@@ -465,12 +465,23 @@ async def _generate_impl(req: AutoPostRequest):
     if scraped_info:
         final_source_data = f"{final_source_data}\n\n[타겟 상품 스크래핑 정보]\n{scraped_info}"
 
+    # 쇼핑파트너스 흐름: 키워드 없이 URL만 들어오면 스크래핑한 상품 타이틀을 키워드로 사용
+    import re as _re
+    effective_keyword = (req.target_keyword or "").strip()
+    if not effective_keyword and scraped_info:
+        m = _re.search(r"상품 타이틀:\s*(.+)", scraped_info)
+        if m:
+            # 브랜드/스토어명 등 군더더기를 줄이려 앞 40자만 사용
+            effective_keyword = m.group(1).strip().split(" : ")[0].split(" | ")[0][:40].strip()
+    if not effective_keyword:
+        effective_keyword = "상품 후기"
+
     async def generate_single(i):
         try:
             # 병렬 처리 충돌(Errno 22) 방지를 위해 개별 orchestrator 생성
             local_orchestrator = WorkflowOrchestrator()
             content_text = await local_orchestrator._generate_content_with_retry(
-                keyword=req.target_keyword or "테스트",
+                keyword=effective_keyword,
                 ai_provider=req.ai_provider,
                 reference_data=req.reference_data,
                 post_purpose=req.post_purpose,
@@ -487,7 +498,7 @@ async def _generate_impl(req: AutoPostRequest):
                 import re
                 content_text = re.sub(r'(\*\*|~~|__)', '', content_text)
             
-            title = f"[{req.target_keyword}] 포스팅"
+            title = f"[{effective_keyword}] 포스팅"
             body = content_text
             lines = content_text.split('\n')
             if lines:
@@ -521,6 +532,7 @@ async def _generate_impl(req: AutoPostRequest):
     return {
         "success": True,
         "generated_contents": results,
+        "effective_keyword": effective_keyword,   # URL에서 자동 추출된 키워드(쇼핑파트너스) — 발행 제목 폴백용
         "scraped_image_folder": scraped_image_folder if scraped_image_folder else None
     }
 

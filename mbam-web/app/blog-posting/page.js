@@ -13,6 +13,7 @@ function BlogPostingContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const isHospital = pathname === "/hospital-blog";  // 병원 블로그 전용 메뉴로 진입 시 병원 카테고리 고정
+  const isShopping = pathname === "/shopping-partners-blog";  // 쇼핑파트너스: 상품 URL만으로 상품후기 자동 생성 (리뷰+상품+일반배포 고정)
   const [generateCardNews, setGenerateCardNews] = useState(isHospital ? false : true);  // 병원: 카드뉴스 대신 나노바나나 AI 이미지
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
@@ -86,7 +87,7 @@ function BlogPostingContent() {
     setSubKwInput("");
   };
   const removeSubKeyword = (kw) => setSubKeywords(subKeywords.filter(k => k !== kw));
-  const [extractUrlImages, setExtractUrlImages] = useState(false);
+  const [extractUrlImages, setExtractUrlImages] = useState(isShopping);  // 쇼핑파트너스는 URL 이미지 자동수집 기본 ON
   const [descImageFiles, setDescImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [aiProvider, setAiProvider] = useState("claude");
   const [postPurpose, setPostPurpose] = useState(isHospital ? "info" : "review");  // 병원: 진료일기(정보성) 고정
@@ -397,7 +398,11 @@ function BlogPostingContent() {
   };
 
   const handleGenerateContent = async () => {
-    if (!targetKeyword) {
+    if (isShopping && !productUrl.trim()) {
+      alert("상품 URL을 입력해주세요.");
+      return;
+    }
+    if (!isShopping && !targetKeyword) {
       alert("타겟 키워드를 입력해주세요.");
       return;
     }
@@ -462,7 +467,11 @@ function BlogPostingContent() {
           const data = st.result || {};
           if (data.success) {
             setGeneratedContents(data.generated_contents || []);
-            try { addHistory("blog-posting", { summary: `원고 생성 ${(data.generated_contents || []).length}건${targetKeyword ? ' · ' + targetKeyword : ''}` }); } catch (e) {}
+            // 쇼핑파트너스: URL에서 자동 추출된 키워드를 채워 발행 제목·이력에 반영
+            if (isShopping && !targetKeyword && data.effective_keyword) {
+              setTargetKeyword(data.effective_keyword);
+            }
+            try { addHistory("blog-posting", { summary: `원고 생성 ${(data.generated_contents || []).length}건${(targetKeyword || data.effective_keyword) ? ' · ' + (targetKeyword || data.effective_keyword) : ''}` }); } catch (e) {}
             if (data.scraped_image_folder) {
               setImageUploadMode("folder");
               setImageFolderPath(data.scraped_image_folder);
@@ -766,8 +775,8 @@ function BlogPostingContent() {
         {/* Left Control Panel */}
         <div style={{ flex: 1.5, display: "flex", flexDirection: "column", gap: "1.5rem", paddingRight: "10px" }}>
         <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>{isHospital ? "🏥 병원 블로그 자동 포스팅" : "블로그 자동 포스팅"}</h1>
-          <p style={{ color: "#64748b", margin: 0 }}>{isHospital ? "병원·의원 전용 — 의료법 준수 원고 + 나노바나나 AI 이미지 자동 생성·삽입." : "SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다."}</p>
+          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>{isHospital ? "🏥 병원 블로그 자동 포스팅" : isShopping ? "🛍 쇼핑파트너스 블로그" : "블로그 자동 포스팅"}</h1>
+          <p style={{ color: "#64748b", margin: 0 }}>{isHospital ? "병원·의원 전용 — 의료법 준수 원고 + 나노바나나 AI 이미지 자동 생성·삽입." : isShopping ? "상품 URL만 넣으면 상품명·이미지를 수집해 상품후기(일반배포) 원고를 자동으로 생성합니다." : "SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다."}</p>
         </div>
 
         {/* 1. Account Settings */}
@@ -814,9 +823,163 @@ function BlogPostingContent() {
           </div>
         </div>
 
-        {/* 2. Image Settings */}
+        {/* 3. Content Settings */}
         <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>2. 이미지 설정</h2>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>2. 원고 설정 (다중 스핀 지원)</h2>
+          
+          <div style={{ padding: "1rem", background: "#f8fafc", color: "#334155", fontSize: "0.95rem", border: "1px solid #e2e8f0", marginBottom: "1.5rem" }}>
+            SEO 분석기가 타겟 키워드의 상위 노출 승리 공식을 분석하고, 선택하신 <strong>포스팅 목적</strong>과 <strong>홍보 카테고리</strong>에 맞춰 AI가 최적의 원고를 100% 창작하여 포스팅합니다.
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            
+            {sourceData && (
+              <div style={{ marginBottom: "1rem", padding: "1rem", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ margin: "0 0 0.5rem 0", color: "#334155" }}>📝 수집된 글감 데이터 (이 데이터로 자동 작성됩니다)</h4>
+                <textarea readOnly value={sourceData} style={{ width: "100%", height: "100px", padding: "0.8rem", border: "1px solid #cbd5e1", borderRadius: "4px", backgroundColor: "#f1f5f9", fontSize: "0.9rem", color: "#475569" }} />
+                <button type="button" onClick={() => { setSourceData(""); localStorage.removeItem('autoWriteSourceData'); }} style={{ marginTop: "0.5rem", padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>글감 데이터 지우기 (직접 입력 모드로 전환)</button>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "1rem" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 키워드 (필수)</label>
+                <input type="text" placeholder="예: 강남역 맛집, 서울 카페 추천" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+
+                <div style={{ marginTop: "0.8rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                    <label style={{ fontSize: "0.9rem", fontWeight: "bold" }}>서브 키워드 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(선택 · 최대 5개)</span></label>
+                    <button type="button" onClick={addSubKeyword} disabled={subKeywords.length >= 5} style={{ padding: "0.35rem 0.8rem", background: subKeywords.length >= 5 ? "#cbd5e1" : "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", fontSize: "0.82rem", cursor: subKeywords.length >= 5 ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>+ 추가</button>
+                  </div>
+                  <input type="text" value={subKwInput} onChange={e => setSubKwInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSubKeyword(); } }} disabled={subKeywords.length >= 5} placeholder={subKeywords.length >= 5 ? "최대 5개까지 추가됨" : "예: 분위기 좋은 카페 (입력 후 Enter)"} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                  {subKeywords.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.6rem" }}>
+                      {subKeywords.map((kw, i) => (
+                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.7rem", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "999px", fontSize: "0.85rem", fontWeight: "bold" }}>{kw}<span onClick={() => removeSubKeyword(kw)} style={{ cursor: "pointer", color: "#60a5fa", fontWeight: "bold" }}>×</span></span>
+                      ))}
+                      <span style={{ alignSelf: "center", fontSize: "0.78rem", color: "#94a3b8" }}>{subKeywords.length}/5</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                {isShopping && (<>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (필수)</label>
+                <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
+                  <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
+                  ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
+                </label>
+                </>)}
+
+                <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
+                  <input type="file" accept="image/*" multiple onChange={e => setDescImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
+                  <button type="button" onClick={handleDescribeImagesBlog} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
+                    {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
+                  </button>
+                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>타겟 키워드 + 첨부 이미지를 AI가 보고 글감을 만든 뒤, '원고 생성'으로 원고를 만듭니다. 첨부 이미지는 발행 글에도 함께 들어갑니다.</p>
+                </div>
+              </div>
+            </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>AI 생성 엔진 선택</label>
+                <select value={aiProvider} onChange={e => setAiProvider(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1" }}>
+                  <option value="claude">Claude (추천/고품질)</option>
+                  <option value="gemini">Gemini (빠름/무료)</option>
+                  <option value="openai">ChatGPT (OpenAI)</option>
+                </select>
+              </div>
+
+            {sourceData && (
+              <div style={{ marginBottom: "1rem", padding: "1rem 1.2rem", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                <p style={{ margin: 0, fontSize: "0.9rem", color: "#15803d", lineHeight: "1.5" }}>
+                  💡 <strong>분석/글감 데이터가 반영됩니다.</strong> 아래에서 <strong>포스팅 목적</strong>(리뷰/홍보)과 <strong>유형</strong>(맛집·업체 등)을 골라 그 성격으로 작성하세요.
+                </p>
+              </div>
+            )}
+              <>
+                {isHospital ? (
+                  <div style={{ padding: "1rem", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px" }}>
+                    <div style={{ fontWeight: "bold", color: "#1e40af" }}>🏥 진료일기 형식 · 병원운영 (자동)</div>
+                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.85rem", color: "#3b82f6" }}>병원 블로그는 리뷰가 아닌 <strong>진료일기(정보성)</strong> 형식으로 의료법 준수 원고를 자동 작성합니다.</p>
+                  </div>
+                ) : isShopping ? (
+                  <div style={{ padding: "1rem", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: "8px" }}>
+                    <div style={{ fontWeight: "bold", color: "#6d28d9" }}>🛍 쇼핑파트너스 · 상품후기 (자동)</div>
+                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.85rem", color: "#7c3aed" }}>상품 URL을 입력하면 상품명·이미지를 수집해 <strong>상품후기(일반배포)</strong> 원고를 자동 생성합니다. 목적·유형·길이는 상품후기용으로 고정됩니다.</p>
+                  </div>
+                ) : (<>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>포스팅 목적</label>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem" }}>
+                    <div onClick={() => setPostPurpose("review")} style={{ padding: "1rem", border: postPurpose === "review" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "review" ? "#f0fdf4" : "white" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📝</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>리뷰용</div>
+                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>방문 후 본인 후기 작성</div>
+                    </div>
+                    <div onClick={() => setPostPurpose("intro")} style={{ padding: "1rem", border: postPurpose === "intro" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "intro" ? "#f0fdf4" : "white" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📢</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>홍보용</div>
+                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>방문 없이 매장·상품 소개</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>블로그 홍보 유형</label>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.5rem" }}>
+                    <div onClick={() => setPromoType("product")} style={{ padding: "1rem 0.5rem", border: promoType === "product" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "product" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🎁</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>상품후기</div>
+                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>제품 리뷰</div>
+                    </div>
+                    <div onClick={() => setPromoType("app")} style={{ padding: "1rem 0.5rem", border: promoType === "app" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "app" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📱</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>앱/서비스</div>
+                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>온라인 서비스</div>
+                    </div>
+                    <div onClick={() => setPromoType("place")} style={{ padding: "1rem 0.5rem", border: promoType === "place" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "place" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🍽️</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>맛집후기</div>
+                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>식당 방문기</div>
+                    </div>
+                    <div onClick={() => setPromoType("service")} style={{ padding: "1rem 0.5rem", border: promoType === "service" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "service" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
+                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>💼</div>
+                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>서비스업</div>
+                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>오프라인 매장</div>
+                    </div>
+                  </div>
+                </div>
+                </>)}
+              </>
+
+            {!isHospital && !isShopping && (
+            <div>
+              <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>배포 방식</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div onClick={() => setDistributionMode("normal")} style={{ padding: "1rem", border: distributionMode === "normal" ? "2px solid #3b82f6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: distributionMode === "normal" ? "#eff6ff" : "white" }}>
+                  <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📝</div>
+                  <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>일반배포</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>1500자 이상 · 상세 본문</div>
+                </div>
+                <div onClick={() => setDistributionMode("quick")} style={{ padding: "1rem", border: distributionMode === "quick" ? "2px solid #3b82f6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: distributionMode === "quick" ? "#eff6ff" : "white" }}>
+                  <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🚀</div>
+                  <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>막배포</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>1500자 이내 · 빠른 배포</div>
+                </div>
+              </div>
+            </div>
+            )}
+
+            <button onClick={handleGenerateContent} disabled={isGenerating} style={{ padding: "1rem", background: "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", borderRadius: "6px", cursor: isGenerating ? "wait" : "pointer", marginTop: "1rem" }}>
+              {isGenerating ? "AI가 각 계정별 원고를 창작 중입니다..." : (isShopping ? "🛍 URL로 상품후기 원고 자동 생성" : "AI 다중 원고 자동 생성하기")}
+            </button>
+          </div>
+        </div>
+        {/* 3. Image Settings (원고 설정 아래로 이동) */}
+        <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>3. 이미지 설정</h2>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: washImages ? "#3b82f6" : "#64748b" }}>
                <input type="checkbox" checked={washImages} onChange={e => setWashImages(e.target.checked)} style={{ transform: "scale(1.2)" }} />
@@ -877,165 +1040,6 @@ function BlogPostingContent() {
           )}
         </div>
 
-        {/* 3. Content Settings */}
-        <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>3. 원고 설정 (다중 스핀 지원)</h2>
-          
-          <div style={{ padding: "1rem", background: "#f8fafc", color: "#334155", fontSize: "0.95rem", border: "1px solid #e2e8f0", marginBottom: "1.5rem" }}>
-            SEO 분석기가 타겟 키워드의 상위 노출 승리 공식을 분석하고, 선택하신 <strong>포스팅 목적</strong>과 <strong>홍보 카테고리</strong>에 맞춰 AI가 최적의 원고를 100% 창작하여 포스팅합니다.
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            
-            {sourceData && (
-              <div style={{ marginBottom: "1rem", padding: "1rem", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 0.5rem 0", color: "#334155" }}>📝 수집된 글감 데이터 (이 데이터로 자동 작성됩니다)</h4>
-                <textarea readOnly value={sourceData} style={{ width: "100%", height: "100px", padding: "0.8rem", border: "1px solid #cbd5e1", borderRadius: "4px", backgroundColor: "#f1f5f9", fontSize: "0.9rem", color: "#475569" }} />
-                <button type="button" onClick={() => { setSourceData(""); localStorage.removeItem('autoWriteSourceData'); }} style={{ marginTop: "0.5rem", padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>글감 데이터 지우기 (직접 입력 모드로 전환)</button>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: "1rem" }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 키워드 (필수)</label>
-                <input type="text" placeholder="예: 강남역 맛집, 서울 카페 추천" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-
-                <div style={{ marginTop: "0.8rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                    <label style={{ fontSize: "0.9rem", fontWeight: "bold" }}>서브 키워드 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(선택 · 최대 5개)</span></label>
-                    <button type="button" onClick={addSubKeyword} disabled={subKeywords.length >= 5} style={{ padding: "0.35rem 0.8rem", background: subKeywords.length >= 5 ? "#cbd5e1" : "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", fontSize: "0.82rem", cursor: subKeywords.length >= 5 ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>+ 추가</button>
-                  </div>
-                  <input type="text" value={subKwInput} onChange={e => setSubKwInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSubKeyword(); } }} disabled={subKeywords.length >= 5} placeholder={subKeywords.length >= 5 ? "최대 5개까지 추가됨" : "예: 분위기 좋은 카페 (입력 후 Enter)"} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                  {subKeywords.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.6rem" }}>
-                      {subKeywords.map((kw, i) => (
-                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.7rem", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "999px", fontSize: "0.85rem", fontWeight: "bold" }}>{kw}<span onClick={() => removeSubKeyword(kw)} style={{ cursor: "pointer", color: "#60a5fa", fontWeight: "bold" }}>×</span></span>
-                      ))}
-                      <span style={{ alignSelf: "center", fontSize: "0.78rem", color: "#94a3b8" }}>{subKeywords.length}/5</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                {!isHospital && (<>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (선택)</label>
-                <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
-                  <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
-                  ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
-                </label>
-                </>)}
-
-                <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
-                  <input type="file" accept="image/*" multiple onChange={e => setDescImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
-                  <button type="button" onClick={handleDescribeImagesBlog} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
-                    {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
-                  </button>
-                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>타겟 키워드 + 첨부 이미지를 AI가 보고 글감을 만든 뒤, '원고 생성'으로 원고를 만듭니다. 첨부 이미지는 발행 글에도 함께 들어갑니다.</p>
-                </div>
-              </div>
-            </div>
-
-              <div>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>AI 생성 엔진 선택</label>
-                <select value={aiProvider} onChange={e => setAiProvider(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1" }}>
-                  <option value="claude">Claude (추천/고품질)</option>
-                  <option value="gemini">Gemini (빠름/무료)</option>
-                  <option value="openai">ChatGPT (OpenAI)</option>
-                </select>
-              </div>
-
-            {sourceData && (
-              <div style={{ marginBottom: "1rem", padding: "1rem 1.2rem", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                <p style={{ margin: 0, fontSize: "0.9rem", color: "#15803d", lineHeight: "1.5" }}>
-                  💡 <strong>분석/글감 데이터가 반영됩니다.</strong> 아래에서 <strong>포스팅 목적</strong>(리뷰/홍보/정보성)과 <strong>유형</strong>(맛집·업체 등)을 골라 그 성격으로 작성하세요.
-                </p>
-              </div>
-            )}
-              <>
-                {isHospital ? (
-                  <div style={{ padding: "1rem", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px" }}>
-                    <div style={{ fontWeight: "bold", color: "#1e40af" }}>🏥 진료일기 형식 · 병원운영 (자동)</div>
-                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.85rem", color: "#3b82f6" }}>병원 블로그는 리뷰가 아닌 <strong>진료일기(정보성)</strong> 형식으로 의료법 준수 원고를 자동 작성합니다.</p>
-                  </div>
-                ) : (<>
-                <div>
-                  <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>포스팅 목적</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
-                    <div onClick={() => setPostPurpose("review")} style={{ padding: "1rem", border: postPurpose === "review" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "review" ? "#f0fdf4" : "white" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📝</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>리뷰용</div>
-                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>방문 후 본인 후기 작성</div>
-                    </div>
-                    <div onClick={() => setPostPurpose("intro")} style={{ padding: "1rem", border: postPurpose === "intro" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "intro" ? "#f0fdf4" : "white" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📢</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>홍보용</div>
-                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>방문 없이 매장·상품 소개</div>
-                    </div>
-                    <div onClick={() => setPostPurpose("info")} style={{ padding: "1rem", border: postPurpose === "info" ? "2px solid #22c55e" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: postPurpose === "info" ? "#f0fdf4" : "white" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📚</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>정보성</div>
-                      <div style={{ fontSize: "0.8rem", color: "#64748b" }}>지수용 정보글(비홍보)</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>블로그 홍보 유형</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "0.5rem" }}>
-                    <div onClick={() => setPromoType("product")} style={{ padding: "1rem 0.5rem", border: promoType === "product" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "product" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🎁</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>상품후기</div>
-                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>제품 리뷰</div>
-                    </div>
-                    <div onClick={() => setPromoType("hospital")} style={{ padding: "1rem 0.5rem", border: promoType === "hospital" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "hospital" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🏥</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>병원운영</div>
-                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>병원·의원 정보</div>
-                    </div>
-                    <div onClick={() => setPromoType("app")} style={{ padding: "1rem 0.5rem", border: promoType === "app" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "app" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📱</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>앱/서비스</div>
-                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>온라인 서비스</div>
-                    </div>
-                    <div onClick={() => setPromoType("place")} style={{ padding: "1rem 0.5rem", border: promoType === "place" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "place" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🍽️</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>맛집후기</div>
-                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>식당 방문기</div>
-                    </div>
-                    <div onClick={() => setPromoType("service")} style={{ padding: "1rem 0.5rem", border: promoType === "service" ? "2px solid #8b5cf6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: promoType === "service" ? "#f5f3ff" : "white", textAlign: "center", wordBreak: "keep-all" }}>
-                      <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>💼</div>
-                      <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem", fontSize: "0.85rem" }}>서비스업</div>
-                      <div style={{ fontSize: "0.7rem", color: "#64748b" }}>오프라인 매장</div>
-                    </div>
-                  </div>
-                </div>
-                </>)}
-              </>
-
-            {!isHospital && (
-            <div>
-              <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>배포 방식</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                <div onClick={() => setDistributionMode("normal")} style={{ padding: "1rem", border: distributionMode === "normal" ? "2px solid #3b82f6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: distributionMode === "normal" ? "#eff6ff" : "white" }}>
-                  <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>📝</div>
-                  <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>일반배포</div>
-                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>1500자 이상 · 상세 본문</div>
-                </div>
-                <div onClick={() => setDistributionMode("quick")} style={{ padding: "1rem", border: distributionMode === "quick" ? "2px solid #3b82f6" : "1px solid #cbd5e1", borderRadius: "8px", cursor: "pointer", background: distributionMode === "quick" ? "#eff6ff" : "white" }}>
-                  <div style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>🚀</div>
-                  <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>막배포</div>
-                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>1500자 이내 · 빠른 배포</div>
-                </div>
-              </div>
-            </div>
-            )}
-
-            <button onClick={handleGenerateContent} disabled={isGenerating} style={{ padding: "1rem", background: "#2563eb", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", borderRadius: "6px", cursor: isGenerating ? "wait" : "pointer", marginTop: "1rem" }}>
-              {isGenerating ? "AI가 각 계정별 원고를 창작 중입니다..." : "AI 다중 원고 자동 생성하기"}
-            </button>
-          </div>
-        </div>
         {/* Publish Action */}
         <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginTop: "1rem", padding: "1.5rem", background: "white", border: "1px solid #cbd5e1" }}>
           <select value={publishMode} onChange={e => setPublishMode(e.target.value)} style={{ padding: "0.8rem", border: "1px solid #0f172a", fontWeight: "bold", outline: "none" }}>
