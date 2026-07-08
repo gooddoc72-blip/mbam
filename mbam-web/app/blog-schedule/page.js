@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import LibraryPickerModal from "../components/LibraryPickerModal";
 
 export default function BlogSchedulePage() {
   const pathname = usePathname();
@@ -40,9 +41,7 @@ export default function BlogSchedulePage() {
 
   // 사진(보관함) 선택
   const [showLibPicker, setShowLibPicker] = useState(false);
-  const [libImages, setLibImages] = useState([]);
-  const [libSelected, setLibSelected] = useState(() => new Set());
-  const [libStaging, setLibStaging] = useState(false);
+  // 이미지 보관함 선택은 공용 LibraryPickerModal 컴포넌트로 분리됨
 
   const loadAll = async () => {
     try {
@@ -70,25 +69,6 @@ export default function BlogSchedulePage() {
     }
   };
 
-  const openLibPicker = async () => {
-    setShowLibPicker(true);
-    try {
-      const res = await fetchWithAuth("/api/settings/wash-library");
-      if (res.ok) { const d = await res.json(); const items = d.items || []; setLibImages(items); setLibSelected(new Set(items.map(i => i.filename))); }
-    } catch (e) {}
-  };
-  const toggleLibImage = (fn) => setLibSelected(prev => { const n = new Set(prev); n.has(fn) ? n.delete(fn) : n.add(fn); return n; });
-  const useLibImages = async () => {
-    const picked = Array.from(libSelected);
-    if (picked.length === 0) { alert("사용할 이미지를 1장 이상 선택하세요."); return; }
-    setLibStaging(true);
-    try {
-      const res = await fetchWithAuth("/api/settings/wash-library/stage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filenames: picked }) });
-      const d = await res.json();
-      if (res.ok && d.success && d.folder) { setRImageFolder(d.folder); setRImageCount(d.count); setShowLibPicker(false); }
-      else alert("이미지 지정 실패");
-    } catch (e) { alert("오류: " + e.message); } finally { setLibStaging(false); }
-  };
 
   const handleAddReservation = async () => {
     if (!rAccountId) { alert("발행 계정을 선택하세요."); return; }
@@ -330,7 +310,7 @@ export default function BlogSchedulePage() {
                 <textarea value={rSource} onChange={(e) => setRSource(e.target.value)} rows={4} placeholder="발행할 글의 주제/내용/참고자료를 자유롭게 입력 (글감 수집·분석 내용을 붙여넣어도 됩니다)" style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
               </div>
               <div style={{ marginTop: "1.1rem", display: "flex", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
-                <button type="button" onClick={openLibPicker} style={{ padding: "0.6rem 1.1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>🗂️ 보관함에서 사진 선택</button>
+                <button type="button" onClick={() => setShowLibPicker(true)} style={{ padding: "0.6rem 1.1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>🗂️ 보관함에서 사진 선택</button>
                 {rImageFolder ? <span style={{ color: "#16a34a", fontWeight: "bold", fontSize: "0.9rem" }}>✅ 사진 {rImageCount}장 지정됨</span> : <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>사진 미지정 시 카드뉴스가 자동 생성됩니다(아래 옵션)</span>}
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "1rem", cursor: "pointer", fontSize: "0.9rem", color: rCard ? "#2563eb" : "#64748b" }}>
@@ -409,37 +389,12 @@ export default function BlogSchedulePage() {
         </div>
       </div>
 
-      {/* 보관함 사진 선택 모달 */}
-      {showLibPicker && (
-        <div onClick={() => setShowLibPicker(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: "12px", padding: "1.5rem", width: "640px", maxWidth: "92vw", maxHeight: "82vh", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
-              <h3 style={{ margin: 0, fontSize: "1.1rem", color: "#1e293b" }}>🗂️ 보관함에서 사진 선택 <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: "normal" }}>(선택 {libSelected.size}/{libImages.length})</span></h3>
-              <button onClick={() => setShowLibPicker(false)} style={{ background: "none", border: "none", fontSize: "1.2rem", cursor: "pointer", color: "#94a3b8" }}>✕</button>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "0.8rem" }}>
-              {libImages.length === 0 ? (
-                <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>보관함이 비어 있습니다. 이미지 세탁소에서 저장 후 이용하세요.</div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: "0.6rem" }}>
-                  {libImages.map((img) => {
-                    const sel = libSelected.has(img.filename);
-                    return (
-                      <div key={img.filename} onClick={() => toggleLibImage(img.filename)} style={{ position: "relative", border: sel ? "3px solid #7c3aed" : "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", cursor: "pointer", boxSizing: "border-box" }}>
-                        <img src={img.base64_data} alt={img.filename} style={{ width: "100%", height: "90px", objectFit: "cover", display: "block", opacity: sel ? 1 : 0.55 }} />
-                        {sel && <span style={{ position: "absolute", top: "4px", right: "4px", width: "20px", height: "20px", borderRadius: "50%", background: "#7c3aed", color: "white", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>✓</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <button onClick={useLibImages} disabled={libStaging || libSelected.size === 0} style={{ marginTop: "1rem", padding: "0.9rem", background: (libStaging || libSelected.size === 0) ? "#cbd5e1" : "#7c3aed", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", fontSize: "1rem", cursor: (libStaging || libSelected.size === 0) ? "not-allowed" : "pointer" }}>
-              {libStaging ? "지정 중..." : `선택한 ${libSelected.size}장 사용`}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* 보관함 사진 선택 모달 (공용 컴포넌트) */}
+      <LibraryPickerModal
+        open={showLibPicker}
+        onClose={() => setShowLibPicker(false)}
+        onUse={(folder, count) => { setRImageFolder(folder); setRImageCount(count); setShowLibPicker(false); }}
+      />
     </div>
   );
 }
