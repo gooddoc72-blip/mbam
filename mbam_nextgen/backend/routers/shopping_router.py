@@ -499,7 +499,8 @@ async def analyze_and_suggest_title(req: TitleSuggestRequest):
     ad_secret_key = _key("NAVER_SECRET_KEY")
     
     if ad_customer_id and ad_access_license and ad_secret_key:
-        import time, urllib.parse, hmac, hashlib, base64
+        # urllib 은 함수 내 import 금지 — 지역변수로 취급돼 위쪽 사용부가 UnboundLocalError (모듈 상단에 이미 import)
+        import time, hmac, hashlib, base64
         method = "GET"
         uri = "/keywordstool"
         timestamp = str(int(round(time.time() * 1000)))
