@@ -20,6 +20,8 @@ export default function CafeAutoPage() {
   const [targetKeyword, setTargetKeyword] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [sourceMode, setSourceMode] = useState("collect"); // 글감 소스: collect(글감수집) | write(직접작성) | image(이미지)
+  const [showAdvanced, setShowAdvanced] = useState(false);  // 고급 설정(발행 텀·테더링) 접기
   const [images, setImages] = useState([]);
   const [referenceData, setReferenceData] = useState(null);
 
@@ -907,10 +909,22 @@ export default function CafeAutoPage() {
                     ☁️ 웹에서 불러오기
                   </button>
                 </div>
-                <input type="text" placeholder="타겟 키워드 (AI 댓글 생성용)" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
+                <input type="text" placeholder="타겟 키워드" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
+
+                {/* 글감 소스 토글 — 3방식 중 하나만 노출 (블로그 발행과 통일된 방식) */}
+                {actionType === "post" && (
+                  <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                    {[["collect", "📥 글감수집에서"], ["write", "✍️ 직접 작성"], ["image", "🖼 이미지로"]].map(([k, label]) => (
+                      <button key={k} type="button" onClick={() => setSourceMode(k)}
+                        style={{ padding: "0.5rem 1rem", borderRadius: "999px", border: sourceMode === k ? "1px solid #2563eb" : "1px solid #cbd5e1", background: sourceMode === k ? "#2563eb" : "white", color: sourceMode === k ? "white" : "#475569", fontWeight: "bold", fontSize: "0.88rem", cursor: "pointer" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* 글감수집에서 글감 선택 (제목/본문 자동 채움) */}
-                {actionType === "post" && (
+                {actionType === "post" && sourceMode === "collect" && (
                   <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", alignItems: "center", flexWrap: "wrap", padding: "0.7rem", background: "#eff6ff", border: "1px dashed #bfdbfe", borderRadius: "6px" }}>
                     <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#1e40af" }}>📚 글감수집에서 선택:</span>
                     <select value={pickCategory} onChange={e => setPickCategory(e.target.value)} style={{ padding: "0.45rem", border: "1px solid #cbd5e1", borderRadius: "4px" }}>
@@ -949,9 +963,9 @@ export default function CafeAutoPage() {
                     <textarea placeholder="직접 본문 작성 시 (또는 'AI 원고 생성'으로 미리보기 후 검토)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: content ? "260px" : "100px", padding: "0.8rem" }} />
                   </>
                 )}
-                {actionType === "post" && (
+                {actionType === "post" && sourceMode === "image" && (
                   <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
-                    <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
+                    <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 이미지 + 키워드로 글감 만들기</div>
                     <input type="file" accept="image/*" multiple onChange={e => setImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
                     <button onClick={handleDescribeImages} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
                       {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
@@ -980,8 +994,12 @@ export default function CafeAutoPage() {
                   </label>
                 )}
 
-                {/* 고급: 계정 간 발행 텀 + USB 테더링 */}
-                <div style={{ marginTop: "1rem", padding: "1rem", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                {/* 고급 설정 접기: 계정 간 발행 텀 + USB 테더링 (블로그 발행과 통일) */}
+                <button type="button" onClick={() => setShowAdvanced(v => !v)} style={{ marginTop: "1rem", padding: "0.6rem 0.9rem", width: "100%", textAlign: "left", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", color: "#475569", fontSize: "0.9rem" }}>
+                  ⚙️ 고급 설정 (발행 텀 · USB 테더링) {showAdvanced ? "▲" : "▼"}
+                </button>
+                {showAdvanced && (
+                <div style={{ marginTop: "0.5rem", padding: "1rem", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.8rem" }}>
                     <span style={{ fontWeight: "bold", color: "#475569" }}>계정 간 발행 텀 (딜레이):</span>
                     <input type="number" min="0" value={accountDelay} onChange={e => setAccountDelay(Number(e.target.value))} style={{ width: "60px", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px", textAlign: "center" }} />
@@ -993,6 +1011,7 @@ export default function CafeAutoPage() {
                     <span style={{ fontSize: "0.8rem", color: "#94a3b8", fontWeight: "normal" }}>* PC와 폰이 USB로 연결되어 있고, USB 테더링이 켜져 있어야 합니다.</span>
                   </label>
                 </div>
+                )}
 
                 {actionType === "post" && (
                   <button onClick={handleSaveManuscripts} style={{ marginTop: "0.8rem", padding: "0.7rem 1rem", background: "#0ea5e9", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", width: "100%" }}>
