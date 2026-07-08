@@ -855,7 +855,7 @@ async def generate_with_theme_api(req: GenerateWithThemeRequest, _q: dict = Depe
         clip_gen = ClipGenerator()
         clip_name = f"clip_{uuid.uuid4().hex[:8]}"
         clip_texts = ai_result.get("clip_texts", ["리뷰 소식"])
-        clip_path = clip_gen.generate_clip(req.image_paths, clip_texts, clip_name)
+        clip_path = clip_gen.generate_clip(req.image_paths, clip_texts, clip_name, place_name=req.place_name)
         
         # 3. DB 저장
         from mbam_nextgen.backend.database import SessionLocal, PlaceNewsHistory
@@ -916,7 +916,7 @@ async def generate_place_news_api(req: PlaceNewsGenerateRequest, _q: dict = Depe
         clip_gen = ClipGenerator()
         clip_name = f"clip_{uuid.uuid4().hex[:8]}"
         clip_texts = ai_result.get("clip_texts", ["리뷰 소식"])
-        clip_path = clip_gen.generate_clip(image_paths, clip_texts, clip_name)
+        clip_path = clip_gen.generate_clip(image_paths, clip_texts, clip_name, place_name=req.place_name)
         
         # DB 저장 (스케줄이 없더라도 History에 임시 저장 가능하도록 처리)
         from mbam_nextgen.backend.database import SessionLocal, PlaceNewsHistory
@@ -1012,5 +1012,34 @@ def get_place_news_history():
             })
         db.close()
         return {"success": True, "history": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/news/history/{history_id}")
+def delete_place_news_history(history_id: str):
+    """소식 생성 이력 삭제 — 생성된 클립 파일도 함께 정리."""
+    try:
+        import os
+        from mbam_nextgen.backend.database import SessionLocal, PlaceNewsHistory
+        db = SessionLocal()
+        try:
+            h = db.query(PlaceNewsHistory).filter(PlaceNewsHistory.id == history_id).first()
+            if not h:
+                raise HTTPException(status_code=404, detail="이력을 찾을 수 없습니다.")
+            clip = h.clip_path
+            db.delete(h)
+            db.commit()
+        finally:
+            db.close()
+        if clip:
+            try:
+                if os.path.exists(clip):
+                    os.remove(clip)
+            except Exception:
+                pass
+        return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

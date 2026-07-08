@@ -423,21 +423,56 @@ export default function PlaceNewsPage() {
                                     <div style={{ background: "white", padding: "1rem", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "0.95rem", color: "#334155", lineHeight: "1.6", whiteSpace: "pre-wrap", maxHeight: "150px", overflowY: "auto", marginBottom: "1rem", boxShadow: "inset 0 2px 4px rgba(0,0,0,0.02)" }}>
                                         {h.generated_text}
                                     </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                                         <span style={{ fontSize: "0.8rem", color: "#64748b" }}>상태: {h.status === 'pending' ? '발행 대기중' : '발행 완료'}</span>
-                                        {h.clip_path && (
-                                            <button 
-                                                onClick={() => alert(`(프로토타입) 다음 경로에 MP4 영상이 저장되어 있습니다:\n\n${h.clip_path}`)}
-                                                style={{ 
-                                                    background: "#10b981", color: "white", border: "none", padding: "0.5rem 1rem", 
-                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: "pointer",
-                                                    display: "flex", alignItems: "center", gap: "0.5rem", boxShadow: "0 2px 5px rgba(16,185,129,0.3)"
+                                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                                            <button
+                                                onClick={() => {
+                                                    // 생성된 소식 원고를 블로그 발행 화면으로 넘겨 바로 발행
+                                                    try {
+                                                        localStorage.setItem('autoWriteSourceData', h.generated_text || "");
+                                                    } catch (e) {}
+                                                    const kwMatch = (h.generated_text || "").match(/제목:\s*(.+)/);
+                                                    const kw = (h.place_name && h.place_name !== "수동생성" ? h.place_name : (kwMatch ? kwMatch[1].trim().slice(0, 20) : ""));
+                                                    window.location.href = `/blog-posting?keyword=${encodeURIComponent(kw)}`;
+                                                }}
+                                                style={{
+                                                    background: "#2563eb", color: "white", border: "none", padding: "0.5rem 1rem",
+                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: "pointer"
                                                 }}
                                             >
-                                                <Video size={16} />
-                                                클립 영상 확인하기
+                                                📝 블로그로 발행
                                             </button>
-                                        )}
+                                            {h.clip_path && (
+                                                <button
+                                                    onClick={() => alert(`(프로토타입) 다음 경로에 MP4 영상이 저장되어 있습니다:\n\n${h.clip_path}`)}
+                                                    style={{
+                                                        background: "#10b981", color: "white", border: "none", padding: "0.5rem 1rem",
+                                                        borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: "pointer",
+                                                        display: "flex", alignItems: "center", gap: "0.5rem", boxShadow: "0 2px 5px rgba(16,185,129,0.3)"
+                                                    }}
+                                                >
+                                                    <Video size={16} />
+                                                    클립 영상 확인하기
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={async () => {
+                                                    if (!window.confirm("이 생성 이력을 삭제할까요? (클립 파일도 함께 삭제)")) return;
+                                                    try {
+                                                        const r = await fetchWithAuth(`/api/place/news/history/${h.id}`, { method: "DELETE" });
+                                                        if (r.ok) setHistory(prev => prev.filter(x => x.id !== h.id));
+                                                        else { const d = await r.json().catch(() => ({})); alert("삭제 실패: " + (d.detail || r.status)); }
+                                                    } catch (e) { alert("서버 오류: " + e.message); }
+                                                }}
+                                                style={{
+                                                    background: "white", color: "#ef4444", border: "1px solid #ef4444", padding: "0.5rem 0.9rem",
+                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: "pointer"
+                                                }}
+                                            >
+                                                삭제
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             ))
