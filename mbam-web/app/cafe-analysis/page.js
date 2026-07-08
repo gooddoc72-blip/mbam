@@ -386,22 +386,24 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto", paddingBottom: "3rem" }}>
             <div style={{ marginBottom: "1rem" }}>
-                <h1 style={{ fontSize: "2rem", color: "#1e293b", margin: "0 0 0.5rem 0" }}>{chName} 분석</h1>
+                <h1 style={{ fontSize: "2rem", color: "#1e293b", margin: "0 0 0.5rem 0" }}>{isBlog ? '형태소 분석' : `${chName} 분석`}</h1>
                 <p style={{ color: "#64748b", margin: 0 }}>
                     {isBlog
-                        ? '네이버 검색 인기 블로그글을 분석합니다 — ID 분석(블로그 지수·등급) + 형태소 분석(블로그글 전용).'
+                        ? '네이버 검색 인기 블로그글의 형태소·상위노출 패턴을 분석합니다.'
                         : '네이버 검색 인기 카페글을 분석합니다 — ID 분석(카페 작성자/카페 권위) + 형태소 분석(카페글 전용).'}
                 </p>
             </div>
 
-            {/* 탭 */}
-            <div style={{ display: 'flex', gap: '0.2rem', borderBottom: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
-                {tabBtn('url', 'ID 분석', Link2)}
-                {tabBtn('content', '형태소 분석', FileText)}
-            </div>
+            {/* 탭 — 카페만. 블로그는 ID 분석이 '블로그 진단' 메뉴와 겹쳐 삭제, 형태소 분석만 유지 */}
+            {!isBlog && (
+                <div style={{ display: 'flex', gap: '0.2rem', borderBottom: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+                    {tabBtn('url', 'ID 분석', Link2)}
+                    {tabBtn('content', '형태소 분석', FileText)}
+                </div>
+            )}
 
-            {/* ───────── URL 권위 분석 ───────── */}
-            {mode === 'url' && (
+            {/* ───────── ID 분석 (카페 전용) ───────── */}
+            {!isBlog && mode === 'url' && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 380px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
                     {/* 입력 */}
                     <div className="glass-card" style={{ padding: '1.5rem' }}>
@@ -510,8 +512,8 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                 </div>
             )}
 
-            {/* ───────── 본문 해부 분석 (기존) ───────── */}
-            {mode === 'content' && (
+            {/* ───────── 형태소 분석 ───────── */}
+            {(isBlog || mode === 'content') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     <div className="glass-card" style={{ padding: '2rem' }}>
                         <div style={{ marginBottom: '1.2rem' }}>
