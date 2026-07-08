@@ -783,7 +783,7 @@ export default function CafeAutoPage() {
         
         {/* Header Tabs */}
         <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "1rem" }}>카페 전문 육성 & 자동화</h1>
+          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "1rem" }}>카페 포스팅</h1>
           <div style={{ display: "flex", gap: "1rem", borderBottom: "2px solid #e2e8f0" }}>
             {[
               { id: "post", label: "카페 포스팅" },
@@ -987,9 +987,9 @@ export default function CafeAutoPage() {
                     <input type="number" min="0" value={accountDelay} onChange={e => setAccountDelay(Number(e.target.value))} style={{ width: "60px", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px", textAlign: "center" }} />
                     <span style={{ color: "#64748b" }}>분 대기 후 다음 계정 발행</span>
                   </div>
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b", flexWrap: "wrap" }}>
                     <input type="checkbox" checked={useTethering} onChange={e => setUseTethering(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-                    📱 안드로이드 USB 테더링 (비행기 모드 자동 토글) 사용
+                    <span style={{ whiteSpace: "nowrap" }}>📱 안드로이드 USB 테더링 (비행기 모드 자동 토글) 사용</span>
                     <span style={{ fontSize: "0.8rem", color: "#94a3b8", fontWeight: "normal" }}>* PC와 폰이 USB로 연결되어 있고, USB 테더링이 켜져 있어야 합니다.</span>
                   </label>
                 </div>

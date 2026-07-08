@@ -815,7 +815,7 @@ function BlogPostingContent() {
               <span style={{ color: "#64748b" }}>분 대기 후 다음 계정 발행</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b", whiteSpace: "nowrap" }}>
                 <input type="checkbox" checked={useTethering} onChange={e => setUseTethering(e.target.checked)} style={{ transform: "scale(1.2)" }} />
                 📱 안드로이드 USB 테더링 (비행기 모드 자동 토글) 사용
               </label>
