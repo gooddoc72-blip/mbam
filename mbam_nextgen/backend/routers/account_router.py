@@ -40,14 +40,59 @@ class AccountEdit(BaseModel):
     status: Optional[str] = None
 
 
-def _serialize(acc: NaverAccount) -> dict:
+# ── 기기 인증 상태를 '클라우드에서 보이게' 저장 ──────────────────────────────
+# 문제: 기기 인증은 사용자 PC(에이전트)에서 실행돼 .registered 마커가 그 PC에만 생김.
+# 클라우드 백엔드는 자기 파일시스템만 봐서 항상 '미인증'으로 표시됐다.
+# 해결: 인증 완료를 app_settings(DB, KV)에 기록하고, 목록/상태 조회 시 그 값도 함께 본다.
+def _reg_key(uid: str, naver_id: str) -> str:
+    return f"device_reg:{uid}:{naver_id}"
+
+
+def _kv_set_registered(uid: str, naver_id: str):
+    try:
+        from .settings import db_set_settings
+        db_set_settings({_reg_key(uid, naver_id): "1"})
+    except Exception as e:
+        print(f"[account] 인증상태 저장 실패: {e}")
+
+
+def _kv_is_registered(uid: str, naver_id: str) -> bool:
+    try:
+        from .settings import db_get_settings
+        k = _reg_key(uid, naver_id)
+        return db_get_settings([k]).get(k) == "1"
+    except Exception:
+        return False
+
+
+def _persist_register_account(db, user_id, payload, result):
+    """[방법 B] 에이전트가 기기 인증을 마치면 클라우드 DB에 '인증 완료'를 기록(cloud 영속화 훅)."""
+    if result and result.get("success"):
+        nid = (payload or {}).get("naver_id")
+        if nid:
+            _kv_set_registered(user_id, nid)
+
+
+try:
+    from ..import jobs as _jobs_mod  # noqa
+except Exception:
+    _jobs_mod = None
+try:
+    from mbam_nextgen.backend import jobs as _jobs_mod
+    _jobs_mod.register_persister("register_account", _persist_register_account)
+except Exception as _e:
+    print(f"[account] register_account persister 등록 실패: {_e}")
+
+
+def _serialize(acc: NaverAccount, uid: str = None) -> dict:
     return {
         "id": acc.id,
         "naver_id": acc.naver_id,
         "blog_addr": acc.blog_addr or "",
         "status": acc.status or "active",
         "has_pw": bool(acc.naver_pw),
-        "registered": is_registered(acc.naver_id),  # 디바이스 인증(자동 로그인) 완료 여부
+        # 로컬 파일 마커(설치형) 또는 클라우드 KV 기록(방법 B) 둘 중 하나면 인증 완료
+        "registered": is_registered(acc.naver_id) or _kv_is_registered(uid or acc.user_id, acc.naver_id),
         "created_at": acc.created_at.isoformat() if acc.created_at else None,
     }
 
@@ -106,7 +151,7 @@ async def list_accounts(db: Session = Depends(get_db), current_user: dict = Depe
         logging.getLogger("uvicorn.error").error(f"[account_router] list_accounts uid={uid!r} → {len(accounts)}개 (DB 전체 {_all}개)")
     except Exception:
         pass
-    return {"accounts": [_serialize(a) for a in accounts]}
+    return {"accounts": [_serialize(a, uid) for a in accounts]}
 
 
 @router.post("", summary="계정 추가 또는 갱신(upsert) — 포스팅 화면의 '계정 추가'도 여기로 저장")
@@ -181,7 +226,7 @@ async def delete_account(account_id: str, db: Session = Depends(get_db), current
 device_auth_tasks: dict = {}  # naver_id -> {"status": running|completed|failed, "message": str, "logs": [str]}
 
 
-async def _run_device_auth(naver_id: str, naver_pw: Optional[str]):
+async def _run_device_auth(naver_id: str, naver_pw: Optional[str], uid: Optional[str] = None):
     state = device_auth_tasks[naver_id]
 
     def log(msg: str):
@@ -222,6 +267,8 @@ async def _run_device_auth(naver_id: str, naver_pw: Optional[str]):
 
             if ok:
                 mark_registered(naver_id)
+                if uid:
+                    _kv_set_registered(uid, naver_id)  # 클라우드에서도 보이도록 DB 기록
                 try:
                     await sm.save_session(context, naver_id)
                 except Exception:
@@ -254,12 +301,20 @@ async def register_device(account_id: str, db: Session = Depends(get_db), curren
         raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
 
     naver_id = acc.naver_id
+    # [방법 B] 클라우드는 브라우저를 못 여므로 로컬 에이전트에 위임(register_account 잡).
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, uid, "register_account", {"naver_id": naver_id, "naver_pw": acc.naver_pw})
+        device_auth_tasks[naver_id] = {"status": "running", "message": "내 PC에서 브라우저가 열립니다. 로그인 + 2단계 인증을 완료해 주세요. (로컬 에이전트 실행 필요)", "logs": [], "job_id": job_id}
+        return {"success": True, "mode": "agent", "job_id": job_id,
+                "message": "내 PC에서 브라우저가 열립니다. 로그인 + 2단계 인증을 완료해 주세요.", "naver_id": naver_id}
+
     existing = device_auth_tasks.get(naver_id)
     if existing and existing.get("status") == "running":
         return {"success": True, "message": "이미 기기 인증이 진행 중입니다. 열린 브라우저 창에서 로그인을 완료해 주세요.", "naver_id": naver_id}
 
     device_auth_tasks[naver_id] = {"status": "running", "message": "기기 인증을 시작합니다...", "logs": []}
-    asyncio.create_task(_run_device_auth(naver_id, acc.naver_pw))
+    asyncio.create_task(_run_device_auth(naver_id, acc.naver_pw, uid))
     return {"success": True, "message": "기기 인증을 시작했습니다. 잠시 후 뜨는 브라우저 창에서 로그인을 완료해 주세요.", "naver_id": naver_id}
 
 
@@ -269,7 +324,12 @@ async def register_device_status(account_id: str, db: Session = Depends(get_db),
     acc = db.query(NaverAccount).filter(NaverAccount.id == account_id, NaverAccount.user_id == uid).first()
     if not acc:
         raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다.")
+    registered = is_registered(acc.naver_id) or _kv_is_registered(uid, acc.naver_id)
     state = device_auth_tasks.get(acc.naver_id)
+    # 클라우드: 에이전트가 인증을 마치면 persister가 KV에 기록 → 그걸로 완료 판정
+    if registered:
+        return {"status": "completed", "message": "기기 인증이 완료되었습니다. 이제 자동 로그인됩니다.",
+                "logs": (state or {}).get("logs", []), "registered": True}
     if not state:
-        return {"status": "idle", "message": "", "logs": [], "registered": is_registered(acc.naver_id)}
-    return {**state, "registered": is_registered(acc.naver_id)}
+        return {"status": "idle", "message": "", "logs": [], "registered": registered}
+    return {**state, "registered": registered}
