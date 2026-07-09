@@ -7,6 +7,14 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 
+// 병원 블로그: 진료과목 드롭다운 목록 (타겟 키워드와 결합해 SEO 키워드 생성)
+const HOSPITAL_DEPTS = [
+  "정형외과", "통증의학과", "신경외과", "재활의학과", "마취통증의학과",
+  "내과", "가정의학과", "이비인후과", "안과", "피부과", "성형외과",
+  "치과", "한의원", "산부인과", "소아청소년과", "비뇨의학과",
+  "정신건강의학과", "외과", "신경과", "검진센터",
+];
+
 function BlogPostingContent() {
 
   // 1. Account Settings
@@ -74,6 +82,7 @@ function BlogPostingContent() {
 
   // 2. Content Settings
   const [targetKeyword, setTargetKeyword] = useState("");
+  const [hospitalDept, setHospitalDept] = useState("");  // 병원 블로그 전용 진료과목
   const [subKeywords, setSubKeywords] = useState([]);   // 서브(연관) 키워드 최대 5개
   const [subKwInput, setSubKwInput] = useState("");
   const [productUrl, setProductUrl] = useState("");
@@ -415,9 +424,13 @@ function BlogPostingContent() {
     setIsGenerating(true);
     setGeneratedContents([]);
     try {
+      // 병원 블로그: 진료과목을 타겟 키워드에 결합 (예: '부산 서면' + '정형외과' → '부산 서면 정형외과')
+      const effectiveKeyword = (isHospital && hospitalDept)
+        ? `${targetKeyword} ${hospitalDept}`.replace(/\s+/g, " ").trim()
+        : targetKeyword;
       const payload = {
         accounts: validAccounts,
-        target_keyword: targetKeyword,
+        target_keyword: effectiveKeyword,
         sub_keywords: subKeywords,
         product_url: productUrl,
         extract_url_images: extractUrlImages,
@@ -834,17 +847,23 @@ function BlogPostingContent() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             
-            {sourceData && (
-              <div style={{ marginBottom: "1rem", padding: "1rem", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <h4 style={{ margin: "0 0 0.5rem 0", color: "#334155" }}>📝 수집된 글감 데이터 (이 데이터로 자동 작성됩니다)</h4>
-                <textarea readOnly value={sourceData} style={{ width: "100%", height: "100px", padding: "0.8rem", border: "1px solid #cbd5e1", borderRadius: "4px", backgroundColor: "#f1f5f9", fontSize: "0.9rem", color: "#475569" }} />
-                <button type="button" onClick={() => { setSourceData(""); localStorage.removeItem('autoWriteSourceData'); }} style={{ marginTop: "0.5rem", padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>글감 데이터 지우기 (직접 입력 모드로 전환)</button>
-              </div>
-            )}
             <div style={{ display: "flex", gap: "1rem" }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 키워드 (필수)</label>
-                <input type="text" placeholder="예: 강남역 맛집, 서울 카페 추천" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                <input type="text" placeholder={isHospital ? "예: 부산 서면, 강남역 (지역)" : "예: 강남역 맛집, 서울 카페 추천"} value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+
+                {isHospital && (
+                  <div style={{ marginTop: "0.8rem" }}>
+                    <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>진료과목 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(타겟 키워드와 자동 결합)</span></label>
+                    <select value={hospitalDept} onChange={e => setHospitalDept(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }}>
+                      <option value="">선택 안 함</option>
+                      {HOSPITAL_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    {hospitalDept && targetKeyword && (
+                      <p style={{ margin: "0.4rem 0 0", fontSize: "0.8rem", color: "#2563eb" }}>→ 생성 키워드: <b>{`${targetKeyword} ${hospitalDept}`.replace(/\s+/g, " ").trim()}</b></p>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ marginTop: "0.8rem" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
@@ -862,25 +881,16 @@ function BlogPostingContent() {
                   )}
                 </div>
               </div>
+              {isShopping && (
               <div style={{ flex: 1 }}>
-                {isShopping && (<>
                 <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (필수)</label>
                 <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
                   <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
                   ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
                 </label>
-                </>)}
-
-                <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 글감수집 없이 — 이미지 + 키워드로 글감 만들기</div>
-                  <input type="file" accept="image/*" multiple onChange={e => setDescImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
-                  <button type="button" onClick={handleDescribeImagesBlog} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
-                    {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
-                  </button>
-                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>타겟 키워드 + 첨부 이미지를 AI가 보고 글감을 만든 뒤, '원고 생성'으로 원고를 만듭니다. 첨부 이미지는 발행 글에도 함께 들어갑니다.</p>
-                </div>
               </div>
+              )}
             </div>
 
               <div>

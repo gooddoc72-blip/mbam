@@ -9,8 +9,6 @@ export default function AccountManager() {
   const [msg, setMsg] = useState(null);
 
   const [form, setForm] = useState({ naver_id: "", naver_pw: "", blog_addr: "" });
-  const [aiKeys, setAiKeys] = useState({ claude: "", gemini: "", openai: "", has: {} });
-  const [aiInput, setAiInput] = useState({ claude_key: "", gemini_key: "", openai_key: "" });
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState({ blog_addr: "", naver_pw: "" });
   const [authState, setAuthState] = useState({}); // accountId -> { status, message }
@@ -29,32 +27,7 @@ export default function AccountManager() {
     }
   };
 
-  const loadAiKeys = async () => {
-    try {
-      const res = await fetchWithAuth("/api/accounts/ai-keys");
-      if (res.ok) setAiKeys(await res.json());
-    } catch (e) { /* ignore */ }
-  };
-
-  const saveAiKeys = async () => {
-    const body = {};
-    if (aiInput.claude_key.trim()) body.claude_key = aiInput.claude_key.trim();
-    if (aiInput.gemini_key.trim()) body.gemini_key = aiInput.gemini_key.trim();
-    if (aiInput.openai_key.trim()) body.openai_key = aiInput.openai_key.trim();
-    if (Object.keys(body).length === 0) return notify("error", "입력된 키가 없습니다. (삭제는 '-' 입력)");
-    try {
-      const res = await fetchWithAuth("/api/accounts/ai-keys", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "저장 실패");
-      notify("success", data.message || "AI 키가 저장되었습니다.");
-      setAiInput({ claude_key: "", gemini_key: "", openai_key: "" });
-      loadAiKeys();
-    } catch (e) { notify("error", e.message); }
-  };
-
-  useEffect(() => { load(); loadAiKeys(); }, []);
+  useEffect(() => { load(); }, []);
 
   const addAccount = async () => {
     if (!form.naver_id.trim()) return notify("error", "네이버 아이디를 입력하세요.");
@@ -159,22 +132,6 @@ export default function AccountManager() {
           color: msg.type === "success" ? "#166534" : "#991b1b",
           border: `1px solid ${msg.type === "success" ? "#bbf7d0" : "#fecaca"}` }}>{msg.text}</div>
       )}
-
-      {/* BYOK: 내 AI 키 (설치형 고객) */}
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "1.2rem", marginBottom: "1.5rem", background: "#fafafa" }}>
-        <div style={{ fontWeight: "bold", color: "#1e293b", marginBottom: "0.3rem" }}>🔑 내 AI 키 (글감/원고 생성용)</div>
-        <p style={{ fontSize: "0.85rem", color: "#64748b", marginTop: 0, marginBottom: "0.8rem" }}>
-          본인 Claude/Gemini 키를 입력하면 <b>글 생성 비용이 본인 계정에 청구</b>됩니다(설치형). 비워두면 서버 기본 키가 사용됩니다.
-          현재: Claude {aiKeys.has?.claude ? `✅ ${aiKeys.claude}` : "미설정"} · Gemini {aiKeys.has?.gemini ? `✅ ${aiKeys.gemini}` : "미설정"} · OpenAI {aiKeys.has?.openai ? `✅ ${aiKeys.openai}` : "미설정"}
-        </p>
-        <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <input style={{ ...inp, flex: 1, minWidth: "180px" }} type="password" placeholder="Claude(Anthropic) 키" value={aiInput.claude_key} onChange={(e) => setAiInput({ ...aiInput, claude_key: e.target.value })} />
-          <input style={{ ...inp, flex: 1, minWidth: "180px" }} type="password" placeholder="Gemini 키" value={aiInput.gemini_key} onChange={(e) => setAiInput({ ...aiInput, gemini_key: e.target.value })} />
-          <input style={{ ...inp, flex: 1, minWidth: "180px" }} type="password" placeholder="OpenAI 키(선택)" value={aiInput.openai_key} onChange={(e) => setAiInput({ ...aiInput, openai_key: e.target.value })} />
-          <button onClick={saveAiKeys} style={{ padding: "0.6rem 1.2rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>키 저장</button>
-        </div>
-        <div style={{ fontSize: "0.78rem", color: "#94a3b8", marginTop: "0.5rem" }}>* 삭제하려면 해당 칸에 <b>-</b> 입력 후 저장. 키는 마스킹되어 표시됩니다.</div>
-      </div>
 
       {/* 추가 폼 */}
       <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1.2rem" }}>

@@ -314,9 +314,12 @@ class SoulRewriter:
         try:
             response = await client.messages.create(
                 model="claude-opus-4-8",
-                max_tokens=2500,
+                max_tokens=8000,  # 1,500자 이상 장문(한글)은 토큰 소모가 커서 2500이면 문장 중간에 잘림
                 messages=[{"role": "user", "content": prompt}],
             )
+            # 토큰 상한에 걸려 잘린 경우 경고 — 잘린 원고가 그대로 발행되는 것을 진단하기 위함
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                print("[Soul] ⚠️ Claude 응답이 max_tokens 상한에 걸려 잘렸습니다. max_tokens 상향이 필요할 수 있습니다.")
             return response.content[0].text
         except Exception as e:
             raise e

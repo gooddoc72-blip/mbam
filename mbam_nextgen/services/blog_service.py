@@ -313,8 +313,26 @@ class BlogService:
             await frame.wait_for_selector(self.selectors["title"], timeout=10000)
             
         await frame.click(self.selectors["title"])
-        await self.stealth.human_type(frame, self.selectors["title"], title, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
-        
+        # 제목은 항상 한 줄 — 개행/중복 공백 제거로 타이핑 중 Enter(포커스 이탈)·빈 단락 입력 방지
+        clean_title = re.sub(r"\s+", " ", title or "").strip()
+        await self.stealth.human_type(frame, self.selectors["title"], clean_title, speed_mode=speed_mode, speed_multiplier=speed_multiplier)
+
+        # 타이핑 직후 실제 입력값 검증 → 뒤 글자 유실 시 전체 재입력(자가 복구)
+        # (마지막 글자가 확정되기 전 본문으로 포커스가 넘어가 잘리던 문제 방지)
+        try:
+            await asyncio.sleep(0.3)
+            typed = (await frame.locator(self.selectors["title"]).first.inner_text() or "").strip()
+            if re.sub(r"\s+", " ", typed) != clean_title:
+                print(f"[BlogService] ⚠️ 제목 입력 불일치 → 재입력 (입력됨: '{typed[:25]}')")
+                await frame.locator(self.selectors["title"]).first.click()
+                await frame.page.keyboard.press("Control+A")
+                await frame.page.keyboard.press("Delete")
+                await asyncio.sleep(0.1)
+                await frame.page.keyboard.insert_text(clean_title)  # 한 번에 삽입 — 글자 유실 없음
+                await asyncio.sleep(0.2)
+        except Exception as e:
+            print(f"[BlogService] 제목 검증 스킵: {e}")
+
         # 본문 및 이미지 교차 입력
         await frame.click(self.selectors["body"])
         # 이전 세션에서 켜진 채 기억된 서식(취소선/굵게 등) 해제 — best effort

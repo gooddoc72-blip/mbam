@@ -581,7 +581,7 @@ class WorkflowOrchestrator:
                 # 카드 제목: '테스트'/빈 키워드면 실제 글 제목을 사용
                 card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (blog_title or "정보")
                 card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
-                card_paths = self.card_news.generate_card_set(card_title, content=blog_content, count=5)
+                card_paths = await self.card_news.generate_cards(card_title, content=blog_content, count=5)
                 for idx_c, gp in enumerate(card_paths):
                     if not gp:
                         continue
@@ -1052,7 +1052,7 @@ class WorkflowOrchestrator:
                         logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
                         card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (title or "정보")
                         card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
-                        for idx_c, gp in enumerate(self.card_news.generate_card_set(card_title, content=cafe_content, count=3)):
+                        for idx_c, gp in enumerate(await self.card_news.generate_cards(card_title, content=cafe_content, count=3)):
                             if not gp:
                                 continue
                             wimg = self.armor.wash_image(gp, f"washed_gen_cafe_{account_id}_{idx_c}.jpg")
