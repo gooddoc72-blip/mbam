@@ -92,6 +92,17 @@ def enqueue_due_blog_posts():
         if not due:
             return
 
+        # 관리자 '블로그 자동배포(blog_daily)' 프롬프트를 잡 payload에 실어 보냄.
+        # 발행(원고 생성)은 에이전트 PC에서 실행되어 로컬 prompts.json 이 없으므로, 여기서 DB값을 주입해야 적용된다.
+        bd_prompt = {}
+        try:
+            from mbam_nextgen.backend.routers.settings import read_prompts
+            _p = read_prompts()
+            if isinstance(_p.get("blog_daily"), dict):
+                bd_prompt = _p["blog_daily"]
+        except Exception as _e:
+            logger.warning(f"[BlogDaily] blog_daily 프롬프트 로드 실패: {_e}")
+
         # (유저, 카테고리)별로 묶어 계정마다 다른 글감 배분
         groups = defaultdict(list)
         for s in due:
@@ -129,6 +140,8 @@ def enqueue_due_blog_posts():
                         "ai_provider": s.ai_provider or "claude",
                         "distribution_mode": s.distribution_mode or "normal",
                         "generate_card_news": bool(s.generate_card_news),
+                        "prompt_category": "blog_daily",  # 관리자 '블로그 자동배포' 프롬프트 사용
+                        "custom_prompt": bd_prompt.get("gemini_prompt" if (s.ai_provider or "claude") == "gemini" else "claude_prompt", ""),
                     }
                     jobsvc.enqueue_job(db, uid, "blog_daily_post", payload, priority=7)
                     total += 1

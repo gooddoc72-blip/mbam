@@ -251,7 +251,7 @@ class WorkflowOrchestrator:
     async def _generate_content_with_retry(
         self, keyword: str, max_attempts: int = 3, timeout: float = 120.0, ai_provider: str = "claude", reference_data: dict = None,
         post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, source_data: str = None, api_key: str = None,
-        prompt_category: str = None, include_source_link: bool = False, sub_keywords: list = None
+        prompt_category: str = None, include_source_link: bool = False, sub_keywords: list = None, custom_prompt: str = None
     ) -> str:
         """AI 원고 생성 — 지수 백오프 재시도. 모두 실패 시 안전한 기본 원고 반환.
 
@@ -287,7 +287,7 @@ class WorkflowOrchestrator:
                 content = await asyncio.wait_for(
                     self.soul.rewrite_for_blog("", enhanced_keyword, provider=ai_provider,
                                                post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode, api_key=api_key,
-                                               prompt_category=prompt_category),
+                                               prompt_category=prompt_category, custom_prompt=custom_prompt),
                     timeout=timeout,
                 )
                 logger.info(f"✅ [Orchestrator] 원고 생성 완료 ({attempt}회차)")
@@ -415,6 +415,8 @@ class WorkflowOrchestrator:
         post_purpose: str = None,
         promo_type: str = None,
         distribution_mode: str = None,
+        prompt_category: str = None,   # 관리자 프롬프트 카테고리(예: 'blog_daily' 매일 자동배포)
+        custom_prompt: str = None,     # 잡 payload로 주입된 프롬프트 원문(에이전트 로컬 파일 없이 적용)
         post_mode: str = "ai_generate",
         manual_title: str = None,
         manual_content: str = None,
@@ -514,7 +516,7 @@ class WorkflowOrchestrator:
                 blog_content = await self._generate_content_with_retry(
                     keyword, ai_provider=ai_provider, reference_data=reference_data,
                     post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode,
-                    source_data=source_data
+                    source_data=source_data, prompt_category=prompt_category, custom_prompt=custom_prompt
                 )
 
             # 마크다운 기호 제거 (모든 모드 공통) — 네이버 에디터의 굵게/취소선/헤딩/리스트 자동변환 방지

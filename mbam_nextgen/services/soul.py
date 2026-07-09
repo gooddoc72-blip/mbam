@@ -65,9 +65,9 @@ class SoulRewriter:
 
     async def rewrite_for_blog(self, raw_data: str, keyword: str, provider: str = None,
                                post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, api_key: str = None,
-                               prompt_category: str = None) -> str:
+                               prompt_category: str = None, custom_prompt: str = None) -> str:
         target_provider = (provider or self.provider).lower()
-        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode, prompt_category)
+        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode, prompt_category, custom_prompt)
 
         if target_provider == "gemini":
             if api_key and genai:
@@ -99,7 +99,7 @@ class SoulRewriter:
         # 설정 오류는 raise — 호출자(orchestrator)가 폴백 처리. string 반환 시 본문에 그대로 게시됨
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 없음 또는 라이브러리 미설치)")
 
-    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None, prompt_category=None):
+    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None, prompt_category=None, custom_prompt_text=None):
         # 1. 포스팅 목적 (Tone & Manner)
         if post_purpose == "intro":
             tone_guide = "객관적이고 전문적인 어조로 매장이나 상품의 장점을 소개하는 '홍보/소개' 글로 작성해주세요. (3인칭 관찰자 혹은 브랜드 에디터 시점)"
@@ -131,9 +131,12 @@ class SoulRewriter:
         # 4. Check Custom Prompts
         custom_prompt = ""
         ref_injection = ""
-        # prompts.json 은 mbam_nextgen/ 아래에 있음 (settings.py 저장 경로와 일치시켜야 커스텀 프롬프트가 적용됨)
+        # 주입된 커스텀 프롬프트(예: 클라우드가 매일 자동배포 잡 payload로 실어 보낸 blog_daily 프롬프트)가
+        # 있으면 로컬 prompts.json 대신 그것을 사용 — 에이전트 PC에 로컬 파일이 없어도 관리자 설정이 적용된다.
         prompts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts.json")
-        if os.path.exists(prompts_path):
+        if custom_prompt_text and str(custom_prompt_text).strip():
+            custom_prompt = str(custom_prompt_text)
+        elif os.path.exists(prompts_path):
             import json
             try:
                 with open(prompts_path, "r", encoding="utf-8") as f:

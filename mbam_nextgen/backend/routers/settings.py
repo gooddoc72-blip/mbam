@@ -258,7 +258,7 @@ async def get_blog_prompts():
         }
         
     # Ensure all keys exist
-    keys = ["product", "hospital", "app", "place", "service", "content_collect"]
+    keys = ["product", "hospital", "app", "place", "service", "content_collect", "blog_daily"]
     for k in keys:
         if k not in data:
             data[k] = {"claude_prompt": "", "gemini_prompt": ""}
