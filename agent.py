@@ -171,11 +171,25 @@ async def _handle_blog_daily_post(payload: dict) -> dict:
         ai_provider=payload.get("ai_provider", "claude"),
         distribution_mode=payload.get("distribution_mode", "normal"),
         generate_card_news=bool(payload.get("generate_card_news", True)),
+        prompt_category=payload.get("prompt_category"),
+        custom_prompt=payload.get("custom_prompt"),
         blog_id=payload.get("blog_addr") or None,
     )
     if not (result and result.get("success")):
         raise RuntimeError("발행 실패: " + str((result or {}).get("error", "원인 미상")))
     return {"success": True, "result_url": result.get("result_url", "")}
+
+
+async def _handle_place_news_publish(payload: dict) -> dict:
+    # 플레이스 소식 발행: 소유주 계정(기기 인증 프로필)으로 스마트플레이스 새소식 등록
+    from mbam_nextgen.services.smartplace_news import publish_smartplace_news
+    res = await publish_smartplace_news(
+        payload.get("naver_id", ""), payload.get("title", ""),
+        payload.get("content", ""), payload.get("clip_path") or None,
+    )
+    if not res.get("success"):
+        raise RuntimeError(res.get("error", "스마트플레이스 발행 실패"))
+    return res
 
 
 async def _handle_shopping_analyze(payload: dict) -> dict:
@@ -227,6 +241,7 @@ HANDLERS = {
     "place_fetch_mid": _handle_place_fetch_mid,
     "place_fetch_reviews": _handle_place_fetch_reviews,
     "blog_daily_post": _handle_blog_daily_post,
+    "place_news_publish": _handle_place_news_publish,
 }
 
 

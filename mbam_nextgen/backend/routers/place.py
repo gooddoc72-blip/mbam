@@ -1016,6 +1016,70 @@ def get_place_news_history():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class PlaceNewsPublishRequest(BaseModel):
+    history_id: str
+    naver_id: str          # 플레이스 소유주 네이버 계정 (기기 인증 완료 필요)
+
+
+def _parse_news_text(generated_text: str):
+    """저장된 generated_text에서 제목/본문 분리. 형식: '[테마]\\n제목: X\\n\\n본문'"""
+    text = (generated_text or "").strip()
+    lines = text.split("\n")
+    title, body_start = "", 0
+    for i, l in enumerate(lines[:4]):
+        m = re.match(r"\s*제목\s*[:：]\s*(.+)", l)
+        if m:
+            title = m.group(1).strip()
+            body_start = i + 1
+            break
+    body = "\n".join(lines[body_start:]).strip()
+    # 첫 줄의 [테마] 표기는 본문에서 제거
+    body = re.sub(r"^\[[^\]]+\]\s*", "", body).strip()
+    return title or "가게 새소식", body or text
+
+
+@router.post("/news/publish")
+async def publish_place_news(req: PlaceNewsPublishRequest,
+                             current_user: dict = Depends(get_current_user),
+                             db: Session = Depends(get_db)):
+    """플레이스 소식 이력을 스마트플레이스 '새소식'으로 발행 (에이전트 자동화).
+    [방법 B] 브라우저 자동화라 클라우드에선 불가 → 로컬 에이전트에 위임."""
+    from mbam_nextgen.backend.database import PlaceNewsHistory
+    from mbam_nextgen.backend import jobs as jobsvc
+    h = db.query(PlaceNewsHistory).filter(PlaceNewsHistory.id == req.history_id).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="발행할 이력을 찾을 수 없습니다.")
+    title, body = _parse_news_text(h.generated_text)
+    payload = {"naver_id": req.naver_id, "title": title, "content": body,
+               "clip_path": h.clip_path or None, "history_id": h.id}
+    if jobsvc.is_cloud_mode():
+        job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "place_news_publish", payload)
+        return {"mode": "agent", "job_id": job_id,
+                "message": "내 PC의 에이전트가 스마트플레이스 발행을 실행합니다."}
+    from mbam_nextgen.services.smartplace_news import publish_smartplace_news
+    res = await publish_smartplace_news(req.naver_id, title, body, h.clip_path or None)
+    if res.get("success"):
+        h.status = "published"
+        db.commit()
+    return res
+
+
+def _persist_place_news_publish(db, user_id, payload, result):
+    """[방법 B] 에이전트가 발행을 마치면 이력 상태를 published 로 갱신(cloud 영속화 훅)."""
+    if result and result.get("success") and (payload or {}).get("history_id"):
+        from mbam_nextgen.backend.database import PlaceNewsHistory
+        h = db.query(PlaceNewsHistory).filter(PlaceNewsHistory.id == payload["history_id"]).first()
+        if h:
+            h.status = "published"
+
+
+try:
+    from mbam_nextgen.backend import jobs as _jobs
+    _jobs.register_persister("place_news_publish", _persist_place_news_publish)
+except Exception as _e:
+    print(f"[place] place_news_publish persister 등록 실패: {_e}")
+
+
 @router.delete("/news/history/{history_id}")
 def delete_place_news_history(history_id: str):
     """소식 생성 이력 삭제 — 생성된 클립 파일도 함께 정리."""

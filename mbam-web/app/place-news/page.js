@@ -21,9 +21,104 @@ export default function PlaceNewsPage() {
     const [schedules, setSchedules] = useState([]);
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = usePersistentState("place-news:loading", false);
-    
+
+    // 발행 계정 (플레이스 소유주) — 계정관리(전체 풀)와 동일 저장소 사용
+    const [ownerAccounts, setOwnerAccounts] = useState([]);
+    const [ownerSelected, setOwnerSelected] = usePersistentState("place-news:ownerSelected", "");
+    const [registeredIds, setRegisteredIds] = useState([]);
+    const [newOwnerId, setNewOwnerId] = useState("");
+    const [newOwnerPw, setNewOwnerPw] = useState("");
+    const [publishing, setPublishing] = useState(false);
+
+    const loadOwnerAccounts = async () => {
+        try {
+            const [accRes, regRes] = await Promise.all([
+                fetchWithAuth("/api/cafe-nurture/accounts"),
+                fetchWithAuth("/api/auto_post/registered-accounts"),
+            ]);
+            if (accRes.ok) setOwnerAccounts(await accRes.json() || []);
+            if (regRes.ok) { const d = await regRes.json(); setRegisteredIds(d.registered || []); }
+        } catch (e) {}
+    };
+
+    const handleAddOwnerAccount = async () => {
+        if (!newOwnerId || !newOwnerPw) return alert("아이디와 비밀번호를 입력하세요.");
+        try {
+            const res = await fetchWithAuth("/api/cafe-nurture/accounts", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ naver_id: newOwnerId, naver_pw: newOwnerPw }),
+            });
+            if (res.ok) { alert("계정이 등록되었습니다. (계정관리에도 반영) 이어서 '기기 인증'을 완료하세요."); setNewOwnerId(""); setNewOwnerPw(""); loadOwnerAccounts(); }
+            else { const d = await res.json().catch(() => ({})); alert("등록 실패: " + (d.detail || res.status)); }
+        } catch (e) { alert("서버 오류: " + e.message); }
+    };
+
+    const handleRegisterOwner = async (naverId) => {
+        if (!window.confirm(`'${naverId}' 기기 인증을 시작합니다.\n내 PC에서 브라우저가 열리면 로그인 + 2단계 인증을 완료해 주세요.`)) return;
+        try {
+            const res = await fetchWithAuth("/api/auto_post/register-account", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ naver_id: naverId, naver_pw: null }),
+            });
+            let data = await res.json();
+            if (data.mode === "agent" && data.job_id) {
+                alert("내 PC에서 브라우저가 열립니다. 로그인 완료까지 기다려 주세요...");
+                data = await resolveMaybeAgent(data, { tries: 120, intervalMs: 3000 });
+            }
+            if (data.success) { alert("✅ 기기 인증 완료!"); loadOwnerAccounts(); }
+            else alert(data.error || data.message || "인증 결과를 확인하세요.");
+        } catch (e) { alert("인증 실패/시간초과: " + e.message); loadOwnerAccounts(); }
+    };
+
+    // 소식 원고(고객 리뷰 기반)를 블로그 원고로 확장 생성 → 소유주 블로그에 바로 발행
+    const handlePublishBlog = async (h) => {
+        if (!ownerSelected) return alert("좌측에서 발행 계정을 먼저 선택(등록·인증)하세요.");
+        if (!window.confirm(`'${ownerSelected}' 블로그에 이 소식을 발행할까요?\n(고객 리뷰 기반으로 블로그용 원고를 새로 생성해 발행합니다)`)) return;
+        setPublishing(true);
+        try {
+            const kw = (h.place_name && h.place_name !== "수동생성") ? h.place_name : "가게 소식";
+            const source = `[고객 리뷰 기반 소식 원고 — 아래 후기·내용을 인용하며 방문을 유도하는 블로그 글로 확장 작성]\n${h.generated_text}`;
+            const payload = {
+                target_type: "blog", login_mode: "auto",
+                accounts: [{ id: ownerSelected, pw: "", checked: true }],
+                naver_id: ownerSelected, naver_pw: null,
+                post_mode: "ai_generate", target_keyword: kw,
+                source_data: source, post_purpose: "review", promo_type: "place",
+                distribution_mode: "normal", publish_mode: "instant",
+                generate_card_news: true, cafe_action_type: "post",
+            };
+            const res = await fetchWithAuth("/api/auto_post/", {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+            });
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 150, intervalMs: 4000 });
+            if (data.success !== false) alert("✅ 블로그 발행 작업이 완료되었습니다. 블로그에서 확인해 보세요.");
+            else alert("발행 실패: " + (data.error || "오류"));
+        } catch (e) { alert("발행 실패/시간초과: " + e.message); }
+        finally { setPublishing(false); }
+    };
+
+    // 스마트플레이스 '새소식'으로 발행 (에이전트 자동화)
+    const handlePublishPlace = async (h) => {
+        if (!ownerSelected) return alert("좌측에서 발행 계정을 먼저 선택(등록·인증)하세요.");
+        if (!window.confirm(`'${ownerSelected}' 계정으로 스마트플레이스 새소식에 발행할까요?\n(내 PC에서 브라우저가 열려 자동 등록됩니다)`)) return;
+        setPublishing(true);
+        try {
+            const res = await fetchWithAuth("/api/place/news/publish", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ history_id: h.id, naver_id: ownerSelected }),
+            });
+            let data = await res.json();
+            data = await resolveMaybeAgent(data, { tries: 150, intervalMs: 4000 });
+            if (data.success) { alert("✅ 스마트플레이스 새소식 발행 완료!"); fetchData(); }
+            else alert("발행 실패: " + (data.error || data.detail || "자동화 단계에서 막히면 열린 브라우저에서 직접 마무리해 주세요."));
+        } catch (e) { alert("발행 실패/시간초과: " + e.message); }
+        finally { setPublishing(false); }
+    };
+
     useEffect(() => {
         fetchData();
+        loadOwnerAccounts();
     }, []);
     
     const fetchData = async () => {
@@ -339,6 +434,39 @@ export default function PlaceNewsPage() {
                         </div>
                     )}
 
+                    {/* 발행 계정 (플레이스 소유주) — 계정관리 풀과 연동, 여기서 등록·기기인증·선택 */}
+                    <div style={{ background: "rgba(255, 255, 255, 0.7)", backdropFilter: "blur(10px)", padding: "1.5rem", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.5)" }}>
+                        <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#1e293b", marginBottom: "0.4rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <CheckCircle2 size={18} color="#8b5cf6" />
+                            발행 계정 (플레이스 소유주)
+                        </h3>
+                        <p style={{ margin: "0 0 0.8rem", fontSize: "0.8rem", color: "#64748b" }}>이 계정으로 블로그·스마트플레이스에 발행합니다. 등록하면 <b>계정관리</b>에도 함께 저장됩니다.</p>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.8rem" }}>
+                            {ownerAccounts.map(acc => {
+                                const reg = registeredIds.includes(acc.naver_id);
+                                const sel = ownerSelected === acc.naver_id;
+                                return (
+                                    <div key={acc.id} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                        <button onClick={() => setOwnerSelected(acc.naver_id)}
+                                            style={{ flex: 1, textAlign: "left", padding: "0.55rem 0.9rem", borderRadius: "8px", border: sel ? "2px solid #8b5cf6" : "1px solid #cbd5e1", background: sel ? "#f5f3ff" : "white", color: sel ? "#6d28d9" : "#334155", fontWeight: "bold", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {sel ? "✔ " : ""}{acc.naver_id}
+                                        </button>
+                                        <button onClick={() => handleRegisterOwner(acc.naver_id)}
+                                            style={{ padding: "0.5rem 0.7rem", borderRadius: "8px", border: reg ? "1px solid #86efac" : "1px solid #fcd34d", background: reg ? "#dcfce7" : "#fef3c7", color: reg ? "#166534" : "#b45309", fontWeight: "bold", fontSize: "0.8rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+                                            {reg ? "✅ 인증완료" : "🔐 기기 인증"}
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                            {ownerAccounts.length === 0 && <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>등록된 계정이 없습니다. 아래에서 추가하세요.</span>}
+                        </div>
+                        <div style={{ display: "flex", gap: "0.4rem" }}>
+                            <input type="text" placeholder="네이버 아이디" value={newOwnerId} onChange={e => setNewOwnerId(e.target.value)} style={{ flex: 1, minWidth: 0, padding: "0.55rem", border: "1px solid #cbd5e1", borderRadius: "8px" }} />
+                            <input type="password" placeholder="비밀번호" value={newOwnerPw} onChange={e => setNewOwnerPw(e.target.value)} style={{ flex: 1, minWidth: 0, padding: "0.55rem", border: "1px solid #cbd5e1", borderRadius: "8px" }} />
+                            <button onClick={handleAddOwnerAccount} style={{ padding: "0.55rem 0.9rem", background: "#8b5cf6", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", whiteSpace: "nowrap" }}>추가</button>
+                        </div>
+                    </div>
+
                     <div style={{ background: "rgba(255, 255, 255, 0.7)", backdropFilter: "blur(10px)", padding: "1.5rem", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.5)" }}>
                         <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#1e293b", marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
                             <Clock size={18} color="#10b981" />
@@ -427,21 +555,24 @@ export default function PlaceNewsPage() {
                                         <span style={{ fontSize: "0.8rem", color: "#64748b" }}>상태: {h.status === 'pending' ? '발행 대기중' : '발행 완료'}</span>
                                         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                                             <button
-                                                onClick={() => {
-                                                    // 생성된 소식 원고를 블로그 발행 화면으로 넘겨 바로 발행
-                                                    try {
-                                                        localStorage.setItem('autoWriteSourceData', h.generated_text || "");
-                                                    } catch (e) {}
-                                                    const kwMatch = (h.generated_text || "").match(/제목:\s*(.+)/);
-                                                    const kw = (h.place_name && h.place_name !== "수동생성" ? h.place_name : (kwMatch ? kwMatch[1].trim().slice(0, 20) : ""));
-                                                    window.location.href = `/blog-posting?keyword=${encodeURIComponent(kw)}`;
-                                                }}
+                                                onClick={() => handlePublishBlog(h)}
+                                                disabled={publishing}
                                                 style={{
-                                                    background: "#2563eb", color: "white", border: "none", padding: "0.5rem 1rem",
-                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: "pointer"
+                                                    background: publishing ? "#94a3b8" : "#2563eb", color: "white", border: "none", padding: "0.5rem 1rem",
+                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: publishing ? "wait" : "pointer"
                                                 }}
                                             >
-                                                📝 블로그로 발행
+                                                📝 블로그 발행
+                                            </button>
+                                            <button
+                                                onClick={() => handlePublishPlace(h)}
+                                                disabled={publishing}
+                                                style={{
+                                                    background: publishing ? "#94a3b8" : "#db2777", color: "white", border: "none", padding: "0.5rem 1rem",
+                                                    borderRadius: "6px", fontWeight: "bold", fontSize: "0.9rem", cursor: publishing ? "wait" : "pointer"
+                                                }}
+                                            >
+                                                📍 플레이스 발행
                                             </button>
                                             {h.clip_path && (
                                                 <button

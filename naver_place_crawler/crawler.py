@@ -508,9 +508,14 @@ class CrawlerEngine:
         return driver
 
     def _coupang_is_blocked(self):
-        """현재 페이지가 쿠팡(Akamai) 차단 상태인지 확인한다."""
+        """쿠팡 차단(Akamai) 여부를 확인한다."""
         try:
-            return "Access Denied" in self.driver.title or "edgesuite" in self.driver.page_source
+            title = self.driver.title
+            source = self.driver.page_source
+            return ("Access Denied" in title or 
+                    "사용권한이 없습니다" in title or 
+                    "사용권한이 없습니다" in source or
+                    "edgesuite" in source)
         except Exception:
             return False
 
@@ -518,22 +523,42 @@ class CrawlerEngine:
         """홈에서 검색창에 사람처럼 타이핑해 검색결과 1페이지로 진입한다. 성공 시 True."""
         import random
         from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support import expected_conditions as EC
+        
         try:
             self.driver.get("https://www.coupang.com/")
             time.sleep(random.uniform(3.5, 5.5))  # 검색창 로딩 여유
-            search_box = wait.until(EC.element_to_be_clickable((By.ID, "headerSearchKeyword")))
-            search_box.click()
+            
+            # Access Denied 인지 확인
+            if self._coupang_is_blocked():
+                self.log("홈 접속 시 쿠팡 차단(Access Denied) 감지됨. 검색창 입력을 중단합니다.")
+                return False
+                
+            # 팝업 오버레이 우회를 위해 clickable 대신 presence 사용 + 대체 선택자 추가
+            search_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#headerSearchKeyword, input[name='q'], input[type='search']")))
+            self.driver.execute_script("arguments[0].click();", search_box)
             time.sleep(random.uniform(0.3, 0.7))
+            
             search_box.clear()
+            self.driver.execute_script("arguments[0].value = '';", search_box)
+            
             for char in keyword:
                 search_box.send_keys(char)
                 time.sleep(random.uniform(0.08, 0.25))
             time.sleep(random.uniform(0.4, 0.9))
+            
             search_box.send_keys(Keys.ENTER)
             time.sleep(random.uniform(2.5, 4.0))
+            
+            # 검색(엔터) 직후 차단 페이지(Access Denied)로 넘어갔는지 확인
+            if self._coupang_is_blocked():
+                self.log("검색 실행 직후 쿠팡 차단(Access Denied) 감지됨. 진행을 중단합니다.")
+                return False
+                
             return True
         except Exception as e:
-            self.log(f"검색창 입력 실패: {e}")
+            self.log(f"검색창 입력 실패: {type(e).__name__}")
             return False
 
     def _coupang_goto_page(self, keyword, page, wait):
@@ -559,35 +584,87 @@ class CrawlerEngine:
         # 페이지네이션이 하단에 있으므로 스크롤 후, href에 page=N 이 담긴 앵커를 클릭
         try:
             from urllib.parse import urlparse, parse_qs
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(random.uniform(1.0, 2.0))
-            # 정확 매칭: 버튼 텍스트가 페이지 번호이거나, href의 page 파라미터가 정확히 일치.
-            # (CSS href*='page=2' 는 page=20/21 에도 걸리는 substring 버그가 있어 쓰지 않는다)
+            from selenium.webdriver.common.by import By
             target = str(page)
             link = None
-            for a in self.driver.find_elements(By.CSS_SELECTOR, "a"):
-                try:
-                    if not a.is_displayed():
+            
+            # 자연스러운 스크롤(Smooth Scroll)로 지연 로딩(Lazy Load) 유도
+            # 단번에 맨 밑으로 내리면 IntersectionObserver가 트리거되지 않거나 봇으로 의심받음
+            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_scroll = 0
+            
+            for attempt in range(15): # 최대 15번 찔끔찔끔 스크롤
+                scroll_step = random.randint(600, 1000)
+                current_scroll += scroll_step
+                self.driver.execute_script(f"window.scrollTo(0, {current_scroll});")
+                time.sleep(random.uniform(0.5, 1.2))
+                
+                # 1순위: a 태그나 button 태그 중 텍스트가 정확히 일치하는 것 찾기
+                elements = self.driver.find_elements(By.CSS_SELECTOR, "a, button, .btn-page")
+                for el in elements:
+                    try:
+                        text = el.text.strip()
+                        if text == target:
+                            link = el
+                            break
+                        href = el.get_attribute("href") or ""
+                        if "page=" in href and parse_qs(urlparse(href).query).get("page", [None])[0] == target:
+                            link = el
+                            break
+                    except Exception:
                         continue
-                    if a.text.strip() == target:
-                        link = a
-                        break
-                    href = a.get_attribute("href") or ""
-                    if "page=" in href and parse_qs(urlparse(href).query).get("page", [None])[0] == target:
-                        link = a
-                        break
-                except Exception:
-                    continue
+                        
+                if link:
+                    break
+                
+                # 만약 이미 맨 밑까지 왔는데도 못 찾았다면 조금 더 기다려봄
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                if current_scroll >= new_height:
+                    time.sleep(1.0)
+                    # 맨 끝 도달 시 약간 위로 올렸다가 다시 내리는 것도 봇 회피에 좋음
+                    self.driver.execute_script("window.scrollBy(0, -500);")
+                    time.sleep(0.5)
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(1.0)
+                    
             if not link:
+                self.log(f"{page}페이지 링크를 찾을 수 없습니다. (스크롤 후에도 페이지네이션 미발견)")
                 return False
+                
             self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", link)
             time.sleep(random.uniform(0.5, 1.0))
-            link.click()
+            
+            try:
+                link.click()
+            except:
+                self.driver.execute_script("arguments[0].click();", link)
+                
             time.sleep(random.uniform(2.5, 4.0))
             return True
         except Exception as e:
             self.log(f"{page}페이지 이동(페이지네이션 클릭) 실패: {e}")
             return False
+
+    def _coupang_scroll_to_bottom(self):
+        """페이지 끝까지 부드럽게 스크롤하여 지연 로딩된 모든 상품을 불러옵니다."""
+        import random
+        current_scroll = 0
+        for _ in range(12):
+            scroll_step = random.randint(600, 1000)
+            current_scroll += scroll_step
+            self.driver.execute_script(f"window.scrollTo(0, {current_scroll});")
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            # 맨 밑에 도달했는지 확인
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            if current_scroll >= new_height:
+                time.sleep(1.0)
+                self.driver.execute_script("window.scrollBy(0, -500);")
+                time.sleep(0.5)
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1.0)
+                break
+        return True
 
     def _coupang_session_reset(self, use_ip_change, restart_browser=True):
         """차단 낙인이 찍힌 세션을 통째로 갈아준다: IP 변경 + 브라우저 재시작 + 홈 워밍업.
@@ -652,7 +729,17 @@ class CrawlerEngine:
             # 봇 차단 방지를 위한 랜덤 딜레이
             time.sleep(random.uniform(1.5, 3.5))
 
-            self.driver.get(prod["상품URL"])
+            # 현재(검색결과) 창의 핸들을 기억해둠
+            main_window = self.driver.current_window_handle
+            
+            # 새 탭으로 상세페이지 열기 (검색결과 페이지 유지)
+            self.driver.execute_script(f"window.open('{prod['상품URL']}', '_blank');")
+            
+            # 새로 열린 탭으로 포커스 이동
+            for handle in self.driver.window_handles:
+                if handle != main_window:
+                    self.driver.switch_to.window(handle)
+                    break
 
             # 페이지 로드 후 자연스러운 스크롤
             time.sleep(random.uniform(1.0, 2.0))
@@ -662,11 +749,27 @@ class CrawlerEngine:
             # Access Denied → 세션 리셋(IP+브라우저 재시작+워밍업) 후 같은 상품 1회 재시도
             if self._coupang_is_blocked():
                 self.log("  [경고] 쿠팡 접근 차단됨(Access Denied). IP 변경+브라우저 재시작 후 재시도합니다...")
+                try:
+                    self.driver.close()
+                    self.driver.switch_to.window(main_window)
+                except:
+                    pass
                 if not self._coupang_session_reset(use_ip_change) or self.driver is None:
                     return False  # 재시작 실패 — 저장하지 않고 재시도 큐로
-                self.driver.get(prod["상품URL"])
+                # 재시작했으므로 창이 1개뿐임. 다시 새 탭으로 시도
+                main_window = self.driver.current_window_handle
+                self.driver.execute_script(f"window.open('{prod['상품URL']}', '_blank');")
+                for handle in self.driver.window_handles:
+                    if handle != main_window:
+                        self.driver.switch_to.window(handle)
+                        break
                 time.sleep(random.uniform(2, 4))
                 if self._coupang_is_blocked():
+                    try:
+                        self.driver.close()
+                        self.driver.switch_to.window(main_window)
+                    except:
+                        pass
                     return False
 
             import bs4
@@ -703,6 +806,15 @@ class CrawlerEngine:
 
         except Exception as detail_e:
             self.log(f"상세 페이지 수집 오류: {detail_e}")
+            
+        finally:
+            # 상세 수집이 끝났거나 오류가 났으면 현재 탭(상세)을 닫고 원래 창(검색목록)으로 복귀
+            try:
+                if len(self.driver.window_handles) > 1:
+                    self.driver.close()
+                    self.driver.switch_to.window(main_window)
+            except Exception as e:
+                self.log(f"탭 닫기 오류(무시): {e}")
 
         prod["판매자명"] = seller_name
         prod["판매자 연락처"] = seller_contact
@@ -802,11 +914,21 @@ class CrawlerEngine:
                             # IP 차단 및 CAPTCHA 감지
                             current_url = self.driver.current_url
                             page_source = self.driver.page_source
-                            if "captcha" in current_url.lower() or "login" in current_url.lower() or "Access Denied" in page_source:
-                                self.log("⚠️ 쿠팡에 의해 IP 차단 또는 보안 절차(CAPTCHA)가 감지되었습니다. 작업을 중단하고 현재 시점을 저장합니다.")
-                                CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
-                                self.is_running = False
-                                return
+                            if "captcha" in current_url.lower() or "login" in current_url.lower() or "Access Denied" in page_source or "사용권한이 없습니다" in page_source:
+                                self.log("⚠️ 쿠팡에 의해 IP 차단 또는 보안 절차(CAPTCHA)가 감지되었습니다.")
+                                if use_ip_change:
+                                    self.log("IP를 변경하고 새 세션에서 현재 페이지를 다시 시도합니다...")
+                                    self._rotate_mobile_ip()
+                                    self._coupang_session_reset(use_ip_change=True, restart_browser=True)
+                                    continue # 같은 페이지 번호로 다시 루프 시도
+                                else:
+                                    self.log("IP 자동 변경 옵션이 꺼져 있어 작업을 중단하고 현재 시점을 저장합니다.")
+                                    CheckpointManager.save_checkpoint("coupang", keywords, idx, position=page, results=self.results)
+                                    self.is_running = False
+                                    return
+
+                            self.log(f"[{keyword}] {page}페이지의 모든 상품을 불러오기 위해 화면을 스크롤합니다...")
+                            self._coupang_scroll_to_bottom()
 
                             # 상품 목록 추출 (기존 DOM과 신규 Next.js DOM 모두 지원, BeautifulSoup 활용)
                             import bs4

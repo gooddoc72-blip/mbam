@@ -8,7 +8,7 @@ import platform
 
 # 인증 서버의 주소입니다. (실제 서버 도메인이나 IP로 변경해야 합니다)
 # 예: http://your-server.com/api/verify_hwid
-AUTH_SERVER_BASE = "http://127.0.0.1:8005"
+AUTH_SERVER_BASE = "http://18.209.162.250:8005"
 AUTH_SERVER_URL = f"{AUTH_SERVER_BASE}/verify"
 
 def get_hwid():
