@@ -82,10 +82,13 @@ def enqueue_due_blog_posts():
     today = now.strftime("%Y-%m-%d")
     db = SessionLocal()
     try:
+        # catch-up: '정확히 이 분'이 아니라 '예약 시각이 지났고 오늘 아직 안 돈' 예약을 적재.
+        # → Railway 재배포/재시작으로 예약된 1분을 놓쳐도, 다음 분 점검에서 그날 안에 자동 보충된다.
+        # ("HH:MM" 제로패딩 문자열이라 사전식 비교 == 시간 비교)
         due = (db.query(BlogSchedule)
-               .filter(BlogSchedule.is_active == 1, BlogSchedule.schedule_time == hhmm)
+               .filter(BlogSchedule.is_active == 1, BlogSchedule.schedule_time <= hhmm)
                .all())
-        due = [s for s in due if s.last_run_date != today]
+        due = [s for s in due if s.schedule_time and s.last_run_date != today]
         if not due:
             return
 

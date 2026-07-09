@@ -36,6 +36,13 @@ async def add_blog_schedule(
     if not acc_ids:
         raise HTTPException(status_code=400, detail="발행 계정을 1개 이상 선택하세요.")
 
+    # 등록 시각이 예약 시각을 이미 지났으면 오늘은 건너뛰고 내일부터 (catch-up이 즉시 발행하지 않도록)
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    _now_kst = _dt.now(_ZI("Asia/Seoul"))
+    _passed_today = (req.schedule_time or "") <= _now_kst.strftime("%H:%M")
+    _last_run = _now_kst.strftime("%Y-%m-%d") if _passed_today else None
+
     created = []
     for aid in acc_ids:
         # 소유권 검증: 본인 계정으로만 예약 가능 (IDOR 방지)
@@ -53,6 +60,7 @@ async def add_blog_schedule(
             ai_provider=req.ai_provider or "claude",
             distribution_mode=req.distribution_mode or "normal",
             generate_card_news=1 if req.generate_card_news else 0,
+            last_run_date=_last_run,
         )
         db.add(new_sch)
         db.commit()
