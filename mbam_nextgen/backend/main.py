@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI):
     scheduler_on = not jobsvc.is_cloud_mode()
     cloud_batch = None
     blog_daily = None
+    content_daily = None
     if scheduler_on:
         scheduler_service.start()
     else:
@@ -70,6 +71,10 @@ async def lifespan(app: FastAPI):
         from mbam_nextgen.services.blog_daily_scheduler import blog_daily_scheduler
         blog_daily = blog_daily_scheduler
         blog_daily.start()
+        # 글감 자동수집(ContentSchedule) — 정부/공공 데이터는 서버에서 직접 수집 가능.
+        from mbam_nextgen.services.content_daily_scheduler import content_daily_scheduler
+        content_daily = content_daily_scheduler
+        content_daily.start()
     yield
     if scheduler_on:
         scheduler_service.shutdown()
@@ -77,6 +82,8 @@ async def lifespan(app: FastAPI):
         cloud_batch.shutdown()
     if blog_daily:
         blog_daily.shutdown()
+    if content_daily:
+        content_daily.shutdown()
 
 app = FastAPI(
     title="SEO Analysis Platform API",
