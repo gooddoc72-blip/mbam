@@ -3,7 +3,7 @@ import { fetchWithAuth, pollAgentJob } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 
@@ -28,6 +28,7 @@ function BlogPostingContent() {
   const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
 
   const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
+  const accountsHydrated = useRef(false);  // 최초 마운트(로드 전)의 빈 기본행이 저장을 덮어쓰지 않도록
   const [intervalMins, setIntervalMins] = useState(5);
   const [useTethering, setUseTethering] = useState(false);
   const [registeredIds, setRegisteredIds] = useState([]);
@@ -250,6 +251,13 @@ function BlogPostingContent() {
   useEffect(() => {
     if (taskStatus === "completed") loadRegistered();
   }, [taskStatus]);
+
+  // 계정 목록이 바뀔 때마다 localStorage에 자동 저장 → 새로고침(F5)해도 계정 행/기기인증 상태 유지
+  // (첫 렌더의 빈 기본행은 건너뛰어, 마운트 시 로드된 저장값을 덮어쓰지 않게 함)
+  useEffect(() => {
+    if (!accountsHydrated.current) { accountsHydrated.current = true; return; }
+    try { localStorage.setItem("mbam_saved_accounts", JSON.stringify(accounts)); } catch (e) { /* 저장 실패 무시 */ }
+  }, [accounts]);
 
 
   const loadAccounts = () => {
