@@ -84,6 +84,7 @@ function BlogPostingContent() {
   // 2. Content Settings
   const [targetKeyword, setTargetKeyword] = useState("");
   const [hospitalDept, setHospitalDept] = useState("");  // 병원 블로그 전용 진료과목
+  const [hospitalMode, setHospitalMode] = useState("manual");  // 병원: 'auto'(자동발행) / 'manual'(생성 후 복붙)
   const [subKeywords, setSubKeywords] = useState([]);   // 서브(연관) 키워드 최대 5개
   const [subKwInput, setSubKwInput] = useState("");
   const [productUrl, setProductUrl] = useState("");
@@ -1059,7 +1060,18 @@ function BlogPostingContent() {
           )}
         </div>
 
-        {/* Publish Action */}
+        {/* 병원 블로그: 자동/수동 발행 선택 */}
+        {isHospital && (
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "1rem", padding: "1rem 1.5rem", background: "white", border: "1px solid #cbd5e1", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: "bold", color: "#334155", marginRight: "0.5rem" }}>발행 방식</span>
+            <button type="button" onClick={() => setHospitalMode("auto")} style={{ padding: "0.6rem 1.4rem", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", background: hospitalMode === "auto" ? "#0f172a" : "#e2e8f0", color: hospitalMode === "auto" ? "white" : "#64748b" }}>자동</button>
+            <button type="button" onClick={() => setHospitalMode("manual")} style={{ padding: "0.6rem 1.4rem", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", background: hospitalMode === "manual" ? "#0f172a" : "#e2e8f0", color: hospitalMode === "manual" ? "white" : "#64748b" }}>수동</button>
+            <span style={{ fontSize: "0.85rem", color: "#94a3b8", marginLeft: "0.5rem" }}>{hospitalMode === "manual" ? "생성된 원고를 복사해 직접 블로그에 붙여넣습니다 (자동 발행 안 함)" : "네이버에 자동으로 발행합니다"}</span>
+          </div>
+        )}
+
+        {/* Publish Action — 병원 '수동' 모드에서는 자동 발행 UI 숨김 */}
+        {!(isHospital && hospitalMode === "manual") && (
         <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginTop: "1rem", padding: "1.5rem", background: "white", border: "1px solid #cbd5e1" }}>
           <select value={publishMode} onChange={e => setPublishMode(e.target.value)} style={{ padding: "0.8rem", border: "1px solid #0f172a", fontWeight: "bold", outline: "none" }}>
             <option value="instant">🚀 즉시 발행</option>
@@ -1094,6 +1106,7 @@ function BlogPostingContent() {
             </button>
           )}
         </div>
+        )}
       </div>
         
         {/* Right Generated Contents Review Section */}
