@@ -658,6 +658,7 @@ class WorkflowOrchestrator:
                     pass
 
             # 대시보드 '블로그 자동화' 작업내역 기록
+            result_url = ""
             try:
                 cur_url = page.url
                 result_url = cur_url if ("PostWriteForm" not in cur_url and "editor" not in cur_url) else ""
@@ -673,7 +674,9 @@ class WorkflowOrchestrator:
                 "keyword": keyword,
                 "ip": current_ip,
                 "publish_mode": publish_mode,
-                "success": publish_result
+                "success": publish_result,
+                "result_url": result_url,
+                "title": (blog_title or keyword or "").strip(),
             }
 
     # ═══════════════════════════════════════════════

@@ -342,20 +342,51 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
 async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     import asyncio
     user_id = get_user_id(current_user)
-    
+
     accounts_data = []
     for acc_id in req.account_ids:
         acc = db.query(NaverAccount).filter(NaverAccount.id == acc_id, NaverAccount.user_id == user_id).first()
         if acc:
-            accounts_data.append({"id": acc.naver_id, "pw": acc.naver_pw})
-            
+            # 비밀번호 복호화(암호화 저장 시). 에이전트로 payload 전달 시 평문이어야 로그인됨.
+            pw = acc.naver_pw or ""
+            try:
+                from mbam_nextgen.backend.cipher_utils import decrypt_val
+                if acc.naver_pw:
+                    pw = decrypt_val(acc.naver_pw)
+            except Exception:
+                pw = acc.naver_pw or ""
+            accounts_data.append({"id": acc.naver_id, "pw": pw})
+
     if not accounts_data:
         raise HTTPException(status_code=400, detail="선택된 계정이 없거나 권한이 없습니다.")
-        
+
     task_id = str(uuid.uuid4())
-    task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data))
-    auto_post_active_tasks[task_id] = task
-    
+
+    # 카페 댓글은 네이버 로그인·브라우저 자동화라 데이터센터 IP·무화면(클라우드)에선 불가.
+    # 클라우드 모드에선 로컬 에이전트(집 IP·화면)에 위임하고, 에이전트가 task_status_store 로 로그를 중계한다.
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        task_status_store[task_id] = {"status": "running", "logs": [
+            "[다중 타겟팅] 작업을 로컬 에이전트(집 PC)에 전달했습니다.",
+            "에이전트가 실행을 시작하면 진행 로그가 여기에 표시됩니다. (에이전트가 켜져 있어야 합니다)",
+        ]}
+        payload = {
+            "task_id": task_id,
+            "accounts_data": accounts_data,
+            "urls": req.urls,
+            "keyword": req.keyword,
+            "ai_provider": req.ai_provider,
+            "delay_min": req.delay_min,
+            "delay_max": req.delay_max,
+            "use_tethering": req.use_tethering,
+            "comment_content": req.comment_content,
+            "do_like": req.do_like,
+        }
+        jobsvc.enqueue_job(db, user_id, "cafe_targeted_comment", payload, priority=5)
+    else:
+        task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data))
+        auto_post_active_tasks[task_id] = task
+
     return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다."}
 
 @router.post("/cancel/{task_id}")

@@ -23,7 +23,8 @@ export default function AdminDashboard() {
     place: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     service: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     content_collect: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
-    blog_daily: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
+    blog_daily: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    blogspot: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
   });
   const [activePromptCategory, setActivePromptCategory] = useState("product");
 
@@ -34,7 +35,8 @@ export default function AdminDashboard() {
     { id: "place", name: "맛집 후기 및 리뷰블로그" },
     { id: "service", name: "서비스업종 리뷰 및 후기 블로그" },
     { id: "content_collect", name: "📰 글감수집 원고" },
-    { id: "blog_daily", name: "🗓️ 블로그 자동배포" }
+    { id: "blog_daily", name: "🗓️ 블로그 자동배포" },
+    { id: "blogspot", name: "🅑 블로그스팟 자동배포(HTML)" }
   ];
   const [apiSaving, setApiSaving] = useState(false);
   const [apiMessage, setApiMessage] = useState(null);

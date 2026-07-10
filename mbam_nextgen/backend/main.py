@@ -40,6 +40,25 @@ try:
 except Exception as e:
     print(f"[Warning] Failed to connect to database during startup: {e}")
 
+# 기존 테이블 컬럼 추가(경량 마이그레이션) — create_all 은 신규 테이블만 만들고 컬럼은 안 붙임.
+# 각 ALTER 를 독립 트랜잭션(engine.begin)으로 실행 → 이미 있으면(중복 컬럼) 예외 무시.
+# VARCHAR 는 Postgres/SQLite 공통 문법이라 두 엔진 모두 동작.
+try:
+    from sqlalchemy import text as _sql_text
+    _column_migrations = [
+        "ALTER TABLE blog_schedules ADD COLUMN last_run_url VARCHAR",
+        "ALTER TABLE blog_schedules ADD COLUMN last_run_title VARCHAR",
+        "ALTER TABLE cafe_schedules ADD COLUMN last_run_date VARCHAR",
+    ]
+    for _mig in _column_migrations:
+        try:
+            with engine.begin() as _conn:
+                _conn.execute(_sql_text(_mig))
+        except Exception:
+            pass  # 컬럼이 이미 존재하면 무시
+except Exception as e:
+    print(f"[Warning] Column migration skipped: {e}")
+
 from contextlib import asynccontextmanager
 from mbam_nextgen.services.scheduler_service import scheduler_service
 
@@ -59,6 +78,8 @@ async def lifespan(app: FastAPI):
     cloud_batch = None
     blog_daily = None
     content_daily = None
+    blogspot_daily = None
+    cafe_daily = None
     if scheduler_on:
         scheduler_service.start()
     else:
@@ -75,6 +96,14 @@ async def lifespan(app: FastAPI):
         from mbam_nextgen.services.content_daily_scheduler import content_daily_scheduler
         content_daily = content_daily_scheduler
         content_daily.start()
+        # 블로그스팟 매일 자동발행 — Blogger API 라 클라우드에서 직접 발행(에이전트 불필요).
+        from mbam_nextgen.services.blogspot_daily_scheduler import blogspot_daily_scheduler
+        blogspot_daily = blogspot_daily_scheduler
+        blogspot_daily.start()
+        # 카페 예약 육성 — 네이버 스크래핑이라 클라우드는 잡 적재만, 실제 실행은 로컬 에이전트.
+        from mbam_nextgen.services.cafe_daily_scheduler import cafe_daily_scheduler
+        cafe_daily = cafe_daily_scheduler
+        cafe_daily.start()
     yield
     if scheduler_on:
         scheduler_service.shutdown()
@@ -84,6 +113,10 @@ async def lifespan(app: FastAPI):
         blog_daily.shutdown()
     if content_daily:
         content_daily.shutdown()
+    if blogspot_daily:
+        blogspot_daily.shutdown()
+    if cafe_daily:
+        cafe_daily.shutdown()
 
 app = FastAPI(
     title="SEO Analysis Platform API",

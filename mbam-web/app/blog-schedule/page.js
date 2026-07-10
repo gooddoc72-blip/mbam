@@ -12,6 +12,11 @@ export default function BlogSchedulePage() {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // 플랫폼: 네이버(스크래핑·에이전트) / 블로그스팟(Blogger API·클라우드 직접발행)
+  const [platform, setPlatform] = useState("naver");
+  const [bsAccounts, setBsAccounts] = useState([]);   // 블로그스팟 계정
+  const [bsSchedules, setBsSchedules] = useState([]); // 블로그스팟 예약
+
   // form state
   const [accountId, setAccountId] = useState("");        // (레거시) 예약 포스팅 서브탭에서 사용
   const [selectedAccIds, setSelectedAccIds] = useState(() => new Set());  // 매일 자동발행: 다중 계정
@@ -45,16 +50,24 @@ export default function BlogSchedulePage() {
 
   const loadAll = async () => {
     try {
-      const [accRes, catRes, schRes, resvRes] = await Promise.all([
+      const [accRes, catRes, schRes, resvRes, bsAccRes, bsSchRes] = await Promise.all([
         fetchWithAuth("/api/cafe-nurture/accounts"),
         fetchWithAuth("/api/content/categories"),
         fetchWithAuth("/api/blog-schedule/schedules"),
         fetchWithAuth("/api/blog-schedule/reservations"),
+        fetchWithAuth("/api/blogspot/accounts"),
+        fetchWithAuth("/api/blogspot/schedules"),
       ]);
       const accData = accRes.ok ? await accRes.json() : [];
       const catData = catRes.ok ? await catRes.json() : {};
       const schData = schRes.ok ? await schRes.json() : [];
       const resvData = resvRes.ok ? await resvRes.json() : [];
+      // 블로그스팟 계정: {success, accounts:[{id, account_name, blog_id}]} → 공용 칩 UI용으로 naver_id 별칭 부여
+      const bsAccJson = bsAccRes.ok ? await bsAccRes.json() : {};
+      const bsAccList = (bsAccJson.accounts || []).map(a => ({ id: a.id, naver_id: a.account_name, blog_addr: a.blog_id }));
+      const bsSchData = bsSchRes.ok ? await bsSchRes.json() : [];
+      setBsAccounts(bsAccList);
+      setBsSchedules(bsSchData || []);
       setAccounts(accData || []);
       setCategories(catData.categories || []);
       setSchedules(schData || []);
@@ -103,27 +116,27 @@ export default function BlogSchedulePage() {
   const toggleAcc = (id) => setSelectedAccIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleAdd = async () => {
+    const isBs = platform === "blogspot";
     const accIds = Array.from(selectedAccIds);
-    if (accIds.length === 0) { alert("발행할 네이버 계정을 1개 이상 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)"); return; }
+    if (accIds.length === 0) {
+      alert(isBs ? "발행할 블로그스팟 계정을 1개 이상 선택하세요." : "발행할 네이버 계정을 1개 이상 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)");
+      return;
+    }
     if (!category) { alert("글감 카테고리를 선택하세요. (글감 수집 메뉴에서 먼저 수집해야 글감이 생깁니다)"); return; }
     setLoading(true);
     try {
-      const res = await fetchWithAuth("/api/blog-schedule/schedules", {
+      const url = isBs ? "/api/blogspot/schedules" : "/api/blog-schedule/schedules";
+      const body = isBs
+        ? { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider }
+        : { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider, distribution_mode: distMode, generate_card_news: cardNews };
+      const res = await fetchWithAuth(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account_ids: accIds,
-          schedule_time: scheduleTime,
-          content_category: category,
-          post_count_per_day: Number(count) || 1,
-          ai_provider: aiProvider,
-          distribution_mode: distMode,
-          generate_card_news: cardNews,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`✅ ${accIds.length}개 계정에 매일 자동발행 예약이 등록되었습니다!\n매일 ${scheduleTime}에 '${category}' 글감으로 자동 발행됩니다.\n(계정마다 서로 다른 인기 글감이 배분됩니다)`);
+        alert(`✅ ${accIds.length}개 계정에 ${isBs ? "블로그스팟 " : ""}매일 자동발행 예약이 등록되었습니다!\n매일 ${scheduleTime}에 '${category}' 글감으로 자동 발행됩니다.`);
         loadAll();
       } else {
         alert("등록 실패: " + (data.detail || data.message || "알 수 없는 오류"));
@@ -137,8 +150,9 @@ export default function BlogSchedulePage() {
 
   const handleDelete = async (id) => {
     if (!confirm("이 예약을 삭제할까요?")) return;
+    const url = platform === "blogspot" ? `/api/blogspot/schedules/${id}` : `/api/blog-schedule/schedules/${id}`;
     try {
-      const res = await fetchWithAuth(`/api/blog-schedule/schedules/${id}`, { method: "DELETE" });
+      const res = await fetchWithAuth(url, { method: "DELETE" });
       if (res.ok) loadAll();
     } catch (e) {
       alert("삭제 중 오류: " + e.message);
@@ -147,6 +161,12 @@ export default function BlogSchedulePage() {
 
   const labelStyle = { display: "block", fontSize: "0.85rem", fontWeight: "bold", marginBottom: "0.4rem", color: "#334155" };
   const inputStyle = { width: "100%", padding: "0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" };
+
+  // 플랫폼에 따라 계정·예약 목록 소스 전환
+  const isBlogspot = platform === "blogspot";
+  const activeAccounts = isBlogspot ? bsAccounts : accounts;
+  const activeSchedules = isBlogspot ? bsSchedules : schedules;
+  const switchPlatform = (p) => { setPlatform(p); setSelectedAccIds(new Set()); };
 
   return (
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
@@ -181,29 +201,43 @@ export default function BlogSchedulePage() {
 
           {subTab === "daily" && (
           <>
+          {/* 플랫폼 선택: 네이버 / 블로그스팟 */}
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {[["naver", "N 네이버 블로그"], ["blogspot", "🅑 블로그스팟"]].map(([k, label]) => (
+              <button key={k} onClick={() => switchPlatform(k)} style={{ padding: "0.55rem 1.1rem", borderRadius: "8px", border: platform === k ? "2px solid #16a34a" : "1px solid #cbd5e1", background: platform === k ? "#f0fdf4" : "white", color: platform === k ? "#15803d" : "#475569", fontWeight: "bold", cursor: "pointer", fontSize: "0.9rem" }}>{label}</button>
+            ))}
+          </div>
+
           <p style={{ color: "#64748b", margin: 0 }}>
             글감 수집 카테고리에서 매일 같은 시각에 글감을 자동으로 뽑아 블로그에 발행합니다.
             매일 다른 글감이 순서대로 사용되며, 하루 1회만 발행됩니다.
           </p>
 
-          {/* 안내 박스 */}
-          <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#92400e" }}>
-            ⚠️ 예약 시각에 발행되려면 <b>백엔드 서버(8000)가 켜져 있어야</b> 합니다. PC를 껐다 켜면 시작하기.bat으로 서버를 다시 띄워주세요.
-            또한 해당 계정은 <b>계정관리에서 기기 인증(1회 수동 로그인)</b>이 되어 있어야 자동 로그인됩니다.
-          </div>
+          {/* 안내 박스 — 플랫폼별 */}
+          {isBlogspot ? (
+            <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#1e40af" }}>
+              ℹ️ 블로그스팟은 Blogger API로 <b>클라우드에서 자동 발행</b>됩니다(PC·에이전트 불필요). 계정은 <b>블로그스팟 메뉴</b>에서 먼저 등록하세요.
+              원고 스타일은 <b>관리자 → 프롬프트 → 블로그스팟 자동배포(HTML)</b> 탭에서 설정합니다.
+            </div>
+          ) : (
+            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#92400e" }}>
+              ⚠️ 예약 시각에 발행되려면 <b>백엔드 서버(8000)가 켜져 있어야</b> 합니다. PC를 껐다 켜면 시작하기.bat으로 서버를 다시 띄워주세요.
+              또한 해당 계정은 <b>계정관리에서 기기 인증(1회 수동 로그인)</b>이 되어 있어야 자동 로그인됩니다.
+            </div>
+          )}
 
           {/* 등록 폼 */}
           <div style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "1.5rem" }}>
             <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1.2rem" }}>새 예약 추가</h2>
             <div style={{ marginBottom: "1.1rem" }}>
               <label style={labelStyle}>발행 계정 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(여러 개 선택 가능 · 계정마다 다른 인기 글감으로 발행)</span></label>
-              {accounts.length === 0 ? (
+              {activeAccounts.length === 0 ? (
                 <div style={{ padding: "0.9rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "6px", color: "#94a3b8", fontSize: "0.88rem" }}>
-                  등록된 네이버 계정이 없습니다. 계정관리에서 기기 인증 후 이용하세요.
+                  {isBlogspot ? "등록된 블로그스팟 계정이 없습니다. 블로그스팟 메뉴에서 먼저 등록하세요." : "등록된 네이버 계정이 없습니다. 계정관리에서 기기 인증 후 이용하세요."}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                  {accounts.map((a) => {
+                  {activeAccounts.map((a) => {
                     const on = selectedAccIds.has(a.id);
                     return (
                       <button key={a.id} type="button" onClick={() => toggleAcc(a.id)}
@@ -242,6 +276,7 @@ export default function BlogSchedulePage() {
                   <option value="openai">OpenAI</option>
                 </select>
               </div>
+              {!isBlogspot && (
               <div>
                 <label style={labelStyle}>배포 방식</label>
                 <select value={distMode} onChange={(e) => setDistMode(e.target.value)} style={inputStyle}>
@@ -249,11 +284,14 @@ export default function BlogSchedulePage() {
                   <option value="quick">막배포 (1500자 이내)</option>
                 </select>
               </div>
+              )}
             </div>
+            {!isBlogspot && (
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "1rem", cursor: "pointer", fontSize: "0.9rem", color: cardNews ? "#2563eb" : "#64748b" }}>
               <input type="checkbox" checked={cardNews} onChange={(e) => setCardNews(e.target.checked)} style={{ width: 18, height: 18 }} />
               🎨 첨부 이미지가 없을 때 AI 카드뉴스 이미지 5장 자동 생성 (글 제목·소제목 기반)
             </label>
+            )}
             <button
               onClick={handleAdd}
               disabled={loading}
@@ -329,14 +367,14 @@ export default function BlogSchedulePage() {
         <div style={{ flex: "1 1 340px", minWidth: 0, background: "white", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "1.5rem", alignSelf: "stretch" }}>
           {subTab === "daily" ? (
           <>
-            <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1rem" }}>등록된 예약 ({schedules.length})</h2>
-            {schedules.length === 0 ? (
+            <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1rem" }}>등록된 예약 ({activeSchedules.length}) {isBlogspot ? "· 블로그스팟" : "· 네이버"}</h2>
+            {activeSchedules.length === 0 ? (
               <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "8px", padding: "2rem", textAlign: "center", color: "#94a3b8" }}>
                 아직 등록된 예약이 없습니다. 왼쪽에서 첫 예약을 추가해 보세요.
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
-                {schedules.map((s) => (
+                {activeSchedules.map((s) => (
                   <div key={s.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "1rem 1.2rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.3rem" }}>
@@ -346,6 +384,13 @@ export default function BlogSchedulePage() {
                         카테고리: <b>{s.content_category || "—"}</b> · 1일 {s.post_count_per_day}개 · {s.ai_provider} · {s.distribution_mode === "quick" ? "막배포" : "일반배포"} · {s.generate_card_news ? "🎨 카드뉴스 ON" : "카드뉴스 OFF"}
                         {s.last_run_date ? <span style={{ marginLeft: "0.6rem", color: "#16a34a" }}>최근 발행: {s.last_run_date}</span> : <span style={{ marginLeft: "0.6rem", color: "#f59e0b" }}>아직 발행 전</span>}
                       </div>
+                      {s.last_run_url && (
+                        <div style={{ fontSize: "0.85rem", marginTop: "0.4rem" }}>
+                          📄 <a href={s.last_run_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: "bold", textDecoration: "none" }}>
+                            {s.last_run_title || "발행된 글 보기"}
+                          </a>
+                        </div>
+                      )}
                     </div>
                     <button
                       onClick={() => handleDelete(s.id)}

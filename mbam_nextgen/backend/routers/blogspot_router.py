@@ -2,10 +2,12 @@ import httpx
 import os
 import json
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
-from mbam_nextgen.backend.database import get_db, BlogspotAccount, BlogspotPostHistory, BlogspotKeywordTracker
+from mbam_nextgen.backend.database import get_db, BlogspotAccount, BlogspotPostHistory, BlogspotKeywordTracker, BlogspotSchedule
+from mbam_nextgen.backend.auth import get_current_user
 
 router = APIRouter(
     prefix="/api/blogspot",
@@ -25,6 +27,7 @@ class AutoPostRequest(BaseModel):
     keyword: str
     ai_provider: str = "gemini" # "gemini" or "claude"
     generate_image: bool = True
+    source_data: Optional[str] = None  # 글감(선택) — 비우면 키워드만으로 작성
 
 @router.get("/accounts")
 def get_accounts(db: Session = Depends(get_db)):
@@ -93,47 +96,31 @@ async def generate_article(keyword: str, provider: str) -> str:
 async def auto_post(req: AutoPostRequest, db: Session = Depends(get_db)):
     acc = db.query(BlogspotAccount).filter(BlogspotAccount.id == req.account_id).first()
     if not acc: raise HTTPException(status_code=404, detail="Account not found")
-    
-    # 1. AI 글 생성
-    content = await generate_article(req.keyword, req.ai_provider)
-    
-    # 2. 대표 이미지 생성 (Placeholder for DALL-E)
+
+    from mbam_nextgen.services.blogspot_service import generate_blogspot_article, publish_to_blogger
+
+    # 1. 관리자 'blogspot' 프롬프트 + 글감으로 HTML 원고 생성 (제목 자동 추출)
+    article = await generate_blogspot_article(req.keyword, req.source_data or "", req.ai_provider)
+    title, content = article["title"], article["html"]
+
+    # 2. 대표 이미지(선택) — 본문 맨 위에 삽입
     if req.generate_image:
         image_html = f'<div style="text-align:center;"><img src="https://source.unsplash.com/800x400/?{req.keyword}" alt="{req.keyword}"></div><br/>'
         content = image_html + content
-        
-    title = f"{req.keyword} 완벽 가이드 및 총정리"
-    
-    # 3. Blogger API 포스팅
-    headers = {"Authorization": f"Bearer {acc.access_token}", "Content-Type": "application/json"}
-    payload = {
-        "kind": "blogger#post",
-        "blog": {"id": acc.blog_id},
-        "title": title,
-        "content": content
-    }
-    
-    async with httpx.AsyncClient() as client:
-        res = await client.post(f"https://www.googleapis.com/blogger/v3/blogs/{acc.blog_id}/posts/", headers=headers, json=payload)
-        post_data = res.json()
-        
-    status_str = "success" if res.status_code == 200 else "failed"
-    post_url = post_data.get("url", "")
-    
+
+    # 3. Blogger API 발행 (토큰 자동 갱신)
+    result = await publish_to_blogger(acc, title, content)
+
     history = BlogspotPostHistory(
-        account_id=acc.id,
-        keyword=req.keyword,
-        title=title,
-        post_url=post_url,
-        status=status_str
+        account_id=acc.id, keyword=req.keyword, title=title,
+        post_url=result.get("url", ""), status="success" if result.get("success") else "failed",
     )
     db.add(history)
     db.commit()
-    
-    if res.status_code != 200:
-        return {"success": False, "error": post_data}
-        
-    return {"success": True, "post_url": post_url}
+
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error")}
+    return {"success": True, "post_url": result.get("url", "")}
 
 class TrackKeywordRequest(BaseModel):
     account_id: str
@@ -173,3 +160,79 @@ def add_tracked_keyword(req: TrackKeywordRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(tracker)
     return {"success": True, "id": tracker.id}
+
+
+# ===================== 매일 자동발행 예약 (Blogger API · 클라우드 직접 발행) =====================
+class BlogspotScheduleCreate(BaseModel):
+    account_ids: Optional[list] = None
+    account_id: Optional[str] = None
+    schedule_time: str                       # "HH:MM"
+    content_category: Optional[str] = None
+    post_count_per_day: Optional[int] = 1
+    ai_provider: Optional[str] = "gemini"
+
+
+@router.post("/schedules", summary="블로그스팟 매일 자동발행 예약 추가")
+def add_blogspot_schedule(req: BlogspotScheduleCreate, db: Session = Depends(get_db),
+                          current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("sub")
+    acc_ids = [a for a in (req.account_ids or []) if a] or ([req.account_id] if req.account_id else [])
+    if not acc_ids:
+        raise HTTPException(status_code=400, detail="발행할 블로그스팟 계정을 1개 이상 선택하세요.")
+
+    # 등록 시각이 예약 시각을 이미 지났으면 오늘은 건너뛰고 내일부터 (catch-up 즉시 발행 방지)
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    _now_kst = _dt.now(_ZI("Asia/Seoul"))
+    _last_run = _now_kst.strftime("%Y-%m-%d") if (req.schedule_time or "") <= _now_kst.strftime("%H:%M") else None
+
+    created = []
+    for aid in acc_ids:
+        acc = db.query(BlogspotAccount).filter(BlogspotAccount.id == aid).first()
+        if not acc:
+            continue
+        sch = BlogspotSchedule(
+            user_id=user_id, account_id=aid, schedule_time=req.schedule_time,
+            content_category=req.content_category, post_count_per_day=req.post_count_per_day or 1,
+            ai_provider=req.ai_provider or "gemini", last_run_date=_last_run,
+        )
+        db.add(sch)
+        db.commit()
+        db.refresh(sch)
+        created.append(sch.id)
+    if not created:
+        raise HTTPException(status_code=404, detail="등록 가능한 계정을 찾을 수 없습니다.")
+    return {"message": f"블로그스팟 매일 발행 예약이 {len(created)}건 등록되었습니다.", "ids": created}
+
+
+@router.get("/schedules", summary="블로그스팟 매일 발행 예약 목록")
+def get_blogspot_schedules(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("sub")
+    rows = db.query(BlogspotSchedule).filter(BlogspotSchedule.user_id == user_id).all()
+    result = []
+    for s in rows:
+        acc = db.query(BlogspotAccount).filter(BlogspotAccount.id == s.account_id).first()
+        result.append({
+            "id": s.id, "account_id": s.account_id,
+            "account_name": acc.account_name if acc else "(삭제됨)",
+            "naver_id": acc.account_name if acc else "(삭제됨)",  # 프론트 공용 렌더 호환
+            "schedule_time": s.schedule_time, "content_category": s.content_category,
+            "post_count_per_day": s.post_count_per_day, "ai_provider": s.ai_provider,
+            "generate_card_news": 0, "distribution_mode": "normal",
+            "is_active": s.is_active, "last_run_date": s.last_run_date,
+            "last_run_url": s.last_run_url, "last_run_title": s.last_run_title,
+        })
+    return result
+
+
+@router.delete("/schedules/{schedule_id}", summary="블로그스팟 매일 발행 예약 삭제")
+def delete_blogspot_schedule(schedule_id: str, db: Session = Depends(get_db),
+                             current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("sub")
+    sch = db.query(BlogspotSchedule).filter(
+        BlogspotSchedule.id == schedule_id, BlogspotSchedule.user_id == user_id
+    ).first()
+    if sch:
+        db.delete(sch)
+        db.commit()
+    return {"message": "예약이 삭제되었습니다."}

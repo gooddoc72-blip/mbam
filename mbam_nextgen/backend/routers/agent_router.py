@@ -57,3 +57,22 @@ async def job_status(job_id: str, current_user: dict = Depends(get_current_user)
     if not info:
         return {"status": "not_found"}
     return info
+
+
+class TaskLog(BaseModel):
+    task_id: str
+    line: Optional[str] = None
+    status: Optional[str] = None   # "running" | "completed" | "failed"
+
+
+@router.post("/task-log", summary="로컬 에이전트: 실행 로그·상태를 클라우드로 중계")
+async def task_log(body: TaskLog, current_user: dict = Depends(get_current_user)):
+    """에이전트가 위임받은 작업(카페 댓글 등)의 진행 로그·최종 상태를 task_status_store 에 반영.
+    웹 프론트는 기존 /api/cafe-nurture/status/{task_id} 폴링으로 그대로 로그를 본다."""
+    from mbam_nextgen.backend.routers.auto_post import task_status_store
+    entry = task_status_store.setdefault(body.task_id, {"status": "running", "logs": []})
+    if body.line:
+        entry["logs"].append(body.line)
+    if body.status:
+        entry["status"] = body.status
+    return {"ok": True}

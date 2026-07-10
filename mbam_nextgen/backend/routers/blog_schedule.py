@@ -103,6 +103,8 @@ async def get_blog_schedules(
                 "generate_card_news": getattr(s, "generate_card_news", 1),
                 "is_active": s.is_active,
                 "last_run_date": s.last_run_date,
+                "last_run_url": getattr(s, "last_run_url", None),
+                "last_run_title": getattr(s, "last_run_title", None),
             })
     return result
 
@@ -209,3 +211,32 @@ async def delete_reservation(reservation_id: str, db: Session = Depends(get_db),
         except Exception:
             pass
     return {"message": "예약이 삭제되었습니다."}
+
+
+# ===================== 매일 자동발행 결과 영속화 =====================
+def _persist_blog_daily_post(db, user_id, payload, result):
+    """에이전트가 매일 자동발행을 완료하면, 발행된 글의 제목·URL 을 해당 예약(BlogSchedule)에 기록.
+    → 매일 자동 포스팅 목록에서 '최근 발행 글'을 링크로 확인 가능. (payload.schedule_id 로 매핑)
+    잡 하나당 글 1건 — 같은 예약에서 하루 여러 건이면 마지막 발행 글이 표시된다."""
+    sid = (payload or {}).get("schedule_id")
+    if not sid:
+        return
+    sch = db.query(BlogSchedule).filter(
+        BlogSchedule.id == sid, BlogSchedule.user_id == user_id
+    ).first()
+    if not sch:
+        return
+    url = (result or {}).get("result_url") or ""
+    title = (result or {}).get("title") or ""
+    if url:
+        sch.last_run_url = url
+    if title:
+        sch.last_run_title = title
+    # complete_job 이 이 세션을 commit 한다.
+
+
+try:
+    from mbam_nextgen.backend import jobs as _jobs
+    _jobs.register_persister("blog_daily_post", _persist_blog_daily_post)
+except Exception as _e:
+    print(f"[blog_schedule] persister 등록 실패: {_e}")

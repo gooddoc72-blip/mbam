@@ -132,6 +132,7 @@ def enqueue_due_blog_posts():
                     ti += 1
                     source = f"[작성 주제] {topic['title']}\n[글감]\n{topic.get('content', '')}"
                     payload = {
+                        "schedule_id": s.id,  # 발행 결과(제목·URL)를 이 예약에 되돌려 기록하기 위함
                         "naver_id": acc.naver_id,
                         "naver_pw": pw,
                         "blog_addr": acc.blog_addr or None,

@@ -452,6 +452,10 @@ class SchedulerService:
                     )
                     if result and result.get("success"):
                         published += 1
+                        # 최근 발행 글(제목·URL)을 예약에 기록 → 매일 자동 포스팅 목록에서 링크 확인
+                        if result.get("result_url"):
+                            sch.last_run_url = result.get("result_url")
+                        sch.last_run_title = result.get("title") or title
                         logger.info(f"  -> [{i+1}/{qty}] 발행 성공: {title}")
                     else:
                         logger.warning(f"  -> [{i+1}/{qty}] 발행 실패: {(result or {}).get('error')}")

@@ -118,6 +118,7 @@ class CafeSchedule(Base):
     do_like = Column(Integer, default=1)   # 좋아요 누르기
     visit_interval_min = Column(Integer, default=30)  # 방문 간 텀(분)
     is_active = Column(Integer, default=1)
+    last_run_date = Column(String, nullable=True)  # "YYYY-MM-DD" — 클라우드 스케줄러 하루 1회 중복 방지
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class BlogSchedule(Base):
@@ -136,6 +137,8 @@ class BlogSchedule(Base):
     is_active = Column(Integer, default=1)
     last_run_date = Column(String, nullable=True)  # "YYYY-MM-DD" — 하루 1회 중복 방지
     last_index = Column(Integer, default=0)         # 글감 회전 인덱스(매일 다른 글감)
+    last_run_url = Column(String, nullable=True)    # 최근 발행된 블로그 글 URL
+    last_run_title = Column(String, nullable=True)  # 최근 발행된 블로그 글 제목
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class BlogReservation(Base):
@@ -254,12 +257,32 @@ class BlogspotPostHistory(Base):
 
 class BlogspotKeywordTracker(Base):
     __tablename__ = "blogspot_keyword_tracker"
-    
+
     id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     account_id = Column(String, ForeignKey("blogspot_accounts.id", ondelete="CASCADE"))
     keyword = Column(String, index=True)
     current_rank = Column(Integer, default=0)
     last_checked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class BlogspotSchedule(Base):
+    """블로그스팟 매일 자동발행 예약: 글감수집 카테고리에서 매일 같은 시각에 글감을 뽑아
+    Blogger API 로 자동 포스팅. 네이버와 달리 데이터센터 IP로도 API 발행이 되므로
+    클라우드(Railway)에서 에이전트 없이 직접 발행한다."""
+    __tablename__ = "blogspot_schedules"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    account_id = Column(String, ForeignKey("blogspot_accounts.id", ondelete="CASCADE"))
+    schedule_time = Column(String)  # "HH:MM" — 매일 발행 시각
+    content_category = Column(String, nullable=True)  # 글감수집 카테고리(네이버와 공유)
+    post_count_per_day = Column(Integer, default=1)
+    ai_provider = Column(String, default="gemini")
+    is_active = Column(Integer, default=1)
+    last_run_date = Column(String, nullable=True)   # "YYYY-MM-DD" — 하루 1회 중복 방지
+    last_index = Column(Integer, default=0)          # 글감 회전 인덱스
+    last_run_url = Column(String, nullable=True)     # 최근 발행 글 URL
+    last_run_title = Column(String, nullable=True)   # 최근 발행 글 제목
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class CoupangTrackedItem(Base):

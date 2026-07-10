@@ -177,7 +177,11 @@ async def _handle_blog_daily_post(payload: dict) -> dict:
     )
     if not (result and result.get("success")):
         raise RuntimeError("발행 실패: " + str((result or {}).get("error", "원인 미상")))
-    return {"success": True, "result_url": result.get("result_url", "")}
+    return {
+        "success": True,
+        "result_url": result.get("result_url", ""),
+        "title": result.get("title", "") or payload.get("keyword", ""),
+    }
 
 
 async def _handle_place_news_publish(payload: dict) -> dict:
@@ -227,6 +231,85 @@ async def _handle_register_account(payload: dict) -> dict:
     return result
 
 
+async def _handle_cafe_targeted_comment(payload: dict, log=None) -> dict:
+    # 카페 다중 타겟 댓글(소통육성): 클라우드가 위임한 잡을 집 IP·화면 있는 PC에서 실행.
+    # log(callable)이 오면 진행 로그를 클라우드(task_status_store)로 실시간 중계한다.
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+
+    def _log(msg):
+        print(f"[cafe] {msg}")
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    result = await WorkflowOrchestrator().execute_targeted_multi_cafe_workflow(
+        accounts_data=payload.get("accounts_data", []),
+        target_urls=payload.get("urls", []),
+        keyword=payload.get("keyword", ""),
+        ai_provider=payload.get("ai_provider", "claude"),
+        delay_min=int(payload.get("delay_min", 30) or 30),
+        delay_max=int(payload.get("delay_max", 60) or 60),
+        use_tethering=bool(payload.get("use_tethering", False)),
+        comment_content=payload.get("comment_content", "") or "",
+        do_like=bool(payload.get("do_like", True)),
+        logger_func=_log,
+    )
+    return {"success": True, "result": result}
+
+
+async def _handle_cafe_nurture_run(payload: dict, log=None) -> dict:
+    # 카페 예약 육성: 클라우드가 예약 시각에 적재한 잡을 집 IP·화면 있는 PC에서 실행.
+    # action: boost(게시글 부스트) / visit(방문 육성) / post(콘텐츠 자동 포스팅)
+    import os
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+
+    def _log(msg):
+        print(f"[cafe-nurture] {msg}")
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    orch = WorkflowOrchestrator()
+    naver_id = payload.get("naver_id", "")
+    pw = payload.get("naver_pw", "")
+    visits = int(payload.get("visits", 1) or 1)
+    interval = int(payload.get("visit_interval_min", 30) or 30)
+    action = payload.get("action")
+
+    if action == "boost":
+        _log(f"게시글 부스트: {payload.get('post_url')} (방문 {visits}회/{interval}분)")
+        await orch.execute_cafe_boost(
+            account_id=naver_id, post_url=payload.get("post_url", ""),
+            do_view=bool(payload.get("do_view", True)), do_like=bool(payload.get("do_like", True)),
+            visits=visits, naver_pw=pw, visit_interval_min=interval,
+        )
+    elif action == "visit":
+        _log(f"방문 육성: {payload.get('post_url')} (방문 {visits}회/{interval}분)")
+        await orch.execute_cafe_boost(
+            account_id=naver_id, post_url=payload.get("post_url", ""),
+            do_view=True, do_like=False, visits=visits, naver_pw=pw, visit_interval_min=interval,
+        )
+    elif action == "post":
+        os.environ["NAVER_PW"] = pw  # execute_cafe_workflow 는 환경변수에서 비번을 읽음
+        items = payload.get("items", []) or []
+        _log(f"콘텐츠 자동 포스팅: {len(items)}건")
+        for i, item in enumerate(items):
+            _log(f"  -> [{i+1}/{len(items)}] {item.get('title', '')}")
+            await orch.execute_cafe_workflow(
+                account_id=naver_id, cafe_id=payload.get("cafe_url", ""),
+                board_name=payload.get("board_name", ""),
+                keyword=item.get("title", "정보 제공"), title=item.get("title", "정보 제공"),
+                content=item.get("content", ""), auto_submit=True, action_type="post",
+            )
+    else:
+        raise RuntimeError(f"알 수 없는 카페 작업 유형: {action}")
+    return {"success": True, "action": action}
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
     "auto_post": _handle_auto_post,
@@ -242,6 +325,8 @@ HANDLERS = {
     "place_fetch_reviews": _handle_place_fetch_reviews,
     "blog_daily_post": _handle_blog_daily_post,
     "place_news_publish": _handle_place_news_publish,
+    "cafe_targeted_comment": _handle_cafe_targeted_comment,
+    "cafe_nurture_run": _handle_cafe_nurture_run,
 }
 
 
@@ -299,23 +384,56 @@ class AgentClient:
                     print(f"[agent] 폴링 오류: {e}")
                     await asyncio.sleep(self.cfg["poll_sec"])
 
+    async def _post_task_log(self, client: httpx.AsyncClient, task_id: str, line: str = None, status: str = None):
+        """위임 작업의 진행 로그·상태를 클라우드 task_status_store 로 중계(프론트 실시간 표시)."""
+        try:
+            await client.post(f"{self.cfg['cloud_url']}/api/agent/task-log",
+                              json={"task_id": task_id, "line": line, "status": status},
+                              headers=self._headers(), timeout=15)
+        except Exception:
+            pass
+
     async def _process(self, client: httpx.AsyncClient, job: dict):
+        import inspect
         job_id = job.get("job_id")
         job_type = job.get("job_type")
         payload = job.get("payload") or {}
+        task_id = payload.get("task_id") if isinstance(payload, dict) else None
         print(f"[agent] 작업 수신: {job_type} ({job_id})")
+
+        # 진행 로그 실시간 중계용 콜백(동기) — task_id 가 있는 위임 작업만.
+        def live_log(line):
+            if not task_id:
+                return
+            try:
+                asyncio.create_task(self._post_task_log(client, task_id, line=str(line)))
+            except Exception:
+                pass
+
         handler = HANDLERS.get(job_type)
         body = {"job_id": job_id}
         if not handler:
             body.update({"status": "error", "error": f"미지원 작업 유형: {job_type}"})
         else:
             try:
-                result = await handler(payload)
+                # log 파라미터를 받는 핸들러(카페 댓글 등)에는 실시간 로그 콜백을 넘김
+                if "log" in inspect.signature(handler).parameters:
+                    result = await handler(payload, log=live_log)
+                else:
+                    result = await handler(payload)
                 body.update({"status": "done", "result": result})
                 print(f"[agent] 작업 완료: {job_type} ({job_id})")
             except Exception as e:
                 body.update({"status": "error", "error": str(e)})
                 print(f"[agent] 작업 실패: {job_type} ({job_id}) — {e}")
+
+        # 위임 작업이면 최종 상태를 task_status_store 로 반영(프론트 폴링 종료 신호)
+        if task_id:
+            if body.get("status") == "done":
+                await self._post_task_log(client, task_id, line="✅ 작업이 완료되었습니다.", status="completed")
+            else:
+                await self._post_task_log(client, task_id, line=f"❌ 오류: {body.get('error', '')}", status="failed")
+
         try:
             await client.post(f"{self.cfg['cloud_url']}/api/agent/job-result",
                               json=body, headers=self._headers(), timeout=30)
