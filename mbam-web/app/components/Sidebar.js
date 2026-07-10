@@ -38,7 +38,8 @@ const MENU_ITEMS = [
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
-            { name: "구글 블로그스팟", path: "/blogspot", icon: FileText }
+            { name: "구글 블로그스팟", path: "/blogspot", icon: FileText },
+            { name: "티스토리", path: "/blog-schedule?platform=tistory", icon: FileText }
         ]
     },
     {

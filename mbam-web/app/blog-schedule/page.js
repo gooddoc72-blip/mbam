@@ -123,7 +123,15 @@ export default function BlogSchedulePage() {
     try { const res = await fetchWithAuth(`/api/blog-schedule/reservations/${id}`, { method: "DELETE" }); if (res.ok) loadAll(); } catch (e) {}
   };
 
-  useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    loadAll();
+    // 사이드바에서 ?platform=tistory 등으로 들어오면 해당 플랫폼을 자동 선택
+    try {
+      const p = new URLSearchParams(window.location.search).get("platform");
+      if (["naver", "blogspot", "tistory"].includes(p)) { setSubTab("daily"); setPlatform(p); }
+    } catch (e) {}
+    /* eslint-disable-next-line */
+  }, []);
 
   const toggleAcc = (id) => setSelectedAccIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
