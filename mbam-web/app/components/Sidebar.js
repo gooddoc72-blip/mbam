@@ -48,6 +48,7 @@ const MENU_ITEMS = [
         submenus: [
             { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
             { name: "카페 포스팅", path: "/cafe-auto", icon: PenTool },
+            { name: "카페 통검 순위", path: "/cafe-rank", icon: TrendingUp },
             { name: "이미지 세탁소", path: "/cafe-image-wash", icon: Image }
         ]
     },
@@ -64,8 +65,7 @@ const MENU_ITEMS = [
         icon: TrendingUp,
         submenus: [
             { name: "네이버 쇼핑", path: "/shopping/rank", icon: TrendingUp },
-            { name: "쿠팡 순위", path: "/coupang/rank", icon: TrendingUp },
-            { name: "카페 통검 순위", path: "/cafe-rank", icon: TrendingUp }
+            { name: "쿠팡 순위", path: "/coupang/rank", icon: TrendingUp }
         ]
     },
     {
