@@ -113,6 +113,10 @@ export default function PostTab({ s }) {
     setImageFolder,
     useTethering,
     setUseTethering,
+    cafeCardNews,
+    setCafeCardNews,
+    cafeCardCount,
+    setCafeCardCount,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
@@ -314,6 +318,22 @@ export default function PostTab({ s }) {
                     </button>
                     {imageFolder && <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#16a34a" }}>✅ 첨부 이미지가 발행 글에도 함께 들어갑니다.</p>}
                     <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>키워드(위 '타겟 키워드') + 첨부 이미지를 AI가 보고 글감을 만든 뒤, 아래 'AI 원고 생성'으로 원고를 만듭니다.</p>
+                  </div>
+                )}
+                {actionType === "post" && (
+                  <div style={{ marginTop: "0.7rem", padding: "0.7rem 0.9rem", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.88rem", cursor: "pointer", color: cafeCardNews ? "#2563eb" : "#64748b", fontWeight: "bold" }}>
+                      <input type="checkbox" checked={cafeCardNews} onChange={e => setCafeCardNews(e.target.checked)} style={{ width: 16, height: 16 }} />
+                      🎨 첨부 이미지가 없을 때 AI 카드뉴스 자동 생성
+                    </label>
+                    {cafeCardNews && (
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.5rem", fontSize: "0.83rem", color: "#475569" }}>
+                        카드뉴스 장수
+                        <input type="number" min="1" max="5" value={cafeCardCount} onChange={e => setCafeCardCount(e.target.value)} style={{ width: "60px", padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "5px" }} />
+                        장 (본문 [이미지] 위치·소제목에 분산 배치)
+                      </div>
+                    )}
+                    {!cafeCardNews && <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#94a3b8" }}>* 끄면 첨부 이미지가 없을 때 이미지 없이 텍스트만 발행됩니다.</p>}
                   </div>
                 )}
                 {actionType === "post" && (

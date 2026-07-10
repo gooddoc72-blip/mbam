@@ -14,7 +14,7 @@ from typing import Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from mbam_nextgen.backend.database import SessionLocal, PlaceTracked, ShoppingTrackedItem, AgentJob
+from mbam_nextgen.backend.database import SessionLocal, PlaceTracked, ShoppingTrackedItem, AgentJob, CafeRankItem
 from mbam_nextgen.backend import jobs as jobsvc
 
 logger = logging.getLogger("CloudBatch")
@@ -83,7 +83,26 @@ def enqueue_daily_batch():
                     }, priority=9)
                     pend.add((it.keyword, it.mid))
                     n_shop += 1
-        logger.info(f"[CloudBatch] 일괄 적재 완료 — 플레이스 {n_place}건, 쇼핑 {n_shop}건")
+        # 3) 카페 순위: 유저별 추적목록 → cafe_rank_check 잡
+        n_cafe = 0
+        pend_cafe = set()
+        for j in (db.query(AgentJob)
+                  .filter(AgentJob.job_type == "cafe_rank_check", AgentJob.status.in_(("queued", "running"))).all()):
+            try:
+                p = json.loads(j.payload or "{}")
+                pend_cafe.add((p.get("keyword"), p.get("target_url")))
+            except Exception:
+                pass
+        for it in db.query(CafeRankItem).all():
+            if (it.keyword, it.target_url) in pend_cafe:
+                continue
+            jobsvc.enqueue_job(db, it.user_id, "cafe_rank_check", {
+                "keyword": it.keyword, "target_url": it.target_url, "tracked_id": it.id,
+            }, priority=9)
+            pend_cafe.add((it.keyword, it.target_url))
+            n_cafe += 1
+
+        logger.info(f"[CloudBatch] 일괄 적재 완료 — 플레이스 {n_place}건, 쇼핑 {n_shop}건, 카페순위 {n_cafe}건")
     except Exception as e:
         logger.error(f"[CloudBatch] 일괄 적재 실패: {e}")
     finally:

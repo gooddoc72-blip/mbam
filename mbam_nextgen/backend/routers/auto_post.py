@@ -121,6 +121,7 @@ class AutoPostRequest(BaseModel):
     # Automation / Content Collect Data
     source_data: Optional[str] = None
     generate_card_news: Optional[bool] = False
+    card_count: Optional[int] = 3   # 카드뉴스 자동 생성 장수(카페)
     generate_ai_images: Optional[bool] = False  # 나노바나나(Gemini) AI 이미지 자동 생성·삽입
     prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
     include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
@@ -302,7 +303,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 prompt_category=req.prompt_category,
                 include_source_link=req.include_source_link,
                 image_folder_path=req.image_folder_path,
-                use_tethering=req.use_tethering
+                use_tethering=req.use_tethering,
+                generate_card_news=bool(req.generate_card_news),
+                card_count=int(getattr(req, "card_count", 3) or 3),
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")

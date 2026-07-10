@@ -73,6 +73,8 @@ export function useCafeAuto() {
   const [imageFiles, setImageFiles] = useState([]); // 첨부 이미지(글감 생성용)
   const [imageFolder, setImageFolder] = useState(""); // 업로드된 이미지 폴더(발행 시 첨부)
   const [useTethering, setUseTethering] = useState(false); // USB 테더링 IP 우회
+  const [cafeCardNews, setCafeCardNews] = useState(true); // 첨부 이미지 없을 때 AI 카드뉴스 자동 생성
+  const [cafeCardCount, setCafeCardCount] = useState(3);  // 카드뉴스 장수
 
   // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
@@ -487,6 +489,7 @@ export function useCafeAuto() {
           post_mode: "manual_text", target_keyword: targetKeyword, title: m.title, content: m.content,
           publish_mode: "instant", cafe_url: m.cafe_url, board_name: m.board_name,
           cafe_action_type: "post", source_data: m.content, use_tethering: useTethering,
+          generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -532,7 +535,9 @@ export function useCafeAuto() {
           source_data: postContent, prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory),
           include_source_link: includeSourceLink,
           image_folder_path: imageFolder || null,  // 첨부 이미지 폴더(있으면 글에 첨부)
-          use_tethering: useTethering              // USB 테더링 IP 우회(계정 발행 전 IP 회전)
+          use_tethering: useTethering,             // USB 테더링 IP 우회(계정 발행 전 IP 회전)
+          generate_card_news: cafeCardNews,        // 첨부 이미지 없을 때 카드뉴스 자동 생성 여부
+          card_count: Number(cafeCardCount) || 3   // 카드뉴스 장수
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
@@ -820,6 +825,10 @@ export function useCafeAuto() {
     setImageFolder,
     useTethering,
     setUseTethering,
+    cafeCardNews,
+    setCafeCardNews,
+    cafeCardCount,
+    setCafeCardCount,
     showLibPicker,
     setShowLibPicker,
     accountDelay,

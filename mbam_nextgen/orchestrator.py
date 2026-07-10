@@ -1082,7 +1082,9 @@ class WorkflowOrchestrator:
         prompt_category: str = None,
         include_source_link: bool = False,
         image_folder_path: str = None,
-        use_tethering: bool = False
+        use_tethering: bool = False,
+        generate_card_news: bool = True,   # 첨부 이미지 없을 때 AI 카드뉴스 자동 생성 여부
+        card_count: int = 3                # 카드뉴스 장수
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -1199,20 +1201,23 @@ class WorkflowOrchestrator:
                                 if wimg:
                                     washed_images.append(wimg)
                         logger.info(f"[Orchestrator] 첨부 이미지 폴더에서 {len(washed_images)}장 사용")
+                    _n_cards = max(1, int(card_count or 3))
                     if washed_images:
                         pass
                     elif test_image:
                         washed_images.append(self.armor.wash_image(test_image, f"washed_cafe_{account_id}.jpg"))
-                    else:
-                        logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
+                    elif generate_card_news:
+                        logger.info(f"[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지({_n_cards}장)를 자동 생성합니다.")
                         card_title = keyword if (keyword and keyword.strip() and keyword.strip() != "테스트") else (title or "정보")
                         card_title = str(card_title).strip().lstrip("[").rstrip("]")[:30]
-                        for idx_c, gp in enumerate(await self.card_news.generate_cards(card_title, content=cafe_content, count=3)):
+                        for idx_c, gp in enumerate(await self.card_news.generate_cards(card_title, content=cafe_content, count=_n_cards)):
                             if not gp:
                                 continue
                             wimg = self.armor.wash_image(gp, f"washed_gen_cafe_{account_id}_{idx_c}.jpg")
                             if wimg:
                                 washed_images.append(wimg)
+                    else:
+                        logger.info("[Orchestrator] 카드뉴스 생성 꺼짐 — 이미지 없이 텍스트만 발행합니다.")
                     
                     # 5. 글쓰기 진입
                     await self.cafe.auto_enter_editor(page)

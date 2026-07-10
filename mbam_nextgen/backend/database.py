@@ -327,6 +327,31 @@ class TistoryPostHistory(Base):
     status = Column(String, default="success")
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class CafeRankItem(Base):
+    """카페 글 통합검색 순위 추적 대상: (키워드, 카페 글 URL) 조합.
+    실제 순위 수집은 로컬 에이전트(집 IP)가 네이버 검색을 스크래핑해 수행한다."""
+    __tablename__ = "cafe_rank_items"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    keyword = Column(String, index=True)
+    target_url = Column(String)                 # 추적할 카페 글 URL
+    name = Column(String, nullable=True)        # 표시용 별칭
+    latest_tongsearch_rank = Column(Integer, nullable=True)  # 통합검색 카페/VIEW 블록 내 순위(미노출=null)
+    latest_cafetab_rank = Column(Integer, nullable=True)     # 카페탭 전체 순위(미노출=null)
+    last_checked_date = Column(String, nullable=True)        # YYYY-MM-DD
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CafeRankHistory(Base):
+    __tablename__ = "cafe_rank_history"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tracked_id = Column(String, ForeignKey("cafe_rank_items.id", ondelete="CASCADE"), index=True)
+    date_str = Column(String, index=True)       # YYYY-MM-DD
+    tongsearch_rank = Column(Integer, nullable=True)
+    cafetab_rank = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CoupangTrackedItem(Base):
     __tablename__ = "coupang_tracked_items"
     

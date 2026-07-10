@@ -349,6 +349,19 @@ async def _handle_tistory_post(payload: dict, log=None) -> dict:
     return {"success": True, "result_url": result.get("result_url", ""), "title": result.get("title", "")}
 
 
+async def _handle_cafe_rank_check(payload: dict) -> dict:
+    # 카페 글 통합검색 순위 수집: 집 IP에서 네이버 검색 스크래핑.
+    # 결과는 클라우드의 persist_cafe_rank 훅이 CafeRankHistory 에 기록.
+    from mbam_nextgen.services.cafe_rank_service import find_cafe_rank
+    res = await find_cafe_rank(payload.get("keyword", ""), payload.get("target_url", ""))
+    return {
+        "success": True,
+        "tongsearch_rank": res.get("tongsearch_rank"),
+        "cafetab_rank": res.get("cafetab_rank"),
+        "found": res.get("found", False),
+    }
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
     "auto_post": _handle_auto_post,
@@ -368,6 +381,7 @@ HANDLERS = {
     "cafe_nurture_run": _handle_cafe_nurture_run,
     "tistory_register": _handle_tistory_register,
     "tistory_post": _handle_tistory_post,
+    "cafe_rank_check": _handle_cafe_rank_check,
 }
 
 
