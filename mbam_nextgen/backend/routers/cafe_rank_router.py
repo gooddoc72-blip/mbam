@@ -110,3 +110,36 @@ try:
     jobsvc.register_persister("cafe_rank_check", _persist_cafe_rank)
 except Exception as _e:
     print(f"[cafe_rank] persister 등록 실패: {_e}")
+
+
+# ─────────────── 카페 발행 → 순위추적 자동 등록 ───────────────
+def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str, name: str = None) -> bool:
+    """카페 글 발행 성공 시, (키워드, URL)을 순위추적에 자동 등록(중복이면 건너뜀)."""
+    keyword = (keyword or "").strip()
+    target_url = (target_url or "").strip()
+    if not user_id or not keyword or not target_url or "cafe.naver.com" not in target_url:
+        return False
+    exists = (db.query(CafeRankItem)
+              .filter(CafeRankItem.user_id == user_id, CafeRankItem.keyword == keyword,
+                      CafeRankItem.target_url == target_url).first())
+    if exists:
+        return False
+    db.add(CafeRankItem(user_id=user_id, keyword=keyword, target_url=target_url, name=(name or None)))
+    return True
+
+
+def _persist_auto_post(db, user_id, payload, result):
+    """에이전트 auto_post(카페) 완료 시, track_rank 이면 발행 글을 순위추적에 자동 등록(클라우드)."""
+    p = payload or {}
+    if p.get("target_type") != "cafe" or not p.get("track_rank"):
+        return
+    url = (result or {}).get("result_url") or ""
+    kw = p.get("target_keyword") or (result or {}).get("keyword") or ""
+    if url and kw:
+        register_cafe_rank_if_absent(db, user_id, kw, url)
+
+
+try:
+    jobsvc.register_persister("auto_post", _persist_auto_post)
+except Exception as _e:
+    print(f"[cafe_rank] auto_post persister 등록 실패: {_e}")

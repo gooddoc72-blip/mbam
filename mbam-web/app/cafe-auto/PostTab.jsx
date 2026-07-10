@@ -117,6 +117,8 @@ export default function PostTab({ s }) {
     setCafeCardNews,
     cafeCardCount,
     setCafeCardCount,
+    cafeTrackRank,
+    setCafeTrackRank,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
@@ -334,6 +336,11 @@ export default function PostTab({ s }) {
                       </div>
                     )}
                     {!cafeCardNews && <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#94a3b8" }}>* 끄면 첨부 이미지가 없을 때 이미지 없이 텍스트만 발행됩니다.</p>}
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", cursor: "pointer", color: cafeTrackRank ? "#16a34a" : "#64748b", fontWeight: "bold" }}>
+                      <input type="checkbox" checked={cafeTrackRank} onChange={e => setCafeTrackRank(e.target.checked)} style={{ width: 16, height: 16 }} />
+                      📈 발행 후 이 글을 카페 통검 순위 추적에 자동 등록
+                    </label>
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 발행 성공 시 (타겟 키워드 + 글 URL)이 '카페 통검 순위'에 등록돼 매일 자동 체크됩니다.</p>
                   </div>
                 )}
                 {actionType === "post" && (

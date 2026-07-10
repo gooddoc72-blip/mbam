@@ -155,7 +155,12 @@ async def _handle_auto_post(payload: dict) -> dict:
     if st.get("status") == "failed":
         logs = st.get("logs", [])
         raise RuntimeError("발행 실패: " + (" / ".join(str(l) for l in logs[-2:]) if logs else "원인 미상"))
-    return {"success": True, "logs": [str(l) for l in st.get("logs", [])[-6:]]}
+    out = {"success": True, "logs": [str(l) for l in st.get("logs", [])[-6:]]}
+    # 카페 발행 결과(URL·키워드) 전달 → 클라우드 persister(auto_post)가 순위추적 자동 등록에 사용
+    res = st.get("result") or {}
+    if isinstance(res, dict):
+        out.update({k: res[k] for k in ("result_url", "keyword") if res.get(k)})
+    return out
 
 
 async def _handle_blog_daily_post(payload: dict) -> dict:

@@ -122,6 +122,7 @@ class AutoPostRequest(BaseModel):
     source_data: Optional[str] = None
     generate_card_news: Optional[bool] = False
     card_count: Optional[int] = 3   # 카드뉴스 자동 생성 장수(카페)
+    track_rank: Optional[bool] = False  # 카페 발행 후 통검 순위 추적 자동 등록
     generate_ai_images: Optional[bool] = False  # 나노바나나(Gemini) AI 이미지 자동 생성·삽입
     prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
     include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
@@ -309,6 +310,18 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
+                # 발행 글 URL·키워드를 결과에 담아 반환 → 클라우드 persister(auto_post)가 순위추적 자동 등록
+                task_status_store[task_id]["result"] = {
+                    "result_url": result.get("result_url", ""),
+                    "keyword": req.target_keyword or "",
+                    "target_type": "cafe",
+                    "track_rank": bool(getattr(req, "track_rank", False)),
+                }
+                if getattr(req, "track_rank", False):
+                    if result.get("result_url"):
+                        log("📈 발행 글을 카페 통검 순위 추적에 등록합니다.")
+                    else:
+                        log("⚠️ 발행 글 URL을 확보하지 못해 순위추적 자동등록을 건너뜁니다(수동 등록 필요).")
             else:
                 log(f"⚠️ 카페 워크플로우 실패: {result.get('error')}")
 

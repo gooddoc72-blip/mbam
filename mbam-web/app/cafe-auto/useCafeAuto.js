@@ -75,6 +75,7 @@ export function useCafeAuto() {
   const [useTethering, setUseTethering] = useState(false); // USB 테더링 IP 우회
   const [cafeCardNews, setCafeCardNews] = useState(true); // 첨부 이미지 없을 때 AI 카드뉴스 자동 생성
   const [cafeCardCount, setCafeCardCount] = useState(3);  // 카드뉴스 장수
+  const [cafeTrackRank, setCafeTrackRank] = useState(true); // 발행 후 통검 순위 추적 자동 등록
 
   // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
@@ -537,7 +538,8 @@ export function useCafeAuto() {
           image_folder_path: imageFolder || null,  // 첨부 이미지 폴더(있으면 글에 첨부)
           use_tethering: useTethering,             // USB 테더링 IP 우회(계정 발행 전 IP 회전)
           generate_card_news: cafeCardNews,        // 첨부 이미지 없을 때 카드뉴스 자동 생성 여부
-          card_count: Number(cafeCardCount) || 3   // 카드뉴스 장수
+          card_count: Number(cafeCardCount) || 3,  // 카드뉴스 장수
+          track_rank: cafeTrackRank                // 발행 후 통검 순위 추적 자동 등록
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
@@ -829,6 +831,8 @@ export function useCafeAuto() {
     setCafeCardNews,
     cafeCardCount,
     setCafeCardCount,
+    cafeTrackRank,
+    setCafeTrackRank,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
