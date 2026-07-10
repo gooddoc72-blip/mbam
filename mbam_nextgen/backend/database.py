@@ -285,6 +285,48 @@ class BlogspotSchedule(Base):
     last_run_title = Column(String, nullable=True)   # 최근 발행 글 제목
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class TistoryAccount(Base):
+    """티스토리 계정 — API가 없어 브라우저 자동화(카카오 로그인)로 발행.
+    네이버처럼 영구 프로필(1회 수동 로그인=기기 인증)로 로그인 상태를 유지한다."""
+    __tablename__ = "tistory_accounts"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    kakao_id = Column(String, index=True)          # 카카오 로그인 아이디(이메일/전화)
+    kakao_pw = Column(String, nullable=True)       # 암호화 저장(수동 기기인증 쓰면 없어도 됨)
+    blog_name = Column(String)                     # 블로그 주소: xxx.tistory.com 의 xxx
+    status = Column(String, default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class TistorySchedule(Base):
+    """티스토리 매일 자동발행 예약. 실제 발행은 로컬 에이전트(집 IP·브라우저)가 수행."""
+    __tablename__ = "tistory_schedules"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    account_id = Column(String, ForeignKey("tistory_accounts.id", ondelete="CASCADE"))
+    schedule_time = Column(String)                 # "HH:MM"
+    content_category = Column(String, nullable=True)
+    post_count_per_day = Column(Integer, default=1)
+    ai_provider = Column(String, default="gemini")
+    is_active = Column(Integer, default=1)
+    last_run_date = Column(String, nullable=True)
+    last_index = Column(Integer, default=0)
+    last_run_url = Column(String, nullable=True)
+    last_run_title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class TistoryPostHistory(Base):
+    __tablename__ = "tistory_post_history"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    account_id = Column(String, ForeignKey("tistory_accounts.id", ondelete="CASCADE"))
+    keyword = Column(String)
+    title = Column(String)
+    post_url = Column(String)
+    status = Column(String, default="success")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CoupangTrackedItem(Base):
     __tablename__ = "coupang_tracked_items"
     

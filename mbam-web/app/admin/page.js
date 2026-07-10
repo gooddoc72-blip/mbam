@@ -24,7 +24,9 @@ export default function AdminDashboard() {
     service: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     content_collect: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     blog_daily: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
-    blogspot: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
+    blogspot: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    cafe: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    tistory: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
   });
   const [activePromptCategory, setActivePromptCategory] = useState("product");
 
@@ -36,7 +38,9 @@ export default function AdminDashboard() {
     { id: "service", name: "서비스업종 리뷰 및 후기 블로그" },
     { id: "content_collect", name: "📰 글감수집 원고" },
     { id: "blog_daily", name: "🗓️ 블로그 자동배포" },
-    { id: "blogspot", name: "🅑 블로그스팟 자동배포(HTML)" }
+    { id: "blogspot", name: "🅑 블로그스팟 자동배포(HTML)" },
+    { id: "cafe", name: "☕ 카페 포스팅" },
+    { id: "tistory", name: "🅣 티스토리 자동배포" }
   ];
   const [apiSaving, setApiSaving] = useState(false);
   const [apiMessage, setApiMessage] = useState(null);

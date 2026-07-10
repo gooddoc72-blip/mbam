@@ -26,7 +26,7 @@ if sys.platform == 'win32':
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path)
 
-from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router, account_router, blog_schedule, agent_router
+from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router, account_router, blog_schedule, agent_router, tistory_router
 from mbam_nextgen.backend.database import engine, Base
 from mbam_nextgen.backend.auth import get_current_user, verify_admin
 from mbam_nextgen.backend.ai_context import setup_ai_context
@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
     content_daily = None
     blogspot_daily = None
     cafe_daily = None
+    tistory_daily = None
     if scheduler_on:
         scheduler_service.start()
     else:
@@ -104,6 +105,10 @@ async def lifespan(app: FastAPI):
         from mbam_nextgen.services.cafe_daily_scheduler import cafe_daily_scheduler
         cafe_daily = cafe_daily_scheduler
         cafe_daily.start()
+        # 티스토리 매일 자동발행 — 브라우저 자동화라 잡 적재만, 실제 발행은 로컬 에이전트.
+        from mbam_nextgen.services.tistory_daily_scheduler import tistory_daily_scheduler
+        tistory_daily = tistory_daily_scheduler
+        tistory_daily.start()
     yield
     if scheduler_on:
         scheduler_service.shutdown()
@@ -117,6 +122,8 @@ async def lifespan(app: FastAPI):
         blogspot_daily.shutdown()
     if cafe_daily:
         cafe_daily.shutdown()
+    if tistory_daily:
+        tistory_daily.shutdown()
 
 app = FastAPI(
     title="SEO Analysis Platform API",
@@ -164,6 +171,7 @@ app.include_router(schedule.router, dependencies=[Depends(get_current_user)])
 app.include_router(shopping_router.router, dependencies=[Depends(get_current_user)])
 app.include_router(admin_router.router)
 app.include_router(blogspot_router.router, dependencies=[Depends(setup_ai_context)])
+app.include_router(tistory_router.router, dependencies=[Depends(setup_ai_context)])
 app.include_router(cafe_nurture.router, dependencies=[Depends(get_current_user)])
 app.include_router(blog_schedule.router, dependencies=[Depends(get_current_user)])
 app.include_router(coupang.router, prefix="/api/coupang", tags=["Coupang"], dependencies=[Depends(get_current_user)])

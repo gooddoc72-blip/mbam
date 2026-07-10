@@ -12,10 +12,14 @@ export default function BlogSchedulePage() {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // 플랫폼: 네이버(스크래핑·에이전트) / 블로그스팟(Blogger API·클라우드 직접발행)
+  // 플랫폼: 네이버(스크래핑·에이전트) / 블로그스팟(Blogger API·클라우드 직접발행) / 티스토리(브라우저 자동화·에이전트)
   const [platform, setPlatform] = useState("naver");
   const [bsAccounts, setBsAccounts] = useState([]);   // 블로그스팟 계정
   const [bsSchedules, setBsSchedules] = useState([]); // 블로그스팟 예약
+  const [tsAccounts, setTsAccounts] = useState([]);   // 티스토리 계정
+  const [tsSchedules, setTsSchedules] = useState([]); // 티스토리 예약
+  const [tsKakaoId, setTsKakaoId] = useState("");     // 티스토리 계정 추가 폼
+  const [tsBlogName, setTsBlogName] = useState("");
 
   // form state
   const [accountId, setAccountId] = useState("");        // (레거시) 예약 포스팅 서브탭에서 사용
@@ -50,13 +54,15 @@ export default function BlogSchedulePage() {
 
   const loadAll = async () => {
     try {
-      const [accRes, catRes, schRes, resvRes, bsAccRes, bsSchRes] = await Promise.all([
+      const [accRes, catRes, schRes, resvRes, bsAccRes, bsSchRes, tsAccRes, tsSchRes] = await Promise.all([
         fetchWithAuth("/api/cafe-nurture/accounts"),
         fetchWithAuth("/api/content/categories"),
         fetchWithAuth("/api/blog-schedule/schedules"),
         fetchWithAuth("/api/blog-schedule/reservations"),
         fetchWithAuth("/api/blogspot/accounts"),
         fetchWithAuth("/api/blogspot/schedules"),
+        fetchWithAuth("/api/tistory/accounts"),
+        fetchWithAuth("/api/tistory/schedules"),
       ]);
       const accData = accRes.ok ? await accRes.json() : [];
       const catData = catRes.ok ? await catRes.json() : {};
@@ -68,6 +74,12 @@ export default function BlogSchedulePage() {
       const bsSchData = bsSchRes.ok ? await bsSchRes.json() : [];
       setBsAccounts(bsAccList);
       setBsSchedules(bsSchData || []);
+      // 티스토리 계정: {success, accounts:[{id, kakao_id, blog_name, status}]} → 공용 칩 UI용 naver_id 별칭
+      const tsAccJson = tsAccRes.ok ? await tsAccRes.json() : {};
+      const tsAccList = (tsAccJson.accounts || []).map(a => ({ id: a.id, naver_id: (a.blog_name ? a.blog_name + ".tistory.com" : a.kakao_id), blog_addr: a.blog_name, kakao_id: a.kakao_id, status: a.status }));
+      const tsSchData = tsSchRes.ok ? await tsSchRes.json() : [];
+      setTsAccounts(tsAccList);
+      setTsSchedules(tsSchData || []);
       setAccounts(accData || []);
       setCategories(catData.categories || []);
       setSchedules(schData || []);
@@ -116,27 +128,26 @@ export default function BlogSchedulePage() {
   const toggleAcc = (id) => setSelectedAccIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const handleAdd = async () => {
-    const isBs = platform === "blogspot";
+    const label = isBlogspot ? "블로그스팟" : isTistory ? "티스토리" : "네이버";
     const accIds = Array.from(selectedAccIds);
     if (accIds.length === 0) {
-      alert(isBs ? "발행할 블로그스팟 계정을 1개 이상 선택하세요." : "발행할 네이버 계정을 1개 이상 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)");
+      alert(isNaver ? "발행할 네이버 계정을 1개 이상 선택하세요. (계정관리에서 기기 인증된 계정이 필요합니다)" : `발행할 ${label} 계정을 1개 이상 선택하세요.`);
       return;
     }
     if (!category) { alert("글감 카테고리를 선택하세요. (글감 수집 메뉴에서 먼저 수집해야 글감이 생깁니다)"); return; }
     setLoading(true);
     try {
-      const url = isBs ? "/api/blogspot/schedules" : "/api/blog-schedule/schedules";
-      const body = isBs
-        ? { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider }
-        : { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider, distribution_mode: distMode, generate_card_news: cardNews };
-      const res = await fetchWithAuth(url, {
+      const body = isNaver
+        ? { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider, distribution_mode: distMode, generate_card_news: cardNews }
+        : { account_ids: accIds, schedule_time: scheduleTime, content_category: category, post_count_per_day: Number(count) || 1, ai_provider: aiProvider };
+      const res = await fetchWithAuth(scheduleBase, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`✅ ${accIds.length}개 계정에 ${isBs ? "블로그스팟 " : ""}매일 자동발행 예약이 등록되었습니다!\n매일 ${scheduleTime}에 '${category}' 글감으로 자동 발행됩니다.`);
+        alert(`✅ ${accIds.length}개 계정에 ${isNaver ? "" : label + " "}매일 자동발행 예약이 등록되었습니다!\n매일 ${scheduleTime}에 '${category}' 글감으로 자동 발행됩니다.`);
         loadAll();
       } else {
         alert("등록 실패: " + (data.detail || data.message || "알 수 없는 오류"));
@@ -150,9 +161,8 @@ export default function BlogSchedulePage() {
 
   const handleDelete = async (id) => {
     if (!confirm("이 예약을 삭제할까요?")) return;
-    const url = platform === "blogspot" ? `/api/blogspot/schedules/${id}` : `/api/blog-schedule/schedules/${id}`;
     try {
-      const res = await fetchWithAuth(url, { method: "DELETE" });
+      const res = await fetchWithAuth(`${scheduleBase}/${id}`, { method: "DELETE" });
       if (res.ok) loadAll();
     } catch (e) {
       alert("삭제 중 오류: " + e.message);
@@ -164,9 +174,37 @@ export default function BlogSchedulePage() {
 
   // 플랫폼에 따라 계정·예약 목록 소스 전환
   const isBlogspot = platform === "blogspot";
-  const activeAccounts = isBlogspot ? bsAccounts : accounts;
-  const activeSchedules = isBlogspot ? bsSchedules : schedules;
+  const isTistory = platform === "tistory";
+  const isNaver = platform === "naver";  // 카드뉴스·배포방식은 네이버 전용
+  const activeAccounts = isBlogspot ? bsAccounts : isTistory ? tsAccounts : accounts;
+  const activeSchedules = isBlogspot ? bsSchedules : isTistory ? tsSchedules : schedules;
   const switchPlatform = (p) => { setPlatform(p); setSelectedAccIds(new Set()); };
+
+  const scheduleBase = isBlogspot ? "/api/blogspot/schedules" : isTistory ? "/api/tistory/schedules" : "/api/blog-schedule/schedules";
+
+  // 티스토리 계정 추가 / 기기 인증
+  const addTistoryAccount = async () => {
+    if (!tsKakaoId.trim() || !tsBlogName.trim()) { alert("카카오 아이디와 블로그 주소(xxx)를 입력하세요."); return; }
+    try {
+      const res = await fetchWithAuth("/api/tistory/accounts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kakao_id: tsKakaoId, blog_name: tsBlogName }),
+      });
+      if (res.ok) { setTsKakaoId(""); setTsBlogName(""); loadAll(); alert("티스토리 계정이 추가되었습니다. 이제 '기기 인증'을 눌러 카카오 로그인을 완료하세요."); }
+      else { const d = await res.json().catch(() => ({})); alert("추가 실패: " + (d.detail || res.status)); }
+    } catch (e) { alert("오류: " + e.message); }
+  };
+  const registerTistoryAccount = async (id) => {
+    try {
+      const res = await fetchWithAuth(`/api/tistory/accounts/${id}/register`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      alert(res.ok ? (d.message || "PC 에이전트에서 로그인 창이 열립니다. 카카오 로그인을 완료하세요.") : ("기기 인증 요청 실패: " + (d.detail || res.status)));
+    } catch (e) { alert("오류: " + e.message); }
+  };
+  const deleteTistoryAccount = async (id) => {
+    if (!confirm("이 티스토리 계정을 삭제할까요?")) return;
+    try { const res = await fetchWithAuth(`/api/tistory/accounts/${id}`, { method: "DELETE" }); if (res.ok) loadAll(); } catch (e) {}
+  };
 
   return (
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
@@ -201,9 +239,9 @@ export default function BlogSchedulePage() {
 
           {subTab === "daily" && (
           <>
-          {/* 플랫폼 선택: 네이버 / 블로그스팟 */}
+          {/* 플랫폼 선택: 네이버 / 블로그스팟 / 티스토리 */}
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            {[["naver", "N 네이버 블로그"], ["blogspot", "🅑 블로그스팟"]].map(([k, label]) => (
+            {[["naver", "N 네이버 블로그"], ["blogspot", "🅑 블로그스팟"], ["tistory", "🅣 티스토리"]].map(([k, label]) => (
               <button key={k} onClick={() => switchPlatform(k)} style={{ padding: "0.55rem 1.1rem", borderRadius: "8px", border: platform === k ? "2px solid #16a34a" : "1px solid #cbd5e1", background: platform === k ? "#f0fdf4" : "white", color: platform === k ? "#15803d" : "#475569", fontWeight: "bold", cursor: "pointer", fontSize: "0.9rem" }}>{label}</button>
             ))}
           </div>
@@ -214,15 +252,45 @@ export default function BlogSchedulePage() {
           </p>
 
           {/* 안내 박스 — 플랫폼별 */}
-          {isBlogspot ? (
+          {isBlogspot && (
             <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#1e40af" }}>
               ℹ️ 블로그스팟은 Blogger API로 <b>클라우드에서 자동 발행</b>됩니다(PC·에이전트 불필요). 계정은 <b>블로그스팟 메뉴</b>에서 먼저 등록하세요.
               원고 스타일은 <b>관리자 → 프롬프트 → 블로그스팟 자동배포(HTML)</b> 탭에서 설정합니다.
             </div>
-          ) : (
+          )}
+          {isTistory && (
+            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#166534" }}>
+              ℹ️ 티스토리는 API가 없어 <b>로컬 에이전트(집 PC)</b>가 브라우저로 발행합니다. 계정 추가 후 <b>기기 인증</b>(1회 카카오 수동 로그인)이 필요합니다. 원고 스타일은 <b>관리자 → 프롬프트 → 티스토리 자동배포</b> 탭에서 설정합니다.
+            </div>
+          )}
+          {isNaver && (
             <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#92400e" }}>
               ⚠️ 예약 시각에 발행되려면 <b>백엔드 서버(8000)가 켜져 있어야</b> 합니다. PC를 껐다 켜면 시작하기.bat으로 서버를 다시 띄워주세요.
               또한 해당 계정은 <b>계정관리에서 기기 인증(1회 수동 로그인)</b>이 되어 있어야 자동 로그인됩니다.
+            </div>
+          )}
+          {/* 티스토리 계정 관리(추가 + 기기 인증) */}
+          {isTistory && (
+            <div style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "1.1rem 1.2rem" }}>
+              <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.7rem" }}>티스토리 계정 관리</div>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.8rem" }}>
+                <input value={tsKakaoId} onChange={(e) => setTsKakaoId(e.target.value)} placeholder="카카오 아이디(이메일)" style={{ ...inputStyle, width: "auto", flex: "1 1 180px" }} />
+                <input value={tsBlogName} onChange={(e) => setTsBlogName(e.target.value)} placeholder="블로그 주소 (예: myblog → myblog.tistory.com)" style={{ ...inputStyle, width: "auto", flex: "1 1 220px" }} />
+                <button onClick={addTistoryAccount} style={{ padding: "0.6rem 1rem", background: "#16a34a", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", whiteSpace: "nowrap" }}>＋ 계정 추가</button>
+              </div>
+              {tsAccounts.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                  {tsAccounts.map(a => (
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", fontSize: "0.85rem", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "0.4rem 0.7rem" }}>
+                      <span><b>{a.blog_addr}</b>.tistory.com · {a.kakao_id}</span>
+                      <span style={{ display: "flex", gap: "0.4rem" }}>
+                        <button onClick={() => registerTistoryAccount(a.id)} style={{ padding: "0.3rem 0.7rem", background: "#2563eb", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }}>기기 인증</button>
+                        <button onClick={() => deleteTistoryAccount(a.id)} style={{ padding: "0.3rem 0.7rem", background: "#ef4444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>삭제</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -233,7 +301,7 @@ export default function BlogSchedulePage() {
               <label style={labelStyle}>발행 계정 <span style={{ fontWeight: "normal", color: "#94a3b8", fontSize: "0.8rem" }}>(여러 개 선택 가능 · 계정마다 다른 인기 글감으로 발행)</span></label>
               {activeAccounts.length === 0 ? (
                 <div style={{ padding: "0.9rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "6px", color: "#94a3b8", fontSize: "0.88rem" }}>
-                  {isBlogspot ? "등록된 블로그스팟 계정이 없습니다. 블로그스팟 메뉴에서 먼저 등록하세요." : "등록된 네이버 계정이 없습니다. 계정관리에서 기기 인증 후 이용하세요."}
+                  {isBlogspot ? "등록된 블로그스팟 계정이 없습니다. 블로그스팟 메뉴에서 먼저 등록하세요." : isTistory ? "등록된 티스토리 계정이 없습니다. 위 '티스토리 계정 관리'에서 추가 후 기기 인증하세요." : "등록된 네이버 계정이 없습니다. 계정관리에서 기기 인증 후 이용하세요."}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -276,7 +344,7 @@ export default function BlogSchedulePage() {
                   <option value="openai">OpenAI</option>
                 </select>
               </div>
-              {!isBlogspot && (
+              {isNaver && (
               <div>
                 <label style={labelStyle}>배포 방식</label>
                 <select value={distMode} onChange={(e) => setDistMode(e.target.value)} style={inputStyle}>
@@ -286,7 +354,7 @@ export default function BlogSchedulePage() {
               </div>
               )}
             </div>
-            {!isBlogspot && (
+            {isNaver && (
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "1rem", cursor: "pointer", fontSize: "0.9rem", color: cardNews ? "#2563eb" : "#64748b" }}>
               <input type="checkbox" checked={cardNews} onChange={(e) => setCardNews(e.target.checked)} style={{ width: 18, height: 18 }} />
               🎨 첨부 이미지가 없을 때 AI 카드뉴스 이미지 5장 자동 생성 (글 제목·소제목 기반)
@@ -367,7 +435,7 @@ export default function BlogSchedulePage() {
         <div style={{ flex: "1 1 340px", minWidth: 0, background: "white", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "1.5rem", alignSelf: "stretch" }}>
           {subTab === "daily" ? (
           <>
-            <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1rem" }}>등록된 예약 ({activeSchedules.length}) {isBlogspot ? "· 블로그스팟" : "· 네이버"}</h2>
+            <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: "0 0 1rem" }}>등록된 예약 ({activeSchedules.length}) {isBlogspot ? "· 블로그스팟" : isTistory ? "· 티스토리" : "· 네이버"}</h2>
             {activeSchedules.length === 0 ? (
               <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "8px", padding: "2rem", textAlign: "center", color: "#94a3b8" }}>
                 아직 등록된 예약이 없습니다. 왼쪽에서 첫 예약을 추가해 보세요.

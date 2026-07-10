@@ -735,6 +735,156 @@ class WorkflowOrchestrator:
                         pass
 
     # ═══════════════════════════════════════════════
+    # 티스토리 (카카오 로그인 → 에디터 자동화) — 공식 API 없어 브라우저 자동화
+    #   ★에디터/발행 버튼 셀렉터는 실계정으로 1회 튜닝 필요(주석 표시 지점)
+    # ═══════════════════════════════════════════════
+
+    def _tistory_profile_key(self, account_id: str) -> str:
+        return f"tistory_{account_id}"
+
+    async def register_tistory_session(self, account_id: str, log_callback=None):
+        """티스토리(카카오) 1회 수동 로그인 → 영구 프로필을 신뢰 기기로 등록(이후 자동 발행)."""
+        def _log(msg):
+            logger.info(msg)
+            if log_callback:
+                try:
+                    log_callback(msg)
+                except Exception:
+                    pass
+
+        pkey = self._tistory_profile_key(account_id)
+        _log(f"🔐 [티스토리 등록] '{account_id}' 로그인 창을 엽니다. 카카오 로그인을 완료해 주세요. (최대 4분)")
+        async with async_playwright() as p:
+            context = None
+            try:
+                profile_dir = self.session_manager.get_profile_dir(pkey)
+                self.session_manager.clear_stale_locks(pkey)
+                context = await p.chromium.launch_persistent_context(
+                    profile_dir, headless=False,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR", timezone_id="Asia/Seoul",
+                )
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto("https://www.tistory.com/auth/login", wait_until="domcontentloaded", timeout=30000)
+                # 로그인 성공 판정: auth/login·kakao 페이지를 벗어나 tistory.com 으로 돌아오면 완료
+                logged_in = False
+                for _ in range(80):  # 최대 ~4분
+                    await asyncio.sleep(3)
+                    url = page.url or ""
+                    if "tistory.com" in url and "auth/login" not in url and "accounts.kakao" not in url:
+                        logged_in = True
+                        break
+                if logged_in:
+                    self.session_manager.mark_registered(pkey)
+                    await self.session_manager.save_session(context, pkey)
+                    _log("✅ [티스토리 등록] 로그인 완료! 이후 자동 발행됩니다.")
+                    return {"success": True, "account_id": account_id}
+                return {"success": False, "account_id": account_id, "error": "로그인 미완료(시간 초과). 다시 시도해 주세요."}
+            except Exception as e:
+                _log(f"⚠️ [티스토리 등록] 오류: {e}")
+                return {"success": False, "account_id": account_id, "error": str(e)}
+            finally:
+                if context:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+
+    async def execute_tistory_workflow(self, account_id: str, blog_name: str, keyword: str,
+                                       title: str = None, content: str = None, source_data: str = None,
+                                       ai_provider: str = "gemini", prompt_category: str = "tistory",
+                                       auto_submit: bool = True):
+        """티스토리 글 발행: 영구 프로필(로그인 유지) → 글쓰기 → 제목/본문 → 발행."""
+        import re as _re
+        async with async_playwright() as p:
+            context = None
+            try:
+                pkey = self._tistory_profile_key(account_id)
+                profile_dir = self.session_manager.get_profile_dir(pkey)
+                self.session_manager.clear_stale_locks(pkey)
+                context = await p.chromium.launch_persistent_context(
+                    profile_dir, headless=False,
+                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+                    viewport={'width': 1920, 'height': 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="ko-KR", timezone_id="Asia/Seoul",
+                )
+                page = context.pages[0] if context.pages else await context.new_page()
+
+                # 1. 원고 생성(글감을 티스토리 프롬프트로 재작성)
+                if content and not source_data:
+                    source_data = content
+                blog_text = await self._generate_content_with_retry(
+                    keyword, ai_provider=ai_provider, source_data=source_data, prompt_category=prompt_category)
+                blog_text = self._strip_markdown(blog_text or "")
+                post_title = title or keyword
+                m = _re.search(r'^\s*\[제목\](.*?)(?:\n|$)', blog_text)
+                if m:
+                    post_title = m.group(1).strip()
+                    blog_text = _re.sub(r'^\s*\[제목\].*?\n+', '', blog_text, count=1).strip()
+                blog_text = blog_text.replace("[이미지]", "").strip()  # 티스토리는 자동 이미지 미지원 — 텍스트만
+
+                # 2. 글쓰기 페이지 진입
+                write_url = f"https://{blog_name}.tistory.com/manage/newpost/"
+                await page.goto(write_url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+                if "auth/login" in (page.url or "") or "accounts.kakao" in (page.url or ""):
+                    return {"success": False, "error": "로그인 세션 만료 — 티스토리 기기 인증을 다시 해주세요."}
+                try:
+                    await page.keyboard.press("Escape")  # '작성 중인 글 이어쓰기' 등 팝업 닫기(best effort)
+                except Exception:
+                    pass
+
+                # 3. 제목 입력  ★셀렉터 튜닝 지점
+                try:
+                    title_sel = "#post-title-inp, input#title, textarea#title, textarea[placeholder*='제목']"
+                    await page.wait_for_selector(title_sel, timeout=15000)
+                    await page.fill(title_sel, post_title)
+                except Exception as e:
+                    logger.warning(f"[Tistory] 제목 입력 실패(셀렉터 튜닝 필요): {e}")
+
+                # 4. 본문 입력 — 에디터 iframe/contenteditable  ★셀렉터 튜닝 지점
+                try:
+                    frame = None
+                    for f in page.frames:
+                        if "editor" in (f.name or "") or "mce" in (f.url or ""):
+                            frame = f
+                            break
+                    target = frame or page
+                    body_sel = "body#tinymce, .mce-content-body, [contenteditable='true']"
+                    await target.wait_for_selector(body_sel, timeout=15000)
+                    await target.click(body_sel)
+                    await page.keyboard.type(blog_text, delay=8)
+                except Exception as e:
+                    logger.warning(f"[Tistory] 본문 입력 실패(셀렉터 튜닝 필요): {e}")
+
+                result_url = ""
+                if auto_submit:
+                    # 5. 발행: 완료 → 공개 발행  ★셀렉터 튜닝 지점
+                    try:
+                        await page.click("button.btn-post, #publish-layer-btn, button:has-text('완료')", timeout=10000)
+                        await asyncio.sleep(1)
+                        await page.click("#publish-btn, button:has-text('공개 발행'), button:has-text('발행')", timeout=10000)
+                        await asyncio.sleep(3)
+                        result_url = page.url if "manage" not in (page.url or "") else ""
+                    except Exception as e:
+                        logger.warning(f"[Tistory] 발행 버튼 실패(셀렉터 튜닝 필요): {e}")
+
+                logger.info(f"[Tistory] 발행 처리 완료 | 제목: {post_title} | URL: {result_url or '(확인필요)'}")
+                return {"success": True, "title": post_title, "result_url": result_url}
+            except Exception as e:
+                logger.error(f"[Tistory] 워크플로우 오류: {e}")
+                return {"success": False, "error": str(e)}
+            finally:
+                if context:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+
+    # ═══════════════════════════════════════════════
     # 멀티 계정 순차 워크플로우
     # ═══════════════════════════════════════════════
 

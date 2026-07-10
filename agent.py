@@ -304,10 +304,49 @@ async def _handle_cafe_nurture_run(payload: dict, log=None) -> dict:
                 board_name=payload.get("board_name", ""),
                 keyword=item.get("title", "정보 제공"), title=item.get("title", "정보 제공"),
                 content=item.get("content", ""), auto_submit=True, action_type="post",
+                prompt_category="cafe",  # 글감을 카페 톤으로 재작성(원문 그대로 게시 방지)
             )
     else:
         raise RuntimeError(f"알 수 없는 카페 작업 유형: {action}")
     return {"success": True, "action": action}
+
+
+async def _handle_tistory_register(payload: dict) -> dict:
+    # 티스토리 기기 인증: 사용자 PC에서 브라우저를 열어 카카오 수동 로그인 → 영구 프로필 저장
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+    result = await WorkflowOrchestrator().register_tistory_session(payload.get("account_id", ""))
+    if not result.get("success"):
+        raise RuntimeError(result.get("error", "티스토리 기기 인증 실패"))
+    return result
+
+
+async def _handle_tistory_post(payload: dict, log=None) -> dict:
+    # 티스토리 발행: 집 PC(로그인 유지된 영구 프로필)에서 글쓰기·발행
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+
+    def _log(msg):
+        print(f"[tistory] {msg}")
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    _log(f"티스토리 발행 시작: {payload.get('keyword', '')}")
+    result = await WorkflowOrchestrator().execute_tistory_workflow(
+        account_id=payload.get("account_id", ""),
+        blog_name=payload.get("blog_name", ""),
+        keyword=payload.get("keyword", "정보"),
+        title=payload.get("title") or None,
+        content=payload.get("content") or None,
+        source_data=payload.get("source_data") or None,
+        ai_provider=payload.get("ai_provider", "gemini"),
+        prompt_category="tistory",
+        auto_submit=True,
+    )
+    if not (result and result.get("success")):
+        raise RuntimeError("티스토리 발행 실패: " + str((result or {}).get("error", "원인 미상")))
+    return {"success": True, "result_url": result.get("result_url", ""), "title": result.get("title", "")}
 
 
 HANDLERS = {
@@ -327,6 +366,8 @@ HANDLERS = {
     "place_news_publish": _handle_place_news_publish,
     "cafe_targeted_comment": _handle_cafe_targeted_comment,
     "cafe_nurture_run": _handle_cafe_nurture_run,
+    "tistory_register": _handle_tistory_register,
+    "tistory_post": _handle_tistory_post,
 }
 
 
