@@ -236,6 +236,12 @@ async def _handle_register_account(payload: dict) -> dict:
     return result
 
 
+async def _handle_matjip_collect(payload: dict, log=None) -> dict:
+    # 맛집 포스팅 소재 수집: 플레이스 방문자 리뷰 + 블로그 후기 → 원고 소재(source_data)
+    from mbam_nextgen.services.matjip_service import collect_matjip_source
+    return await collect_matjip_source(payload.get("place_url", ""), payload.get("keyword", ""), log=log)
+
+
 async def _handle_cafe_targeted_comment(payload: dict, log=None) -> dict:
     # 카페 다중 타겟 댓글(소통육성): 클라우드가 위임한 잡을 집 IP·화면 있는 PC에서 실행.
     # log(callable)이 오면 진행 로그를 클라우드(task_status_store)로 실시간 중계한다.
@@ -387,6 +393,7 @@ HANDLERS = {
     "tistory_register": _handle_tistory_register,
     "tistory_post": _handle_tistory_post,
     "cafe_rank_check": _handle_cafe_rank_check,
+    "matjip_collect": _handle_matjip_collect,
 }
 
 

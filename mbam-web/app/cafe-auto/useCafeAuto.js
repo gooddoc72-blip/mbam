@@ -76,6 +76,8 @@ export function useCafeAuto() {
   const [cafeCardNews, setCafeCardNews] = useState(true); // 첨부 이미지 없을 때 AI 카드뉴스 자동 생성
   const [cafeCardCount, setCafeCardCount] = useState(3);  // 카드뉴스 장수
   const [cafeTrackRank, setCafeTrackRank] = useState(true); // 발행 후 통검 순위 추적 자동 등록
+  const [placeUrl, setPlaceUrl] = useState("");             // 맛집 포스팅: 플레이스 URL
+  const [collectingMatjip, setCollectingMatjip] = useState(false);
 
   // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
@@ -353,6 +355,40 @@ export function useCafeAuto() {
   };
 
   // AI 원고 생성(미리보기) 시작 — 발행 전에 실제 원고를 만들어 검토/수정
+  // 맛집 포스팅: 플레이스 리뷰 + 블로그 후기를 수집해 원고 소재(content)로 채운다.
+  const collectMatjipSource = async () => {
+    if (!placeUrl.trim() && !targetKeyword.trim()) { alert("플레이스 URL 또는 맛집 키워드를 입력하세요."); return; }
+    setCollectingMatjip(true);
+    setStatusLogs(p => [...p, "🍜 맛집 소재 수집 시작... (에이전트가 플레이스 리뷰·블로그 후기를 수집)"]);
+    try {
+      const res = await fetchWithAuth("/api/cafe-nurture/matjip-collect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ place_url: placeUrl, keyword: targetKeyword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert("수집 실패: " + (data.detail || res.status)); return; }
+      const applySource = (sd) => { setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
+      if (data.mode === "inline") {
+        applySource(data.source_data);
+        setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
+      } else if (data.mode === "job" && data.job_id) {
+        let done = false;
+        for (let i = 0; i < 80 && !done; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const jr = await fetchWithAuth(`/api/agent/jobs/${data.job_id}`);
+          const jd = await jr.json().catch(() => ({}));
+          if (jd.status === "done") {
+            applySource((jd.result && jd.result.source_data) || "");
+            setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
+            done = true;
+          } else if (jd.status === "error") { alert("수집 실패: " + (jd.error || "오류")); done = true; }
+        }
+        if (!done) alert("수집이 지연됩니다. 로컬 에이전트가 켜져 있는지 확인 후 잠시 뒤 다시 시도하세요.");
+      }
+    } catch (e) { alert("오류: " + e.message); }
+    finally { setCollectingMatjip(false); }
+  };
+
   const handleGenerateCafe = async () => {
     if (!content.trim() && !targetKeyword.trim()) {
       return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
@@ -833,6 +869,10 @@ export function useCafeAuto() {
     setCafeCardCount,
     cafeTrackRank,
     setCafeTrackRank,
+    placeUrl,
+    setPlaceUrl,
+    collectingMatjip,
+    collectMatjipSource,
     showLibPicker,
     setShowLibPicker,
     accountDelay,

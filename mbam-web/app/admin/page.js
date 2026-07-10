@@ -26,6 +26,7 @@ export default function AdminDashboard() {
     blog_daily: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     blogspot: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     cafe: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
+    cafe_matjip: { claude_prompt: "", gemini_prompt: "", reference_files: [] },
     tistory: { claude_prompt: "", gemini_prompt: "", reference_files: [] }
   });
   const [activePromptCategory, setActivePromptCategory] = useState("product");
@@ -40,6 +41,7 @@ export default function AdminDashboard() {
     { id: "blog_daily", name: "🗓️ 블로그 자동배포" },
     { id: "blogspot", name: "🅑 블로그스팟 자동배포(HTML)" },
     { id: "cafe", name: "☕ 카페 포스팅" },
+    { id: "cafe_matjip", name: "🍜 카페 맛집 포스팅" },
     { id: "tistory", name: "🅣 티스토리 자동배포" }
   ];
   const [apiSaving, setApiSaving] = useState(false);

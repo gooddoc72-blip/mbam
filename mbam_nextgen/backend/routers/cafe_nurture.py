@@ -338,6 +338,29 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
         log(f"❌ 오류 발생: {str(e)}")
         task_status_store[task_id]["status"] = "failed"
 
+class MatjipCollectRequest(BaseModel):
+    place_url: Optional[str] = None
+    keyword: Optional[str] = None
+
+
+@router.post("/matjip-collect", summary="맛집 소재 수집(플레이스 리뷰+블로그 후기)")
+async def matjip_collect(req: MatjipCollectRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    from mbam_nextgen.backend import jobs as jobsvc
+    place_url = (req.place_url or "").strip()
+    keyword = (req.keyword or "").strip()
+    if not place_url and not keyword:
+        raise HTTPException(status_code=400, detail="플레이스 URL 또는 키워드를 입력하세요.")
+    payload = {"place_url": place_url, "keyword": keyword}
+    if jobsvc.is_cloud_mode():
+        # 스크래핑은 로컬 에이전트(집 IP)가 수행 → 잡 적재 후 job_id 반환(프론트가 /api/agent/jobs 폴링)
+        job_id = jobsvc.enqueue_job(db, get_user_id(current_user), "matjip_collect", payload, priority=4)
+        return {"success": True, "mode": "job", "job_id": job_id}
+    # 설치형(local): 백엔드가 직접 수집
+    from mbam_nextgen.services.matjip_service import collect_matjip_source
+    res = await collect_matjip_source(place_url, keyword)
+    return {"success": True, "mode": "inline", "source_data": res.get("source_data", "")}
+
+
 @router.post("/trigger-targeted", summary="다중 아이디로 타겟 게시글 댓글 작업 시작")
 async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     import asyncio

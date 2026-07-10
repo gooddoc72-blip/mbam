@@ -185,7 +185,8 @@ export default function CafeAutoPage() {
           <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "1rem" }}>카페 포스팅</h1>
           <div style={{ display: "flex", gap: "1rem", borderBottom: "2px solid #e2e8f0" }}>
             {[
-              { id: "post", label: "카페 포스팅" },
+              { id: "post", label: "정보성 포스팅" },
+              { id: "matjip", label: "맛집 포스팅" },
               { id: "nurture", label: "카페 소통·육성" }
             ].map(tab => (
               <button key={tab.id} onClick={() => setMainTab(tab.id)}
@@ -205,8 +206,8 @@ export default function CafeAutoPage() {
         {/* Content Area */}
         <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", overflowY: "auto" }}>
           
-          {/* TAB 1(병합): 즉시 포스팅 + 계정/카페/예약 육성 */}
-          {mainTab === "post" && <PostTab s={s} />}
+          {/* TAB 1: 정보성 포스팅 / 맛집 포스팅(맛집 모드) — 같은 PostTab 재사용 */}
+          {(mainTab === "post" || mainTab === "matjip") && <PostTab s={s} />}
 
           {/* TAB 2: TARGET MULTI */}
           {mainTab === "nurture" && <NurtureTab s={s} />}

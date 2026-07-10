@@ -167,7 +167,13 @@ export default function PostTab({ s }) {
     handleAddCafe,
     handleAddSchedule,
     handleDeleteSchedule,
+    placeUrl,
+    setPlaceUrl,
+    collectingMatjip,
+    collectMatjipSource,
   } = s;
+
+  const matjip = mainTab === "matjip";
 
   return (
             <>
@@ -272,7 +278,19 @@ export default function PostTab({ s }) {
                     ☁️ 웹에서 불러오기
                   </button>
                 </div>
-                <input type="text" placeholder="타겟 키워드" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
+                <input type="text" placeholder={matjip ? "맛집 키워드 (예: 전포동 파스타 맛집)" : "타겟 키워드"} value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
+
+                {/* 맛집 포스팅: 플레이스 URL + 소재 자동 수집 */}
+                {matjip && (
+                  <div style={{ marginBottom: "1rem", padding: "0.9rem 1rem", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px" }}>
+                    <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#9a3412", marginBottom: "0.5rem" }}>🍜 맛집 소재 수집 (플레이스 리뷰 + 블로그 후기)</div>
+                    <input type="text" placeholder="네이버 플레이스 URL (선택 — 방문자 리뷰 참고)" value={placeUrl} onChange={e => setPlaceUrl(e.target.value)} style={{ width: "100%", padding: "0.7rem", marginBottom: "0.6rem", boxSizing: "border-box", border: "1px solid #fdba74", borderRadius: "6px" }} />
+                    <button onClick={collectMatjipSource} disabled={collectingMatjip} style={{ width: "100%", padding: "0.7rem", background: collectingMatjip ? "#94a3b8" : "#ea580c", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: collectingMatjip ? "wait" : "pointer" }}>
+                      {collectingMatjip ? "소재 수집 중... (에이전트 실행 필요)" : "🔍 플레이스 리뷰·블로그 후기 수집"}
+                    </button>
+                    <p style={{ margin: "0.5rem 0 0", fontSize: "0.78rem", color: "#9a3412" }}>* 수집이 끝나면 아래 글감이 자동으로 채워집니다. 이후 <b>AI 원고 생성</b> → 검토 → 발행. (수집은 집 PC 에이전트가 수행)</p>
+                  </div>
+                )}
 
                 {/* 글감 소스 토글 — 3방식 중 하나만 노출 (블로그 발행과 통일된 방식) */}
                 {actionType === "post" && (
