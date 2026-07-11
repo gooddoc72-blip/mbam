@@ -1,13 +1,16 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { fetchWithAuth } from "../utils/api";
 
-export default function CafeRankPage() {
+function CafeRankInner() {
+  const searchParams = useSearchParams();
   const [items, setItems] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const type = searchParams.get("type") || "";  // "blog" | "cafe" | "" (전체)
 
   const load = async () => {
     try {
@@ -18,6 +21,12 @@ export default function CafeRankPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const urlType = (u) => ((u || "").includes("blog.naver.com") ? "blog" : (u || "").includes("cafe.naver.com") || (u || "").includes("/cafes/") ? "cafe" : "");
+  const shownItems = type ? items.filter(it => urlType(it.target_url) === type) : items;
+  const typeLabel = type === "blog" ? "블로그" : type === "cafe" ? "카페" : "블로그·카페";
+  const tabLabel = type === "blog" ? "블로그탭" : type === "cafe" ? "카페탭" : "탭 순위";
+  const urlPlaceholder = type === "blog" ? "https://blog.naver.com/..." : type === "cafe" ? "https://cafe.naver.com/..." : "https://blog.naver.com/... 또는 https://cafe.naver.com/...";
 
   const addItem = async () => {
     if (!keyword.trim() || !targetUrl.trim()) { alert("키워드와 카페 글 URL을 입력하세요."); return; }
@@ -52,10 +61,10 @@ export default function CafeRankPage() {
 
   return (
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
-      <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 블로그·카페 글 순위</h1>
+      <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 {typeLabel} 글 순위</h1>
       <p style={{ color: "#64748b", margin: "0 0 1.2rem", fontSize: "0.9rem" }}>
-        블로그/카페 글 URL과 키워드를 등록하면, 로컬 에이전트(집 PC)가 매일(새벽) 네이버 검색을 확인해
-        <b> 통합검색 순위</b>와 <b>탭 순위</b>(블로그 글→블로그탭, 카페 글→카페탭)를 기록합니다. '지금 수집'으로 즉시 확인도 가능합니다(에이전트 실행 필요).
+        {typeLabel} 글 URL과 키워드를 등록하면, 로컬 에이전트(집 PC)가 매일(새벽) 네이버 검색을 확인해
+        <b> 통합검색 순위</b>와 <b>{tabLabel} 순위</b>를 기록합니다. '지금 수집'으로 즉시 확인도 가능합니다(에이전트 실행 필요).
       </p>
 
       {/* 등록 폼 */}
@@ -65,8 +74,8 @@ export default function CafeRankPage() {
           <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 전포동 맛집" style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
         </div>
         <div style={{ flex: "2 1 300px" }}>
-          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>글 URL (블로그/카페)</label>
-          <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://blog.naver.com/... 또는 https://cafe.naver.com/..." style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>{typeLabel} 글 URL</label>
+          <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder={urlPlaceholder} style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
         </div>
         <div style={{ flex: "1 1 120px" }}>
           <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>별칭(선택)</label>
@@ -76,7 +85,7 @@ export default function CafeRankPage() {
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
-        <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: 0 }}>추적 목록 ({items.length})</h2>
+        <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: 0 }}>추적 목록 ({shownItems.length})</h2>
         <button onClick={load} style={{ padding: "0.45rem 0.9rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem" }}>🔄 새로고침</button>
       </div>
 
@@ -87,16 +96,16 @@ export default function CafeRankPage() {
               <th style={th}>키워드 / 별칭</th>
               <th style={th}>카페 글 URL</th>
               <th style={th}>통합검색</th>
-              <th style={th}>탭 순위</th>
+              <th style={th}>{tabLabel}</th>
               <th style={th}>최근 수집</th>
               <th style={th}>최근 추이(통검)</th>
               <th style={th}></th>
             </tr>
           </thead>
           <tbody>
-            {items.length === 0 ? (
-              <tr><td style={td} colSpan={7}><span style={{ color: "#94a3b8" }}>아직 추적 중인 카페 글이 없습니다. 위에서 추가하세요.</span></td></tr>
-            ) : items.map(it => (
+            {shownItems.length === 0 ? (
+              <tr><td style={td} colSpan={7}><span style={{ color: "#94a3b8" }}>아직 추적 중인 {typeLabel} 글이 없습니다. 위에서 추가하세요.</span></td></tr>
+            ) : shownItems.map(it => (
               <tr key={it.id}>
                 <td style={td}><b>{it.keyword}</b>{it.name ? <div style={{ color: "#64748b", fontSize: "0.8rem" }}>{it.name}</div> : null}</td>
                 <td style={{ ...td, maxWidth: "260px" }}><a href={it.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb", wordBreak: "break-all", fontSize: "0.8rem" }}>{it.target_url}</a></td>
@@ -114,5 +123,13 @@ export default function CafeRankPage() {
         </table>
       </div>
     </div>
+  );
+}
+
+export default function CafeRankPage() {
+  return (
+    <Suspense fallback={null}>
+      <CafeRankInner />
+    </Suspense>
   );
 }

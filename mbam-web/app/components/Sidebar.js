@@ -39,8 +39,7 @@ const MENU_ITEMS = [
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
             { name: "구글 블로그스팟", path: "/blogspot", icon: FileText },
-            { name: "티스토리", path: "/blog-schedule?platform=tistory", icon: FileText },
-            { name: "블로그·카페 글 순위", path: "/cafe-rank", icon: TrendingUp }
+            { name: "티스토리", path: "/blog-schedule?platform=tistory", icon: FileText }
         ]
     },
     {
@@ -49,7 +48,6 @@ const MENU_ITEMS = [
         submenus: [
             { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
             { name: "카페 포스팅", path: "/cafe-auto", icon: PenTool },
-            { name: "블로그·카페 글 순위", path: "/cafe-rank", icon: TrendingUp },
             { name: "이미지 세탁소", path: "/cafe-image-wash", icon: Image }
         ]
     },
@@ -66,7 +64,9 @@ const MENU_ITEMS = [
         icon: TrendingUp,
         submenus: [
             { name: "네이버 쇼핑", path: "/shopping/rank", icon: TrendingUp },
-            { name: "쿠팡 순위", path: "/coupang/rank", icon: TrendingUp }
+            { name: "쿠팡 순위", path: "/coupang/rank", icon: TrendingUp },
+            { name: "블로그 순위", path: "/cafe-rank?type=blog", icon: TrendingUp },
+            { name: "카페 순위", path: "/cafe-rank?type=cafe", icon: TrendingUp }
         ]
     },
     {
