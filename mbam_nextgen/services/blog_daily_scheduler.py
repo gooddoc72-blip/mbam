@@ -95,13 +95,21 @@ def enqueue_due_blog_posts():
         # 관리자 '블로그 자동배포(blog_daily)' 프롬프트를 잡 payload에 실어 보냄.
         # 발행(원고 생성)은 에이전트 PC에서 실행되어 로컬 prompts.json 이 없으므로, 여기서 DB값을 주입해야 적용된다.
         bd_prompt = {}
+        cc_prompt = {}  # '글감수집 원고' 폴백 — blog_daily 가 비어 있으면 이걸 사용
         try:
             from mbam_nextgen.backend.routers.settings import read_prompts
             _p = read_prompts()
             if isinstance(_p.get("blog_daily"), dict):
                 bd_prompt = _p["blog_daily"]
+            if isinstance(_p.get("content_collect"), dict):
+                cc_prompt = _p["content_collect"]
         except Exception as _e:
-            logger.warning(f"[BlogDaily] blog_daily 프롬프트 로드 실패: {_e}")
+            logger.warning(f"[BlogDaily] 프롬프트 로드 실패: {_e}")
+
+        def _pick_prompt(provider: str) -> str:
+            key = "gemini_prompt" if (provider or "claude") == "gemini" else "claude_prompt"
+            # 우선순위: 블로그 자동배포 → (비면) 글감수집 원고
+            return (bd_prompt.get(key) or "").strip() or (cc_prompt.get(key) or "").strip()
 
         # (유저, 카테고리)별로 묶어 계정마다 다른 글감 배분
         groups = defaultdict(list)
@@ -142,7 +150,7 @@ def enqueue_due_blog_posts():
                         "distribution_mode": s.distribution_mode or "normal",
                         "generate_card_news": bool(s.generate_card_news),
                         "prompt_category": "blog_daily",  # 관리자 '블로그 자동배포' 프롬프트 사용
-                        "custom_prompt": bd_prompt.get("gemini_prompt" if (s.ai_provider or "claude") == "gemini" else "claude_prompt", ""),
+                        "custom_prompt": _pick_prompt(s.ai_provider),  # 블로그 자동배포 → (비면) 글감수집 원고
                     }
                     jobsvc.enqueue_job(db, uid, "blog_daily_post", payload, priority=7)
                     total += 1
