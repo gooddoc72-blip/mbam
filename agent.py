@@ -612,7 +612,34 @@ def _prompt_login(cfg: dict) -> dict:
     return cfg
 
 
+def _setup_file_logging():
+    """pythonw(콘솔 없음)에서도 발행 과정을 볼 수 있게 stdout/stderr + logging 을 파일로 남긴다.
+    로그 파일: agent.py 와 같은 폴더의 agent.log (발행 실패 진단용)."""
+    try:
+        import datetime as _dt
+        log_path = os.path.join(APP_DIR, "agent.log")
+        try:
+            if os.path.exists(log_path) and os.path.getsize(log_path) > 5 * 1024 * 1024:
+                os.remove(log_path)  # 5MB 넘으면 새로 시작
+        except Exception:
+            pass
+        f = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+        sys.stdout = f
+        sys.stderr = f
+        try:
+            import logging
+            logging.basicConfig(level=logging.INFO, stream=f,
+                                format="%(asctime)s %(levelname)s %(name)s %(message)s", force=True)
+        except Exception:
+            pass
+        f.write(f"\n\n===== [agent] 시작 {_dt.datetime.now().isoformat()} (log: {log_path}) =====\n")
+        return log_path
+    except Exception:
+        return None
+
+
 def main():
+    _setup_file_logging()
     if sys.platform == "win32":
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
