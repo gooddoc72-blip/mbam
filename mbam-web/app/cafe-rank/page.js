@@ -52,10 +52,10 @@ export default function CafeRankPage() {
 
   return (
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
-      <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 카페 글 통합검색 순위</h1>
+      <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 블로그·카페 글 순위</h1>
       <p style={{ color: "#64748b", margin: "0 0 1.2rem", fontSize: "0.9rem" }}>
-        카페 글 URL과 키워드를 등록하면, 로컬 에이전트(집 PC)가 매일(새벽) 네이버 검색을 확인해
-        <b> 통합검색 순위</b>와 <b>카페탭 순위</b>를 기록합니다. '지금 수집'으로 즉시 확인도 가능합니다(에이전트 실행 필요).
+        블로그/카페 글 URL과 키워드를 등록하면, 로컬 에이전트(집 PC)가 매일(새벽) 네이버 검색을 확인해
+        <b> 통합검색 순위</b>와 <b>탭 순위</b>(블로그 글→블로그탭, 카페 글→카페탭)를 기록합니다. '지금 수집'으로 즉시 확인도 가능합니다(에이전트 실행 필요).
       </p>
 
       {/* 등록 폼 */}
@@ -65,8 +65,8 @@ export default function CafeRankPage() {
           <input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 전포동 맛집" style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
         </div>
         <div style={{ flex: "2 1 300px" }}>
-          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>카페 글 URL</label>
-          <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://cafe.naver.com/..." style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>글 URL (블로그/카페)</label>
+          <input value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://blog.naver.com/... 또는 https://cafe.naver.com/..." style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
         </div>
         <div style={{ flex: "1 1 120px" }}>
           <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>별칭(선택)</label>
@@ -87,7 +87,7 @@ export default function CafeRankPage() {
               <th style={th}>키워드 / 별칭</th>
               <th style={th}>카페 글 URL</th>
               <th style={th}>통합검색</th>
-              <th style={th}>카페탭</th>
+              <th style={th}>탭 순위</th>
               <th style={th}>최근 수집</th>
               <th style={th}>최근 추이(통검)</th>
               <th style={th}></th>
