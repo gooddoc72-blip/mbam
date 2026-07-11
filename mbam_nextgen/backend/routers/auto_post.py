@@ -124,6 +124,7 @@ class AutoPostRequest(BaseModel):
     card_count: Optional[int] = 3   # 카드뉴스 자동 생성 장수(카페)
     track_rank: Optional[bool] = False  # 카페 발행 후 통검 순위 추적 자동 등록
     generate_ai_images: Optional[bool] = False  # 나노바나나(Gemini) AI 이미지 자동 생성·삽입
+    ai_supplement_count: Optional[int] = 0       # 실사진이 있어도 AI 연출컷을 N장 추가(상품 블로그)
     prompt_category: Optional[str] = None  # 예: 'content_collect'(글감수집 전용 프롬프트)
     include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
     
@@ -258,6 +259,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     source_data=req.source_data,
                     generate_card_news=req.generate_card_news,
                     generate_ai_images=ai_images,
+                    ai_supplement_count=req.ai_supplement_count,
                     use_tethering=req.use_tethering,
                     insert_map=req.insert_map,
                     map_query=req.map_query,
@@ -278,6 +280,10 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     promo_type=req.promo_type,
                     distribution_mode=req.distribution_mode,
                     generate_ai_images=ai_images,
+                    ai_supplement_count=req.ai_supplement_count,
+                    image_folder_path=req.image_folder_path,
+                    source_data=req.source_data,
+                    generate_card_news=req.generate_card_news,
                     insert_map=req.insert_map,
                     map_query=req.map_query
                 )

@@ -25,7 +25,8 @@ function BlogPostingContent() {
   const [generateCardNews, setGenerateCardNews] = useState(isHospital ? false : true);  // 병원: 카드뉴스 대신 나노바나나 AI 이미지
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
-  const [includeSourceLink, setIncludeSourceLink] = useState(false); // 본문 끝 출처 링크 (기본 OFF)
+  const [includeSourceLink, setIncludeSourceLink] = useState(pathname === "/shopping-partners-blog"); // 본문 끝 상품/출처 링크 (쇼핑파트너스=유입용 기본 ON)
+  const [aiSupplementCount, setAiSupplementCount] = useState(pathname === "/shopping-partners-blog" ? 2 : 0); // 실사진 + AI 연출컷 N장 보조
 
   const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
   const accountsHydrated = useRef(false);  // 최초 마운트(로드 전)의 빈 기본행이 저장을 덮어쓰지 않도록
@@ -611,7 +612,9 @@ function BlogPostingContent() {
         schedule_date: scheduleDate,
         schedule_time: scheduleTime,
         use_tethering: useTethering,
-        generate_card_news: generateCardNews
+        generate_card_news: generateCardNews,
+        ai_supplement_count: Number(aiSupplementCount) || 0,
+        include_source_link: includeSourceLink
       };      const res = await fetchWithAuth("/api/auto_post/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -896,7 +899,16 @@ function BlogPostingContent() {
                 <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
                   <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
-                  ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기
+                  ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기 (실사진)
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.5rem", fontSize: "0.85rem", color: "#475569" }}>
+                  🎨 AI 연출컷
+                  <input type="number" min="0" max="3" value={aiSupplementCount} onChange={e => setAiSupplementCount(e.target.value)} style={{ width: "56px", padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "5px" }} />
+                  장 추가 <span style={{ color: "#94a3b8", fontSize: "0.78rem" }}>(실사진 + 분위기/사용장면 연출컷. 실물 재현 X)</span>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: includeSourceLink ? "#16a34a" : "#64748b" }}>
+                  <input type="checkbox" checked={includeSourceLink} onChange={e => setIncludeSourceLink(e.target.checked)} />
+                  🔗 본문에 상품 링크 삽입 (유입용 — 블로그→상품 방문)
                 </label>
               </div>
               )}

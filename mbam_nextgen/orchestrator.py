@@ -425,6 +425,7 @@ class WorkflowOrchestrator:
         source_data: str = None,
         generate_card_news: bool = False,
         generate_ai_images: bool = False,   # 나노바나나(Gemini) AI 이미지 자동 생성·삽입 (병원 등)
+        ai_supplement_count: int = 0,        # 실사진이 있어도 AI 연출컷을 N장 추가(상품 블로그 등)
         blog_id: str = None,   # 로그인ID와 다른 실제 블로그 주소(예: bonetacasa). 있으면 다이렉트 진입에 사용
         **kwargs
     ):
@@ -547,7 +548,28 @@ class WorkflowOrchestrator:
                             if washed: washed_images.append(washed)
                         else:
                             washed_images.append(img)
-            
+
+            # (A') 실사진 + AI 연출컷 보조 — 실사진이 있어도 나노바나나 연출컷을 N장 추가(상품 블로그 등)
+            #      제품 실물은 실사진으로, 연출컷은 분위기/사용장면(실물 재현 X)으로 보강.
+            if washed_images and int(ai_supplement_count or 0) > 0:
+                try:
+                    from mbam_nextgen.services.soul import SoulRewriter
+                    import uuid as _uuid_sup
+                    _soul = SoulRewriter()
+                    _n = max(1, min(int(ai_supplement_count), 3))
+                    _prompts = await _soul.generate_blog_image_prompts(
+                        title=blog_title, content=blog_content, keyword=keyword, category="product", n=_n)
+                    if _prompts:
+                        _out = os.path.join(os.getcwd(), "generated_images", "ai", f"{account_id}_sup_{_uuid_sup.uuid4().hex[:6]}")
+                        _paths = await _soul.generate_images(_prompts, _out, filename_prefix=f"aisup_{account_id}")
+                        for _i, _gp in enumerate(_paths):
+                            _w = self.armor.wash_image(_gp, f"washed_aisup_{account_id}_{_i}.jpg") if wash_images else _gp
+                            washed_images.append(_w if _w else _gp)
+                        logger.info(f"[Orchestrator] AI 연출컷 {len(_paths)}장 추가 (실사진+연출컷 총 {len(washed_images)}장)")
+                        blog_content = self._align_card_markers(blog_content, len(washed_images))
+                except Exception as _e:
+                    logger.error(f"[Orchestrator] AI 연출컷 추가 실패(무시): {_e}")
+
             # (B) 테스트 이미지 (기존 방식)
             if not washed_images and test_image:
                 logger.info("🖼️ [Orchestrator] 기본 이미지 세척 중...")

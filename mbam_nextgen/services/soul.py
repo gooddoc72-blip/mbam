@@ -593,6 +593,15 @@ class SoulRewriter:
                 "Strictly: no text/letters/numbers/watermark rendered in the image, no blood or graphic wounds, "
                 "no real celebrities, no brand logos, safe-for-work."
             )
+        elif (category or "").lower() in ("product", "shopping", "product_scene"):
+            style_guide = (
+                "This is a PRODUCT REVIEW blog. Produce LIFESTYLE/CONTEXT staging images that set the mood and "
+                "usage scene for the product CATEGORY — NOT a recreation of the specific branded product. "
+                "Examples: the item in cozy daily use, a tasteful flat-lay on a wooden desk, warm interior scene, "
+                "hands using it in natural daylight, magazine editorial mood, soft shadows, inviting warm tone. "
+                "Do NOT recreate the exact branded product, packaging, or logos; keep any product shape generic/blurred. "
+                "Strictly: no text/letters/numbers/watermark, no brand logos, no identifiable real faces in focus, safe-for-work."
+            )
         else:
             style_guide = (
                 "Produce photorealistic, clean, blog-friendly images, one matching each major section of the post. "
