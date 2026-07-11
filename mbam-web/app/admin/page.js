@@ -454,8 +454,8 @@ export default function AdminDashboard() {
               </div>
               <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "1rem" }}>{`여기에서 설정한 프롬프트는 블로그 포스팅 자동화 시 AI(클로드/제미나이)에 기본 지시어로 주입됩니다. {keyword}, {combined_text} 등의 변수를 적절히 활용할 수 있습니다.`}</p>
               
-              {/* 카테고리 탭 */}
-              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "1px solid #cbd5e1", paddingBottom: "0.5rem", overflowX: "auto" }}>
+              {/* 카테고리 탭 — 좁은 화면에서는 가로 스크롤 대신 여러 줄로 접힘 */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "1px solid #cbd5e1", paddingBottom: "0.5rem" }}>
                 {promptCategories.map(cat => (
                   <button
                     key={cat.id}
