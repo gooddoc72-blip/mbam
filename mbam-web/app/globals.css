@@ -178,6 +178,10 @@ h1, h2, h3 {
   .grid-6 { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ===== 반응형 공통 안전장치 (데스크톱에도 무해) ===== */
+img, video { max-width: 100%; height: auto; }
+input, select, textarea { max-width: 100%; box-sizing: border-box; }
+
 /* ===== 반응형 앱 셸 (사이드바 + 메인) ===== */
 .app-shell { display: flex; min-height: 100vh; }
 .app-main { flex: 1; padding: 2rem; height: 100vh; overflow-y: auto; min-width: 0; box-sizing: border-box; }
@@ -209,11 +213,22 @@ h1, h2, h3 {
     background: rgba(0, 0, 0, 0.4);
   }
 
-  /* 메인: 햄버거 자리 확보 + 패딩 축소 + 높이 자동(모바일 스크롤) */
-  .app-main { padding: 3.5rem 1rem 1.5rem 1rem; height: auto; min-height: 100vh; }
+  /* 메인: 햄버거 자리 확보 + 패딩 축소 + 높이 자동(모바일 스크롤) + 가로 넘침 방지 */
+  .app-main { padding: 3.5rem 1rem 1.5rem 1rem; height: auto; min-height: 100vh; overflow-x: hidden; }
 
   /* 표가 넘칠 때 가로 스크롤 허용 */
   table { display: block; overflow-x: auto; white-space: nowrap; max-width: 100%; }
+}
+
+/* 태블릿↓: 인라인 스타일로 잡힌 2~3단 그리드를 1단으로 (React style="grid-template-columns: 1fr 1fr ..." 대응) */
+@media (max-width: 768px) {
+  [style*="1fr 1fr"] { grid-template-columns: 1fr !important; }
+  /* 고정폭 요소가 화면을 넘지 않도록 */
+  [style*="width: 250px"], [style*="width:250px"],
+  [style*="width: 300px"], [style*="width:300px"],
+  [style*="width: 340px"], [style*="width:340px"] { width: 100% !important; }
+  /* 좌우 2단 flex 레이아웃(발행 화면 등)이 세로로 쌓이도록 */
+  [style*="flex-wrap: wrap"] { row-gap: 1rem; }
 }
 
 @media (max-width: 480px) {
