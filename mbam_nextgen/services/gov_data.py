@@ -3,9 +3,14 @@ import os
 import asyncio
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# 글감 캐시의 '오늘 수집분' 판정은 한국 날짜(KST) 기준으로 통일한다.
+# (Railway 컨테이너는 UTC라 naive now()로 날짜를 비교하면 09:00 KST 경계에서 어긋남)
+KST = ZoneInfo("Asia/Seoul")
 
 try:
     import requests
@@ -453,7 +458,8 @@ class GovDataCollector:
         with open(path, "w", encoding="utf-8") as f:
             json.dump({
                 "category": category,
-                "updated": datetime.now().isoformat(),
+                # KST 시각으로 기록 → 서버(UTC)/로컬(KST) 어디서 저장하든 '오늘' 판정이 일관됨
+                "updated": datetime.now(KST).isoformat(),
                 "items": data
             }, f, ensure_ascii=False, indent=2)
 
@@ -465,6 +471,28 @@ class GovDataCollector:
                     return json.load(f).get("items", [])
             except: return []
         return []
+
+    def is_cached_today(self, category: str) -> bool:
+        """캐시가 '오늘(KST)' 수집분인지. 매일 1회 갱신 판정용.
+        - 파일 없음/비어있음 → False (수집 필요)
+        - updated 날짜가 오늘 KST 와 다르면 → False (어제 이후 → 재수집 필요)
+        - 구버전(naive/UTC) 타임스탬프도 KST 로 해석해 하위호환."""
+        path = self._get_cache_path(category)
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                blob = json.load(f)
+            if not blob.get("items"):
+                return False
+            dt = datetime.fromisoformat(blob.get("updated", ""))
+            if dt.tzinfo is None:
+                # 구버전은 저장 당시 서버 로컬(UTC 가정) → UTC 로 간주 후 KST 변환
+                from datetime import timezone
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(KST).date() == datetime.now(KST).date()
+        except Exception:
+            return False
 
     def get_cache_time(self, category: str) -> str:
         path = self._get_cache_path(category)

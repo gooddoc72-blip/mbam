@@ -27,6 +27,16 @@ from mbam_nextgen.backend import jobs as jobsvc
 logger = logging.getLogger("ContentDailyScheduler")
 KST = ZoneInfo("Asia/Seoul")
 
+# [A] 기본 수집 카테고리: 활성 매일예약·관심(⭐)이 없어도 항상 수집하는 핵심 정부지원 카테고리.
+# (사용자가 관심 지정을 안 해도 대표 글감은 매일 채워지도록 — 이름은 GovDataCollector.CATEGORIES 키와 일치)
+DEFAULT_CATEGORIES = {
+    "공공서비스",
+    "소상공인24 (sbiz24)",
+    "기업마당 (Bizinfo)",
+    "복지로 (Bokjiro)",
+    "창업진흥원 (K-startup)",
+}
+
 _running = False                       # 수집이 1분 넘게 걸릴 수 있어 중복 실행 방지
 _attempted = {"date": None, "cats": set()}  # 같은 날 재시도(빈결과 반복) 방지
 
@@ -45,7 +55,7 @@ async def collect_due_content():
         sch = db.query(ContentSchedule).first()
         if not sch or not sch.schedule_time or sch.schedule_time > hhmm:
             return
-        cats = set()
+        cats = set(DEFAULT_CATEGORIES)  # [A] 핵심 카테고리는 항상 포함
         for row in db.query(BlogSchedule.content_category).filter(BlogSchedule.is_active == 1).distinct():
             if row[0]:
                 cats.add(row[0])
@@ -72,8 +82,8 @@ async def collect_due_content():
         for cat in cats:
             if cat in _attempted["cats"]:
                 continue                       # 오늘 이미 시도함
-            if collector.load_cache(cat):
-                continue                       # 이미 캐시 있음(오늘 수집됨)
+            if collector.is_cached_today(cat):
+                continue                       # [B] 오늘(KST) 수집분이 이미 있음 — 어제 캐시면 재수집
             _attempted["cats"].add(cat)        # 시도 마킹(빈결과 반복 호출 방지)
             try:
                 logger.info(f"[ContentDaily] {hhmm} KST — '{cat}' 글감 자동수집 시작")
