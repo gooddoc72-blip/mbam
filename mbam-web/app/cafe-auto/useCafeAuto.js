@@ -540,7 +540,8 @@ export function useCafeAuto() {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (data.success && data.task_id) { last = data.task_id; started++; }
+        // 클라우드 모드는 에이전트 잡으로 적재되어 {mode:'agent', job_id} 를 반환 → 이것도 '시작 성공'으로 인정
+        if ((data.success && data.task_id) || data.job_id) { last = data.task_id || data.job_id; started++; }
         if (i < savedManuscripts.length - 1 && accountDelay > 0) {
           await cancellableWait(accountDelay * 60 * 1000);
         }
