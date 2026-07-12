@@ -161,7 +161,7 @@ export default function ImageWashPage() {
       <h1 style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#1e293b", marginBottom: "0.5rem" }}>이미지 일괄 편집기</h1>
       <p style={{ color: "#64748b", marginBottom: "2rem" }}>수동: 최대 10개 이미지 (각 5MB 이하) / 자동: 블로그 캠페인 수량만큼 일괄 생성</p>
 
-      <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div className="iw-row" style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start", flexWrap: "wrap" }}>
         
         {/* Left Panel: Files */}
         <div style={{ width: "220px", display: "flex", flexDirection: "column", gap: "1rem" }}>
