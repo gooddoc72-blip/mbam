@@ -244,6 +244,40 @@ input, select, textarea { max-width: 100%; box-sizing: border-box; }
 /* 한글이 폭 부족 시 글자 단위로 세로 배열되는 것 방지(단어 단위 줄바꿈) */
 .cc-header, .cc-schedule, .cc-list-header, .cc-grid { word-break: keep-all; }
 
+/* 황금키워드 표: 폰에서는 9열 표 대신 행별 카드로 변환(각 셀 앞에 항목명 라벨) */
+@media (max-width: 768px) {
+  .cc-golden-table { overflow-x: visible; }
+  .cc-golden-table table { display: block; white-space: normal; }
+  .cc-golden-table thead { display: none; }
+  .cc-golden-table tbody { display: block; }
+  .cc-golden-table tr {
+    display: block; background: #fff;
+    border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 0.3rem 0.2rem; margin-bottom: 1rem;
+  }
+  .cc-golden-table td {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; white-space: normal;
+    text-align: right !important;
+    padding: 0.5rem 0.9rem !important; border: none !important;
+  }
+  .cc-golden-table td::before {
+    content: attr(data-label);
+    font-weight: 700; color: #64748b; text-align: left; flex-shrink: 0;
+  }
+  /* 키워드 셀은 내용이 길어 위→아래로 */
+  .cc-golden-table td[data-label="키워드"] {
+    flex-direction: column; align-items: flex-start; text-align: left !important;
+  }
+  .cc-golden-table td[data-label="키워드"] > div { max-width: 100% !important; }
+  /* 작성 버튼: 라벨 아래로 두 버튼이 폭을 채우도록 */
+  .cc-golden-table td[data-label="작성"] { flex-wrap: wrap; justify-content: flex-end; }
+  .cc-golden-table td[data-label="작성"] button {
+    flex: 1 1 45%; margin: 0.25rem 0 0 0 !important;
+    padding: 0.6rem !important; font-size: 0.85rem !important;
+  }
+}
+
 @media (max-width: 480px) {
   .app-main { padding: 3.4rem 0.6rem 1rem 0.6rem; }
   .glass-card { padding: 1rem; }

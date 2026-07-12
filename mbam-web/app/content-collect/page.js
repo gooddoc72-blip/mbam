@@ -300,7 +300,7 @@ export default function ContentCollectPage() {
       {/* 💎 황금키워드 추천 패널 (상단) */}
       {(goldenLoading || golden || goldenError) && (
         <div className="glass-card" style={{ padding: "2rem", marginBottom: "2rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
             <h2 style={{ fontSize: "1.4rem", color: "#1e293b" }}>
               💎 황금키워드 추천 <span style={{ fontSize: "0.9rem", color: "#94a3b8", fontWeight: "normal" }}>({selectedCat})</span>
             </h2>
@@ -324,7 +324,7 @@ export default function ContentCollectPage() {
           ) : golden?.keywords?.length === 0 ? (
             <div style={{ padding: "1.5rem", textAlign: "center", color: "#64748b" }}>추천할 키워드를 찾지 못했습니다.</div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div className="cc-golden-table" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
                 <thead>
                   <tr style={{ background: "#f8fafc", color: "#475569", textAlign: "left" }}>
@@ -346,8 +346,8 @@ export default function ContentCollectPage() {
                     const matched = matchItem(k.keyword); // 작성 시 함께 넘어갈 글감
                     return (
                       <tr key={k.keyword} style={{ borderTop: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: "0.6rem 0.8rem", color: "#94a3b8" }}>{i + 1}</td>
-                        <td style={{ padding: "0.6rem 0.8rem", color: "#1e293b" }}>
+                        <td data-label="#" style={{ padding: "0.6rem 0.8rem", color: "#94a3b8" }}>{i + 1}</td>
+                        <td data-label="키워드" style={{ padding: "0.6rem 0.8rem", color: "#1e293b" }}>
                           <div style={{ fontWeight: "bold" }}>{k.keyword}</div>
                           <div
                             title={matched ? matched.title : `정확 매칭 글감이 없어 '${selectedCat}' 수집 글감을 참고자료로 함께 전달합니다.`}
@@ -356,23 +356,23 @@ export default function ContentCollectPage() {
                             {matched ? `📎 ${matched.title}` : "📎 카테고리 글감 참고"}
                           </div>
                         </td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "right" }}>{k.volume?.toLocaleString()}</td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "center" }}>
+                        <td data-label="월검색량" style={{ padding: "0.6rem 0.8rem", textAlign: "right" }}>{k.volume?.toLocaleString()}</td>
+                        <td data-label="경쟁도" style={{ padding: "0.6rem 0.8rem", textAlign: "center" }}>
                           <span style={{ color: compColor, fontWeight: "bold" }}>{k.comp || "-"}</span>
                         </td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "right", color: "#64748b" }}>{k.blog_docs == null ? "측정실패" : k.blog_docs.toLocaleString()}</td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "right", color: "#64748b" }}>{k.cafe_docs == null ? "측정실패" : k.cafe_docs.toLocaleString()}</td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "center" }}>
+                        <td data-label="블로그 문서" style={{ padding: "0.6rem 0.8rem", textAlign: "right", color: "#64748b" }}>{k.blog_docs == null ? "측정실패" : k.blog_docs.toLocaleString()}</td>
+                        <td data-label="카페 문서" style={{ padding: "0.6rem 0.8rem", textAlign: "right", color: "#64748b" }}>{k.cafe_docs == null ? "측정실패" : k.cafe_docs.toLocaleString()}</td>
+                        <td data-label="추천 채널" style={{ padding: "0.6rem 0.8rem", textAlign: "center" }}>
                           {k.channel ? (
                             <span style={{ background: chanColor, color: "white", padding: "0.15rem 0.6rem", borderRadius: "999px", fontSize: "0.8rem", fontWeight: "bold" }}>
                               {k.channel === "카페" ? "☕ 카페" : "📝 블로그"}
                             </span>
                           ) : "-"}
                         </td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "right", fontWeight: "bold", color: "#d97706" }}>
+                        <td data-label="황금점수" style={{ padding: "0.6rem 0.8rem", textAlign: "right", fontWeight: "bold", color: "#d97706" }}>
                           {k.gold == null ? "-" : k.gold.toLocaleString()}
                         </td>
-                        <td style={{ padding: "0.6rem 0.8rem", textAlign: "center", whiteSpace: "nowrap" }}>
+                        <td data-label="작성" style={{ padding: "0.6rem 0.8rem", textAlign: "center", whiteSpace: "nowrap" }}>
                           <button
                             onClick={() => goWrite("블로그", k.keyword)}
                             title={k.channel === "블로그" ? "추천 채널" : "블로그로 작성"}
