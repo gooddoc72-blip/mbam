@@ -16,8 +16,15 @@ class PlaceReviewService:
         """방문자 리뷰 및 사진 수집 (Apollo State 기반, 초고속/우회)"""
         print(f"[PlaceReview] 플레이스 리뷰 수집 시작: {place_url}")
         
-        # Ensure URL points to the review/visitor tab
-        if "/home" in place_url:
+        # 네이버 플레이스 URL 정규화: 어떤 형식이든 place id 를 뽑아
+        # Apollo State 가 인라인되는 m.place.naver.com 형식으로 변환한다.
+        # (map.naver.com/p/entry/place/{id} 는 SPA 셸이라 리뷰 데이터가 없어 0건이 됨)
+        pid_match = re.search(r'(?:place|restaurant|hairshop|hospital|attraction|entry/place)/(\d+)', place_url)
+        if not pid_match:
+            pid_match = re.search(r'(\d{6,})', place_url)  # 순수 숫자 id 폴백
+        if pid_match:
+            review_url = f"https://m.place.naver.com/place/{pid_match.group(1)}/review/visitor"
+        elif "/home" in place_url:
             review_url = place_url.replace("/home", "/review/visitor")
         elif "/review/visitor" not in place_url:
             review_url = place_url.rstrip("/") + "/review/visitor"
