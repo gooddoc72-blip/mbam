@@ -181,6 +181,25 @@ class ContentSchedule(Base):
     interest_categories = Column(String, default="") # Comma-separated list of categories
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class ContentCache(Base):
+    """수집된 글감 영속 저장(카테고리별 JSON 블롭).
+    Railway 는 재배포 때 파일캐시가 초기화되므로 DB 에 보관해 유지한다."""
+    __tablename__ = "content_cache"
+
+    category = Column(String, primary_key=True, index=True)  # 카테고리명이 키
+    items = Column(Text)     # json.dumps(list) — 수집 아이템 목록
+    updated = Column(String) # KST isoformat (파일캐시와 동일 포맷 → 파싱 로직 재사용)
+
+
+class GoldenCache(Base):
+    """황금키워드 분석 결과 영속 저장(카테고리별). 파일캐시와 동일하게 재배포에도 유지."""
+    __tablename__ = "golden_cache"
+
+    category = Column(String, primary_key=True, index=True)
+    payload = Column(Text)   # json.dumps(result dict — 내부에 updated 포함)
+    updated = Column(String) # KST isoformat
+
 class PlaceNewsSchedule(Base):
     __tablename__ = "place_news_schedules"
 

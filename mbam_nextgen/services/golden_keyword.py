@@ -140,10 +140,48 @@ def _cache_path(category: str) -> str:
     return os.path.join(_DATA_PATH, f"golden_{safe}.json")
 
 
+def _db_write_golden(category: str, out: dict):
+    """DB 영속(재배포에도 유지). 실패해도 파일 저장은 계속된다."""
+    try:
+        from mbam_nextgen.backend.database import SessionLocal, GoldenCache
+    except Exception:
+        return
+    db = SessionLocal()
+    try:
+        payload = json.dumps(out, ensure_ascii=False)
+        row = db.query(GoldenCache).filter(GoldenCache.category == category).first()
+        if row:
+            row.payload = payload
+            row.updated = out.get("updated", "")
+        else:
+            db.add(GoldenCache(category=category, payload=payload, updated=out.get("updated", "")))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _db_read_golden(category: str):
+    try:
+        from mbam_nextgen.backend.database import SessionLocal, GoldenCache
+    except Exception:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.query(GoldenCache).filter(GoldenCache.category == category).first()
+        return json.loads(row.payload) if row and row.payload else None
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+
 def save_cache(category: str, result: dict) -> dict:
-    """분석 결과를 파일에 저장(메뉴 이동/재접속 후에도 유지). updated 타임스탬프 부여."""
+    """분석 결과를 DB(영속)+파일에 저장(메뉴 이동/재접속·재배포 후에도 유지)."""
     from datetime import datetime
     out = {**result, "updated": datetime.now().isoformat()}
+    _db_write_golden(category, out)
     try:
         with open(_cache_path(category), "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
@@ -153,6 +191,10 @@ def save_cache(category: str, result: dict) -> dict:
 
 
 def load_cache(category: str):
+    # DB 우선(재배포에도 유지) → 파일 폴백
+    blob = _db_read_golden(category)
+    if blob is not None:
+        return blob
     path = _cache_path(category)
     if os.path.exists(path):
         try:

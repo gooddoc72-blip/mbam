@@ -453,55 +453,103 @@ class GovDataCollector:
         safe_name = re.sub(r'[^a-zA-Z0-9가-힣]', '_', category)
         return os.path.join(DATA_PATH, f"cache_{safe_name}.json")
 
-    def save_cache(self, category: str, data: list):
+    # ── 영속 캐시: DB(Postgres) 우선, 파일은 폴백/로컬 호환 ──────────────
+    @staticmethod
+    def _db_read(category: str):
+        """DB 에서 {'items': [...], 'updated': iso} 반환. 부재/실패 시 None."""
+        try:
+            from mbam_nextgen.backend.database import SessionLocal, ContentCache
+        except Exception:
+            return None
+        db = SessionLocal()
+        try:
+            row = db.query(ContentCache).filter(ContentCache.category == category).first()
+            if not row:
+                return None
+            items = json.loads(row.items) if row.items else []
+            return {"items": items, "updated": row.updated}
+        except Exception:
+            return None
+        finally:
+            db.close()
+
+    @staticmethod
+    def _db_write(category: str, data: list, updated_iso: str):
+        try:
+            from mbam_nextgen.backend.database import SessionLocal, ContentCache
+        except Exception:
+            return
+        db = SessionLocal()
+        try:
+            payload = json.dumps(data, ensure_ascii=False)
+            row = db.query(ContentCache).filter(ContentCache.category == category).first()
+            if row:
+                row.items = payload
+                row.updated = updated_iso
+            else:
+                db.add(ContentCache(category=category, items=payload, updated=updated_iso))
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+    def _read_blob(self, category: str):
+        """DB 우선 → 파일 폴백. {'items':[...], 'updated': iso} 또는 None."""
+        blob = self._db_read(category)
+        if blob is not None:
+            return blob
         path = self._get_cache_path(category)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "category": category,
-                # KST 시각으로 기록 → 서버(UTC)/로컬(KST) 어디서 저장하든 '오늘' 판정이 일관됨
-                "updated": datetime.now(KST).isoformat(),
-                "items": data
-            }, f, ensure_ascii=False, indent=2)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                return {"items": d.get("items", []), "updated": d.get("updated", "")}
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _kst_date(updated_iso: str):
+        """updated 문자열 → KST date. 실패 시 None. 구버전 naive 는 UTC 로 간주."""
+        try:
+            dt = datetime.fromisoformat(updated_iso)
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            from datetime import timezone
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(KST).date()
+
+    def save_cache(self, category: str, data: list):
+        # KST 시각으로 기록 → 서버(UTC)/로컬(KST) 어디서 저장하든 '오늘' 판정 일관
+        updated_iso = datetime.now(KST).isoformat()
+        # 1) DB 영속(재배포에도 유지)  2) 파일(로컬 설치형/폴백)
+        self._db_write(category, data, updated_iso)
+        try:
+            with open(self._get_cache_path(category), "w", encoding="utf-8") as f:
+                json.dump({"category": category, "updated": updated_iso, "items": data},
+                          f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def load_cache(self, category: str) -> list:
-        path = self._get_cache_path(category)
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f).get("items", [])
-            except: return []
-        return []
+        blob = self._read_blob(category)
+        return blob["items"] if blob else []
 
     def is_cached_today(self, category: str) -> bool:
-        """캐시가 '오늘(KST)' 수집분인지. 매일 1회 갱신 판정용.
-        - 파일 없음/비어있음 → False (수집 필요)
-        - updated 날짜가 오늘 KST 와 다르면 → False (어제 이후 → 재수집 필요)
-        - 구버전(naive/UTC) 타임스탬프도 KST 로 해석해 하위호환."""
-        path = self._get_cache_path(category)
-        if not os.path.exists(path):
+        """캐시가 '오늘(KST)' 수집분인지. 매일 1회 갱신 판정용."""
+        blob = self._read_blob(category)
+        if not blob or not blob.get("items"):
             return False
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                blob = json.load(f)
-            if not blob.get("items"):
-                return False
-            dt = datetime.fromisoformat(blob.get("updated", ""))
-            if dt.tzinfo is None:
-                # 구버전은 저장 당시 서버 로컬(UTC 가정) → UTC 로 간주 후 KST 변환
-                from datetime import timezone
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(KST).date() == datetime.now(KST).date()
-        except Exception:
-            return False
+        d = self._kst_date(blob.get("updated", ""))
+        return d is not None and d == datetime.now(KST).date()
 
     def get_cache_time(self, category: str) -> str:
-        path = self._get_cache_path(category)
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    dt_str = json.load(f).get("updated", "없음")
-                    if dt_str != "없음":
-                        dt = datetime.fromisoformat(dt_str)
-                        return dt.strftime("%Y-%m-%d %H:%M")
-            except: return "없음"
-        return "없음"
+        blob = self._read_blob(category)
+        if not blob or not blob.get("updated"):
+            return "없음"
+        try:
+            return datetime.fromisoformat(blob["updated"]).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return "없음"
