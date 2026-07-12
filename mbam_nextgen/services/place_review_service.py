@@ -49,6 +49,16 @@ class PlaceReviewService:
                     raise Exception("Apollo State not found in HTML (Bot detection or DOM change)")
                 
                 data = json.loads(match.group(1))
+
+                # 가게 이름 추출(원고 제목/키워드·블로그 검색어용) — 장소 엔티티(name + 주소/카테고리 등)
+                place_name = ""
+                for _k, _v in data.items():
+                    if isinstance(_v, dict) and isinstance(_v.get("name"), str) and _v.get("name").strip():
+                        if any(_v.get(f) for f in ("category", "categoryCodeList", "road", "address",
+                                                    "fullAddress", "virtualPhone", "phone", "conveniences", "businessCategory")):
+                            place_name = _v["name"].strip()
+                            break
+
                 reviews = []
                 image_urls = []
                 
@@ -81,6 +91,7 @@ class PlaceReviewService:
 
                 return {
                     "success": True,
+                    "place_name": place_name,
                     "reviews": reviews[:40], # 최대 40개
                     "image_paths": downloaded_paths
                 }

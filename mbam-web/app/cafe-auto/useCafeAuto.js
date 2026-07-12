@@ -403,11 +403,14 @@ export function useCafeAuto() {
         ? chosen.map(a => ({ id: a.naver_id, checked: true }))
         : [{ id: "preview", checked: true }];
       // 맛집 모드: 수집한 방문자 리뷰를 근거로 '내돈내산 후기'로 작성 (정보성 프롬프트 X)
+      // 주제 키워드는 수집 소스의 '[가게 이름]'에서 뽑아 정확한 제목이 나오게 함(잔여 정보성 키워드 미사용).
       const isMatjip = mainTab === "matjip";
+      const matjipName = (content.match(/\[가게 이름\]\s*(.+)/) || [])[1];
+      const matjipKeyword = matjipName ? `${matjipName.trim()} 후기` : "맛집 방문 후기";
       const payload = {
         accounts: genAccounts,
         target_keyword: isMatjip
-          ? (targetKeyword || "맛집 방문 후기")
+          ? matjipKeyword
           : (targetKeyword || (title || "").slice(0, 20) || "카페글"),
         ai_provider: "claude",
         source_data: content,            // 현재 글감/참고 내용을 소스로
