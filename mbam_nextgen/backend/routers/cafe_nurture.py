@@ -351,12 +351,23 @@ async def matjip_collect(req: MatjipCollectRequest, db: Session = Depends(get_db
     if not place_url and not keyword:
         raise HTTPException(status_code=400, detail="플레이스 URL 또는 키워드를 입력하세요.")
     payload = {"place_url": place_url, "keyword": keyword}
+    from mbam_nextgen.services.matjip_service import collect_matjip_source
     if jobsvc.is_cloud_mode():
-        # 스크래핑은 로컬 에이전트(집 IP)가 수행 → 잡 적재 후 job_id 반환(프론트가 /api/agent/jobs 폴링)
+        # 1순위: 서버에서 직접 수집 시도. 플레이스 방문자 리뷰는 데이터센터 IP 에서도 httpx 로
+        #        수집 가능(브라우저 불필요) → 플레이스 URL 만 있으면 에이전트 없이 바로 채워진다.
+        if place_url:
+            try:
+                import asyncio
+                res = await asyncio.wait_for(
+                    collect_matjip_source(place_url, keyword, browser_ok=False), timeout=40)
+                if (res or {}).get("source_data"):
+                    return {"success": True, "mode": "inline", "source_data": res["source_data"]}
+            except Exception:
+                pass  # 차단/실패 → 아래 에이전트로 폴백
+        # 2순위: 서버가 못 하면(플레이스 URL 없음/차단, 또는 블로그 후기까지 필요) 로컬 에이전트 잡으로 적재.
         job_id = jobsvc.enqueue_job(db, get_user_id(current_user), "matjip_collect", payload, priority=4)
         return {"success": True, "mode": "job", "job_id": job_id}
-    # 설치형(local): 백엔드가 직접 수집
-    from mbam_nextgen.services.matjip_service import collect_matjip_source
+    # 설치형(local): 백엔드가 직접 수집(브라우저 있음 → 리뷰+블로그 후기 모두)
     res = await collect_matjip_source(place_url, keyword)
     return {"success": True, "mode": "inline", "source_data": res.get("source_data", "")}
 

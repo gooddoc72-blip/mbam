@@ -5,7 +5,11 @@
 """
 
 
-async def collect_matjip_source(place_url: str = "", keyword: str = "", log=None) -> dict:
+async def collect_matjip_source(place_url: str = "", keyword: str = "", log=None, browser_ok: bool = True) -> dict:
+    """맛집 소재 수집.
+    browser_ok=True(로컬 에이전트): 플레이스 리뷰(httpx) + 블로그 후기(playwright) 모두.
+    browser_ok=False(클라우드 서버): 브라우저가 없으므로 플레이스 리뷰(httpx)만 수집.
+      → 플레이스 URL 만 있으면 클라우드에서 에이전트 없이 바로 수집 가능."""
     place_url = (place_url or "").strip()
     keyword = (keyword or "").strip()
 
@@ -36,8 +40,8 @@ async def collect_matjip_source(place_url: str = "", keyword: str = "", log=None
         except Exception as e:
             _log(f"플레이스 리뷰 수집 실패(계속): {e}")
 
-    # 2) 블로그 후기
-    if keyword:
+    # 2) 블로그 후기 (playwright 필요 → 브라우저 가능한 환경에서만. 클라우드 서버는 건너뜀)
+    if keyword and browser_ok:
         try:
             _log(f"'{keyword}' 블로그 후기 수집 중...")
             from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
