@@ -367,8 +367,8 @@ export function useCafeAuto() {
       });
       const data = await res.json();
       if (!res.ok) { alert("수집 실패: " + (data.detail || res.status)); return; }
-      // 이전 정보성/글감수집에서 남은 제목을 비운다(맛집 제목은 AI 원고 생성 시 채워짐)
-      const applySource = (sd) => { setTitle(""); setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
+      // 이전 정보성/글감수집에서 남은 제목·키워드를 비운다(맛집 주제는 리뷰 소스 기반으로 AI가 작성)
+      const applySource = (sd) => { setTitle(""); setTargetKeyword(""); setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
       if (data.mode === "inline") {
         applySource(data.source_data);
         setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
@@ -402,14 +402,18 @@ export function useCafeAuto() {
       const genAccounts = chosen.length > 0
         ? chosen.map(a => ({ id: a.naver_id, checked: true }))
         : [{ id: "preview", checked: true }];
+      // 맛집 모드: 수집한 방문자 리뷰를 근거로 '내돈내산 후기'로 작성 (정보성 프롬프트 X)
+      const isMatjip = mainTab === "matjip";
       const payload = {
         accounts: genAccounts,
-        target_keyword: targetKeyword || (title || "").slice(0, 20) || "카페글",
+        target_keyword: isMatjip
+          ? (targetKeyword || "맛집 방문 후기")
+          : (targetKeyword || (title || "").slice(0, 20) || "카페글"),
         ai_provider: "claude",
         source_data: content,            // 현재 글감/참고 내용을 소스로
         prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory), // 카페 전용 톤 프롬프트
         include_source_link: includeSourceLink,
-        post_purpose: "info",
+        post_purpose: isMatjip ? "review" : "info",   // 맛집=후기 톤, 정보성=info
         target_type: "cafe",
         post_mode: "ai_generate",
       };
