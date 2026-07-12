@@ -292,8 +292,9 @@ export default function PostTab({ s }) {
                   </div>
                 )}
 
-                {/* 글감 소스 토글 — 3방식 중 하나만 노출 (블로그 발행과 통일된 방식) */}
-                {actionType === "post" && (
+                {/* 글감 소스 토글 — 3방식 중 하나만 노출 (블로그 발행과 통일된 방식)
+                    맛집 포스팅은 위 '맛집 소재 수집'이 소스이므로 글감수집 토글은 숨긴다 */}
+                {actionType === "post" && !matjip && (
                   <div style={{ display: "flex", gap: "0.4rem", marginBottom: "1rem", flexWrap: "wrap" }}>
                     {[["collect", "📥 글감수집에서"], ["write", "✍️ 직접 작성"], ["image", "🖼 이미지로"]].map(([k, label]) => (
                       <button key={k} type="button" onClick={() => setSourceMode(k)}
@@ -304,8 +305,8 @@ export default function PostTab({ s }) {
                   </div>
                 )}
 
-                {/* 글감수집에서 글감 선택 (제목/본문 자동 채움) */}
-                {actionType === "post" && sourceMode === "collect" && (
+                {/* 글감수집에서 글감 선택 (제목/본문 자동 채움) — 맛집 모드에선 미노출 */}
+                {actionType === "post" && !matjip && sourceMode === "collect" && (
                   <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", alignItems: "center", flexWrap: "wrap", padding: "0.7rem", background: "#eff6ff", border: "1px dashed #bfdbfe", borderRadius: "6px" }}>
                     <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#1e40af" }}>📚 글감수집에서 선택:</span>
                     <select value={pickCategory} onChange={e => setPickCategory(e.target.value)} style={{ padding: "0.45rem", border: "1px solid #cbd5e1", borderRadius: "4px" }}>
