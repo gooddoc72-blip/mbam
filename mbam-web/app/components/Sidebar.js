@@ -23,7 +23,8 @@ import {
     BarChart3,
     KeyRound,
     Image,
-    Folder
+    Folder,
+    BookOpen
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
 
@@ -87,6 +88,7 @@ const MENU_ITEMS = [
             { name: "이미지 세탁소", path: "/content-image-wash", icon: Image }
         ]
     },
+    { name: "사용 가이드", path: "/guide", icon: BookOpen },
     { name: "계정관리", path: "/multi-task", icon: Layers },
     { name: "설정", path: "/settings", icon: Settings },
     { name: "결제 및 플랜", path: "/billing", icon: CreditCard },
