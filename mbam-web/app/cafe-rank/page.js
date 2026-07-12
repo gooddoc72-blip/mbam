@@ -81,12 +81,12 @@ function CafeRankInner() {
           <label style={{ display: "block", fontSize: "0.8rem", fontWeight: "bold", color: "#334155", marginBottom: "0.3rem" }}>별칭(선택)</label>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="메모" style={{ width: "100%", padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
         </div>
-        <button onClick={addItem} disabled={loading} style={{ padding: "0.65rem 1.2rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap" }}>＋ 추적 추가</button>
+        <button onClick={addItem} disabled={loading} style={{ padding: "0.65rem 1.2rem", background: loading ? "#94a3b8" : "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: loading ? "wait" : "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>＋ 추적 추가</button>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
-        <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: 0 }}>추적 목록 ({shownItems.length})</h2>
-        <button onClick={load} style={{ padding: "0.45rem 0.9rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem" }}>🔄 새로고침</button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem", flexWrap: "wrap", gap: "0.6rem" }}>
+        <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: 0, whiteSpace: "nowrap" }}>추적 목록 ({shownItems.length})</h2>
+        <button onClick={load} style={{ padding: "0.45rem 0.9rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem", whiteSpace: "nowrap" }}>🔄 새로고침</button>
       </div>
 
       <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: "10px", overflowX: "auto" }}>

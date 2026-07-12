@@ -345,17 +345,17 @@ export default function ShoppingRankDashboard() {
   };
 
   return (
-    <main style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
+    <main className="rank-shell" style={{ maxWidth: "1800px", margin: "0 auto", padding: "1.5rem", background: "#f8fafc", height: "100vh", display: "flex", flexDirection: "column" }}>
       <header style={{ marginBottom: "0.5rem" }}>
         <h1 style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#1e293b", margin: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <ShoppingCart size={24} color="#3b82f6"/> 쇼핑 N지수 하이브리드 분석기 (400위 초정밀 딥서치)
         </h1>
       </header>
 
-      <div style={{ display: "flex", gap: "1rem", flex: 1, minHeight: 0 }}>
-        
+      <div className="rank-row" style={{ display: "flex", gap: "1rem", flex: 1, minHeight: 0 }}>
+
         {/* 1. Left Sidebar: 분석리스트 */}
-        <div style={{ width: "260px", background: "white", border: "1px solid #cbd5e1", display: "flex", flexDirection: "column", borderRadius: "8px", overflow: "hidden" }}>
+        <div className="rank-side" style={{ width: "260px", background: "white", border: "1px solid #cbd5e1", display: "flex", flexDirection: "column", borderRadius: "8px", overflow: "hidden" }}>
           <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", padding: "1rem", borderBottom: "1px solid #cbd5e1", margin: 0, background: "#f1f5f9" }}>관심 상품 분석리스트</h2>
           <div style={{ flex: 1, overflowY: "auto", padding: "0.5rem" }}>
             {trackedPlaces.length === 0 ? (
@@ -411,8 +411,8 @@ export default function ShoppingRankDashboard() {
                   <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 씨솔트초콜릿" style={{ flex: 1, padding: "0.6rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} />
                 </div>
               </div>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button type="submit" disabled={loading} style={{ padding: "0.5rem 2rem", height: "38px", background: "#3b82f6", color: "white", fontWeight: "bold", border: "none", cursor: loading ? "wait" : "pointer", borderRadius: "4px", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                <button type="submit" disabled={loading} style={{ padding: "0.5rem 2rem", height: "38px", background: "#3b82f6", color: "white", fontWeight: "bold", border: "none", cursor: loading ? "wait" : "pointer", borderRadius: "4px", display: "flex", alignItems: "center", gap: "0.5rem", whiteSpace: "nowrap", flexShrink: 0 }}>
                   {loading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
                   {loading ? "조회중..." : "초고속 조회"}
                 </button>
@@ -428,7 +428,7 @@ export default function ShoppingRankDashboard() {
                 )}
                 
                 <div style={{ display: "flex", alignItems: "center", marginLeft: "1rem", gap: "0.5rem", borderLeft: "1px solid #e2e8f0", paddingLeft: "1rem" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#10b981", background: "#ecfdf5", padding: "0.4rem 0.8rem", borderRadius: "12px", border: "1px solid #a7f3d0", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#10b981", background: "#ecfdf5", padding: "0.4rem 0.8rem", borderRadius: "12px", border: "1px solid #a7f3d0", display: "flex", alignItems: "center", gap: "0.3rem", whiteSpace: "nowrap" }}>
                     <Zap size={14} /> 매일 새벽 5시 자동 순위 업데이트
                   </span>
                 </div>
@@ -484,8 +484,8 @@ export default function ShoppingRankDashboard() {
                 </button>
 
                 {/* 증감비교 필터 영역 */}
-                <div style={{ display: "flex", alignItems: "center", marginLeft: "1rem", gap: "0.2rem" }}>
-                  <span style={{ fontSize: "0.85rem", color: "#64748b", marginRight: "0.5rem" }}>증감비교:</span>
+                <div style={{ display: "flex", alignItems: "center", marginLeft: "1rem", gap: "0.2rem", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "0.85rem", color: "#64748b", marginRight: "0.5rem", whiteSpace: "nowrap" }}>증감비교:</span>
                   {[1, 5, 7, 10, 14, 20, 30, 60].map(days => (
                     <button
                       key={days}

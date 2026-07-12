@@ -290,6 +290,18 @@ input, select, textarea { max-width: 100%; box-sizing: border-box; }
   }
 }
 
+/* ===== 순위 추적 페이지(쇼핑/쿠팡/블로그/카페) 공통 반응형 =====
+   데스크톱 고정 레이아웃(height:100vh + 가로 flex 패널 + 고정폭 사이드바)을
+   좁은 화면에서 세로 스택 + 자연 높이로 전환 */
+@media (max-width: 900px) {
+  /* 100vh 고정 → 자연 높이(모바일 스크롤) */
+  .rank-shell { height: auto !important; min-height: auto !important; }
+  /* 좌측 사이드바 + 우측 본문 가로 flex → 세로 스택 */
+  .rank-row { flex-wrap: wrap !important; }
+  /* 고정폭 사이드바 → 전체폭, 높이는 제한해 목록만 스크롤 */
+  .rank-side { width: 100% !important; flex: 1 1 100% !important; max-height: 45vh; }
+}
+
 @media (max-width: 480px) {
   .app-main { padding: 3.4rem 0.6rem 1rem 0.6rem; }
   .glass-card { padding: 1rem; }

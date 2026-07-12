@@ -161,7 +161,7 @@ export default function ImageWashPage() {
       <h1 style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#1e293b", marginBottom: "0.5rem" }}>이미지 일괄 편집기</h1>
       <p style={{ color: "#64748b", marginBottom: "2rem" }}>수동: 최대 10개 이미지 (각 5MB 이하) / 자동: 블로그 캠페인 수량만큼 일괄 생성</p>
 
-      <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start", flexWrap: "wrap" }}>
         
         {/* Left Panel: Files */}
         <div style={{ width: "220px", display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -214,26 +214,26 @@ export default function ImageWashPage() {
         </div>
 
         {/* Center Panel: Settings */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem" }}>
-          
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "1rem" }}>
+
           <div style={{ backgroundColor: "#f8faff", border: "1px solid #dbeafe", borderRadius: "8px", padding: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
-              <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#1e3a8a", margin: 0 }}>자동 대량 생성</h2>
-              <span style={{ backgroundColor: "#dbeafe", color: "#2563eb", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.8rem" }}>블로그 캠페인용</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+              <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#1e3a8a", margin: 0, whiteSpace: "nowrap" }}>자동 대량 생성</h2>
+              <span style={{ backgroundColor: "#dbeafe", color: "#2563eb", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.8rem", whiteSpace: "nowrap" }}>블로그 캠페인용</span>
             </div>
             <p style={{ fontSize: "0.9rem", color: "#475569", marginBottom: "1.5rem", lineHeight: 1.5 }}>
               원본 이미지를 순환하며 N장을 생성합니다. 각 이미지마다 노이즈·회전·밝기를 미세 변형하고 EXIF 날짜를 오늘 기준 ±10일 내 랜덤 설정합니다.
             </p>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
-              <span style={{ fontWeight: "bold", color: "#334155" }}>생성 수량</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
+              <span style={{ fontWeight: "bold", color: "#334155", whiteSpace: "nowrap" }}>생성 수량</span>
               <input 
                 type="number" 
                 value={count} 
                 onChange={e => setCount(parseInt(e.target.value))} 
                 style={{ width: "80px", padding: "0.5rem", border: "1px solid #cbd5e1", borderRadius: "4px", textAlign: "center" }}
               />
-              <span style={{ color: "#64748b" }}>장 (최대 200)</span>
+              <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>장 (최대 200)</span>
             </div>
 
             <div style={{ padding: "0.8rem 1rem", border: "1px solid #cbd5e1", borderRadius: "4px", backgroundColor: "white", marginBottom: "1.5rem", fontSize: "0.9rem", color: "#334155" }}>
@@ -261,14 +261,14 @@ export default function ImageWashPage() {
             { label: "워터마크", state: useWatermark, setter: setUseWatermark },
             { label: "회전", state: useRotation, setter: setUseRotation, desc: "(자동 생성 시 기준값 ±2° 랜덤 추가)" },
           ].map((opt, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", padding: "1.2rem", backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
+            <div key={i} style={{ display: "flex", alignItems: "center", padding: "1.2rem", backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", flexWrap: "wrap" }}>
               <input 
                 type="checkbox" 
                 checked={opt.state} 
                 onChange={e => opt.setter(e.target.checked)} 
                 style={{ width: "18px", height: "18px", marginRight: "1rem", cursor: "pointer" }}
               />
-              <span style={{ fontSize: "1rem", fontWeight: "bold", color: "#334155" }}>{opt.label}</span>
+              <span style={{ fontSize: "1rem", fontWeight: "bold", color: "#334155", whiteSpace: "nowrap" }}>{opt.label}</span>
               {opt.desc && <span style={{ marginLeft: "0.5rem", fontSize: "0.9rem", color: "#94a3b8" }}>{opt.desc}</span>}
             </div>
           ))}
@@ -280,8 +280,8 @@ export default function ImageWashPage() {
           
           <div style={{ backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1.5rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-              <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0, color: "#1e293b" }}>미리보기</h3>
-              <button style={{ padding: "0.4rem 0.8rem", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "4px", fontSize: "0.85rem", cursor: "pointer" }}>미리보기 생성</button>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0, color: "#1e293b", whiteSpace: "nowrap" }}>미리보기</h3>
+              <button style={{ padding: "0.4rem 0.8rem", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "4px", fontSize: "0.85rem", cursor: "pointer", whiteSpace: "nowrap" }}>미리보기 생성</button>
             </div>
 
             {selectedOriginal ? (
@@ -340,9 +340,9 @@ export default function ImageWashPage() {
 
       {/* 내 이미지 보관함 */}
       <div style={{ marginTop: "2rem", padding: "1.5rem", background: "white", border: "1px solid #e2e8f0", borderRadius: "10px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
           <h2 style={{ margin: 0, fontSize: "1.1rem", color: "#0f172a" }}>🗂️ 내 이미지 보관함 <span style={{ color: "#94a3b8", fontWeight: "normal", fontSize: "0.9rem" }}>({library.length}/{libMeta.max_files}장)</span></h2>
-          <button onClick={loadLibrary} style={{ fontSize: "0.85rem", padding: "0.4rem 0.9rem", background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>새로고침</button>
+          <button onClick={loadLibrary} style={{ fontSize: "0.85rem", padding: "0.4rem 0.9rem", background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>새로고침</button>
         </div>
         <p style={{ margin: "0 0 1rem", fontSize: "0.85rem", color: "#64748b" }}>세탁한 이미지를 저장해두면, 블로그·카페 발행 때 가져다 쓸 수 있습니다. 서버 용량 보호를 위해 <b>계정당 최대 {libMeta.max_files}장 · {libMeta.ttl_days}일 후 자동 삭제 · 저장 시 자동 압축</b>됩니다.</p>
         {library.length === 0 ? (
