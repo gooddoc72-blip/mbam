@@ -265,7 +265,7 @@ export default function ContentCollectPage() {
 
   return (
     <main style={{ maxWidth: "1400px", margin: "0 auto", padding: "2rem" }}>
-      <header style={{ marginBottom: "2rem", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+      <header className="cc-header" style={{ marginBottom: "2rem", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "1rem" }}>
         <div>
           <h1 style={{ fontSize: "2.5rem", fontWeight: "bold", background: "linear-gradient(90deg, #3b82f6, #8b5cf6)", WebkitBackgroundClip: "text", color: "transparent", marginBottom: "0.5rem" }}>
             📰 글감 수집
@@ -275,8 +275,8 @@ export default function ContentCollectPage() {
           </p>
         </div>
         
-        <div style={{ background: "white", padding: "1rem", borderRadius: "8px", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "1rem", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-          <div style={{ fontSize: "0.9rem", color: "#475569", fontWeight: "bold" }}>🕒 매일 자동 수집 시간</div>
+        <div className="cc-schedule" style={{ background: "white", padding: "1rem", borderRadius: "8px", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap", boxShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
+          <div style={{ fontSize: "0.9rem", color: "#475569", fontWeight: "bold", whiteSpace: "nowrap" }}>🕒 매일 자동 수집 시간</div>
           <input 
             type="time" 
             value={scheduleTime} 
@@ -408,7 +408,7 @@ export default function ContentCollectPage() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "2rem" }}>
+      <div className="cc-grid" style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "2rem" }}>
         
         {/* 좌측 패널 (카테고리) */}
         <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
@@ -498,9 +498,9 @@ export default function ContentCollectPage() {
 
         {/* 우측 메인 패널 (데이터 목록) */}
         <div className="glass-card" style={{ padding: "2rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-            <h2 style={{ fontSize: "1.5rem", color: "#1e293b" }}>📋 {selectedCat} 목록</h2>
-            
+          <div className="cc-list-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
+            <h2 style={{ fontSize: "1.5rem", color: "#1e293b", whiteSpace: "nowrap" }}>📋 {selectedCat} 목록</h2>
+
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input
                 type="text"

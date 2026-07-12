@@ -231,6 +231,19 @@ input, select, textarea { max-width: 100%; box-sizing: border-box; }
   [style*="flex-wrap: wrap"] { row-gap: 1rem; }
 }
 
+/* ===== 글감 수집(content-collect) 반응형 =====
+   좁아지면 카테고리 메뉴 → 목록이 세로로 쌓이고, 라벨/제목은 글자당 한 줄로
+   접히지 않도록(줄바꿈은 단어 단위) 처리 */
+@media (max-width: 900px) {
+  /* 좌측 카테고리(300px) + 우측 목록(1fr) → 세로 1단 */
+  .cc-grid { grid-template-columns: 1fr !important; }
+  /* 헤더: 제목/스케줄 박스가 세로로 쌓이고 스케줄 박스는 전체폭 */
+  .cc-header { flex-direction: column; align-items: stretch !important; }
+  .cc-schedule { width: 100%; }
+}
+/* 한글이 폭 부족 시 글자 단위로 세로 배열되는 것 방지(단어 단위 줄바꿈) */
+.cc-header, .cc-schedule, .cc-list-header, .cc-grid { word-break: keep-all; }
+
 @media (max-width: 480px) {
   .app-main { padding: 3.4rem 0.6rem 1rem 0.6rem; }
   .glass-card { padding: 1rem; }
