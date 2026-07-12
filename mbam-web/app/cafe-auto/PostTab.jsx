@@ -296,6 +296,18 @@ export default function PostTab({ s }) {
                   </div>
                 )}
 
+                {/* 맛집: 내 사진 폴더 지정 (업로드 X). 발행하는 내 PC(에이전트)의 폴더 사진을 글에 넣는다. */}
+                {matjip && (
+                  <div style={{ marginBottom: "1rem", padding: "0.8rem 1rem", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "8px" }}>
+                    <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#3730a3", marginBottom: "0.4rem" }}>🖼 내 사진 폴더 지정 (선택)</div>
+                    <input type="text" placeholder="발행 PC의 이미지 폴더 경로 (예: C:\사진\맛집)" value={imageFolder || ""} onChange={e => setImageFolder(e.target.value)}
+                      style={{ width: "100%", padding: "0.6rem", border: "1px solid #c7d2fe", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.9rem" }} />
+                    <p style={{ margin: "0.45rem 0 0", fontSize: "0.78rem", color: "#4338ca" }}>
+                      * 이 폴더의 사진(.jpg/.png)을 발행 시 글에 넣습니다. <b>발행하는 내 PC(에이전트) 기준 경로</b>예요(업로드 아님). 비워두면 아래 설정대로 AI 카드뉴스가 자동 생성됩니다.
+                    </p>
+                  </div>
+                )}
+
                 {/* 글감 소스 토글 — 3방식 중 하나만 노출 (블로그 발행과 통일된 방식)
                     맛집 포스팅은 위 '맛집 소재 수집'이 소스이므로 글감수집 토글은 숨긴다 */}
                 {actionType === "post" && !matjip && (

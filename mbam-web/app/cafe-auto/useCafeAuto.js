@@ -535,6 +535,7 @@ export function useCafeAuto() {
           publish_mode: "instant", cafe_url: m.cafe_url, board_name: m.board_name,
           cafe_action_type: "post", source_data: m.content, use_tethering: useTethering,
           generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
+          image_folder_path: imageFolder || null,  // 지정한 이미지 폴더(발행 PC=에이전트 기준). 있으면 카드뉴스 대신 사용
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
