@@ -274,11 +274,15 @@ export default function PostTab({ s }) {
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                   <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>3. 원고 만들기</h2>
-                  <button onClick={() => setIsModalOpen(true)} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
-                    ☁️ 웹에서 불러오기
-                  </button>
+                  {/* 맛집 포스팅은 플레이스 URL로 소재를 모으므로 '웹에서 불러오기'는 정보성에서만 노출 */}
+                  {!matjip && (
+                    <button onClick={() => setIsModalOpen(true)} style={{ padding: '0.4rem 0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                      ☁️ 웹에서 불러오기
+                    </button>
+                  )}
                 </div>
-                <input type="text" placeholder={matjip ? "맛집 키워드 (예: 전포동 파스타 맛집)" : "타겟 키워드"} value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />
+                {/* 타겟 키워드 입력칸은 정보성에서만. 맛집은 아래 '맛집 소재 수집'(플레이스 URL)이 소스 */}
+                {!matjip && <input type="text" placeholder="타겟 키워드" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />}
 
                 {/* 맛집 포스팅: 플레이스 URL + 소재 자동 수집 */}
                 {matjip && (
