@@ -90,7 +90,9 @@ smartstore_state.txt
 *.csv
 ~$*
 *.exe
-naver_place_crawler/Output/
+# 마케팅연구소 앱과 무관한 별개 프로젝트 — repo에서 분리(추적/배포 제외)
+naver_place_crawler/
+naver_place_crawler_수정본/
 
 # 비밀키·자격증명 (절대 커밋 금지)
 *.pem
