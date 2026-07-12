@@ -222,7 +222,19 @@ input, select, textarea { max-width: 100%; box-sizing: border-box; }
 
 /* 태블릿↓: 인라인 스타일로 잡힌 2~3단 그리드를 1단으로 (React style="grid-template-columns: 1fr 1fr ..." 대응) */
 @media (max-width: 768px) {
-  [style*="1fr 1fr"] { grid-template-columns: 1fr !important; }
+  /* 인라인 style로 잡힌 다단 그리드를 모바일에서 1단으로 (사이드바형/스탯형 모두 대응)
+     - "1fr 1fr", "1fr 1fr 1fr..." / "1fr 1.5fr"
+     - "300px 1fr", "300px minmax(0, 1fr)" 등 고정폭+가변 사이드바
+     - "repeat(2~6, 1fr)" (auto-fit/auto-fill minmax는 매칭 안 됨 → 본래 반응형 유지) */
+  [style*="1fr 1fr"],
+  [style*="1.5fr"],
+  [style*="px 1fr"],
+  [style*="px minmax"],
+  [style*="repeat(2,"], [style*="repeat(2, "],
+  [style*="repeat(3,"], [style*="repeat(3, "],
+  [style*="repeat(4,"], [style*="repeat(4, "],
+  [style*="repeat(5,"], [style*="repeat(5, "],
+  [style*="repeat(6,"], [style*="repeat(6, "] { grid-template-columns: 1fr !important; }
   /* 고정폭 요소가 화면을 넘지 않도록 */
   [style*="width: 250px"], [style*="width:250px"],
   [style*="width: 300px"], [style*="width:300px"],
