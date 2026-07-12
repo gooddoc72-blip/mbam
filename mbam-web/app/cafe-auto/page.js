@@ -183,7 +183,7 @@ export default function CafeAutoPage() {
         {/* Header Tabs */}
         <div>
           <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "1rem" }}>카페 포스팅</h1>
-          <div style={{ display: "flex", gap: "1rem", borderBottom: "2px solid #e2e8f0" }}>
+          <div style={{ display: "flex", gap: "1rem", borderBottom: "2px solid #e2e8f0", overflowX: "auto" }}>
             {[
               { id: "post", label: "정보성 포스팅" },
               { id: "matjip", label: "맛집 포스팅" },
@@ -193,6 +193,7 @@ export default function CafeAutoPage() {
                 style={{
                   padding: "0.8rem 1.5rem", border: "none", background: "none",
                   fontWeight: "bold", fontSize: "1.05rem", cursor: "pointer",
+                  whiteSpace: "nowrap", flexShrink: 0,
                   color: mainTab === tab.id ? "#2563eb" : "#64748b",
                   borderBottom: mainTab === tab.id ? "3px solid #2563eb" : "3px solid transparent",
                   marginBottom: "-2px"
