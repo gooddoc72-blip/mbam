@@ -43,21 +43,22 @@ Name: "desktopicon"; Description: "바탕화면에 바로가기 만들기"; Grou
 
 [Registry]
 ; 로그인(부팅) 시 에이전트를 콘솔 없이 백그라운드로 자동 실행
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "MarketLabsAgent"; ValueData: "wscript.exe ""{app}\agent_startup.vbs"""; Flags: uninsdeletevalue; Tasks: agentautostart
+; 동봉 pythonw 를 직접 실행(vbs 인코딩/시스템 python 탐색 변수 제거). agent.py 가 cwd 를 스스로 고정.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "MarketLabsAgent"; ValueData: """{app}\{#AgentPyw}"" ""{app}\agent.py"""; Flags: uninsdeletevalue; Tasks: agentautostart
 
 [Files]
 ; build_agent_payload.ps1 이 생성한 payload_agent 전체를 설치 폴더로 복사
 Source: "payload_agent\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName} 시작";  Filename: "wscript.exe"; Parameters: """{app}\agent_startup.vbs"""; WorkingDir: "{app}"; Comment: "에이전트 시작(최초 실행 시 로그인 창)"
+Name: "{group}\{#MyAppName} 시작";  Filename: "{app}\{#AgentPyw}"; Parameters: """{app}\agent.py"""; WorkingDir: "{app}"; Comment: "에이전트 시작(최초 실행 시 로그인 창)"
 Name: "{group}\제거"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "wscript.exe"; Parameters: """{app}\agent_startup.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#AgentPyw}"; Parameters: """{app}\agent.py"""; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; 설치 직후 에이전트 시작 → 최초 1회 로그인 창이 떠서 계정 입력 (이후 자동)
-; agent_startup.vbs 경유로 실행해야 PYTHONPATH 가 설정되어 mbam_nextgen import 가 된다.
-Filename: "wscript.exe"; Parameters: """{app}\agent_startup.vbs"""; WorkingDir: "{app}"; Description: "지금 로그인하고 에이전트 시작"; Flags: nowait postinstall skipifsilent
+; 동봉 pythonw 를 직접 실행(WorkingDir={app}). agent.py 가 sys.path[0]=앱폴더라 mbam_nextgen import 정상.
+Filename: "{app}\{#AgentPyw}"; Parameters: """{app}\agent.py"""; WorkingDir: "{app}"; Description: "지금 로그인하고 에이전트 시작"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\__pycache__"

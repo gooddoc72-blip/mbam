@@ -22,6 +22,13 @@ import httpx
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 실행 위치와 무관하게 상대경로(데이터/캐시/임시 폴더 등)가 앱 폴더 기준이 되도록 cwd 고정.
+# (부팅 자동실행은 cwd 가 system32 라, 고정하지 않으면 상대경로가 깨진다 → vbs 없이 직접 실행 가능)
+try:
+    os.chdir(APP_DIR)
+except Exception:
+    pass
+
 # 설치형(에이전트 전용) 패키지에서는 Chromium 이 runtime\ms-playwright 에 동봉된다.
 # agent_startup.vbs 가 런처 없이 agent.py 를 직접 실행하므로, 여기서 브라우저 경로를
 # 잡아줘야 Playwright(블로그·발행)가 동봉 Chromium 을 찾는다. (개발 환경엔 폴더가 없어 무시)
