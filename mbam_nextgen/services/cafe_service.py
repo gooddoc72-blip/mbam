@@ -555,3 +555,74 @@ class CafeService:
                 print(f"[CafeService] ⚠️ 순회 중 오류 발생 ({i+1}번째): {e}")
                 await page.go_back()
                 await asyncio.sleep(3)
+
+    async def natural_browse(self, page, n_posts: int = 2, logger=None):
+        """방문 육성용 자연 브라우징: 게시글 목록에서 '공지 제외' 일반글을 랜덤으로 골라
+        클릭 → 잠깐 읽기(체류·스크롤) → 목록으로 나오기 를 n_posts 회 반복.
+        (사람처럼 이 글 저 글 둘러보게 해 계정 신뢰도·자연스러움을 높인다.)"""
+        import random
+        def _log(m):
+            if logger:
+                try: logger.info(m)
+                except Exception: pass
+            print(f"[CafeService] {m}")
+
+        for i in range(max(1, n_posts)):
+            try:
+                cafe_frame = page.frame(name="cafe_main")
+                if not cafe_frame:
+                    await asyncio.sleep(2)
+                    cafe_frame = page.frame(name="cafe_main")
+                    if not cafe_frame:
+                        _log("cafe_main 프레임 없음 → 자연 브라우징 중단")
+                        break
+
+                links = cafe_frame.locator("a.article")
+                cnt = await links.count()
+                if cnt == 0:
+                    _log("게시글 목록이 비어 자연 브라우징 중단")
+                    break
+
+                # 공지 제외한 일반글 인덱스만 수집
+                candidates = []
+                for idx in range(min(cnt, 30)):
+                    try:
+                        row_txt = await links.nth(idx).evaluate(
+                            "e => ((e.closest('tr,li,div') || e.parentElement || e).innerText || '')")
+                        if "공지" in (row_txt or ""):
+                            continue
+                        candidates.append(idx)
+                    except Exception:
+                        candidates.append(idx)
+                if not candidates:
+                    candidates = list(range(min(cnt, 20)))
+
+                pick = random.choice(candidates)
+                _log(f"자연 브라우징 [{i+1}/{n_posts}] 랜덤 글(#{pick+1}) 열람")
+                await links.nth(pick).click()
+                await asyncio.sleep(random.uniform(3.0, 6.5))  # 읽기 체류
+
+                # 읽는 척 스크롤 (본문 프레임 갱신)
+                cf = page.frame(name="cafe_main") or cafe_frame
+                for _ in range(random.randint(1, 3)):
+                    try:
+                        await cf.evaluate("window.scrollBy(0, 500)")
+                    except Exception:
+                        pass
+                    await asyncio.sleep(random.uniform(1.0, 2.5))
+
+                # 목록으로 나오기 (목록 버튼 우선, 없으면 뒤로가기)
+                cf = page.frame(name="cafe_main") or cafe_frame
+                back_btn = cf.locator("a:has-text('목록'), .BaseButton:has-text('목록')")
+                if await back_btn.count() > 0:
+                    await back_btn.first.click()
+                else:
+                    await page.go_back()
+                await asyncio.sleep(random.uniform(2.5, 5.0))
+            except Exception as e:
+                _log(f"자연 브라우징 중 오류(계속): {e}")
+                try:
+                    await page.go_back()
+                except Exception:
+                    pass
+                await asyncio.sleep(2)

@@ -1015,8 +1015,10 @@ class WorkflowOrchestrator:
         """게시글 부스트: 대상 카페 글을 방문해 조회수를 올리고(반복 방문) 좋아요를 누른다.
         방문은 visit_interval_min(분) 간격으로 분산 수행하며, 대기 중에는 브라우저를 닫아 리소스를 점유하지 않는다.
         좋아요는 첫 방문에서 1회만 누른다. post_url이 카페 메인 주소면 방문(육성)만 수행."""
-        import asyncio as _aio, random as _rnd
+        import asyncio as _aio, random as _rnd, re as _re
         n = max(1, int(visits or 1))
+        # 카페 메인 주소면 '방문 육성' → 공지 제외 랜덤 일반글을 둘러보고 나오는 자연 브라우징 수행
+        _is_main = not _re.search(r'/articles?/|ArticleRead|articleid=', str(post_url or ''), _re.I)
         interval = max(0, int(visit_interval_min or 0)) * 60
         logger.info(f"\n👍 [Orchestrator] 카페 부스트 | 계정:{account_id} | 방문:{n}회 | 간격:{visit_interval_min}분 | 좋아요:{do_like}")
         logger.info(f"   대상: {post_url}")
@@ -1060,6 +1062,12 @@ class WorkflowOrchestrator:
                     except Exception:
                         pass
                     await _aio.sleep(_rnd.uniform(1.0, 2.5))
+                    # 방문 육성(카페 메인): 공지 제외 랜덤 일반글 1~2개 열람 → 읽고 → 목록 복귀
+                    if _is_main:
+                        try:
+                            await self.cafe.natural_browse(page, n_posts=_rnd.randint(1, 2), logger=logger)
+                        except Exception as e:
+                            logger.warning(f"자연 브라우징 실패(계속): {e}")
                     if do_like and not liked:
                         try:
                             liked = await self.cafe.click_like(page)
