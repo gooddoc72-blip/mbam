@@ -289,14 +289,26 @@ class SoulRewriter:
         return ""
 
     async def generate_content(self, prompt: str) -> str:
-        """자유 형식의 프롬프트를 처리 (가용한 첫 번째 AI 사용)"""
-        if self.gemini_client:
-            return await self._call_gemini_client(self.gemini_client, prompt)
-        elif self.claude_client:
-            return await self._call_claude_client(self.claude_client, prompt)
-        elif self.openai_client:
-            return await self._call_openai_client(self.openai_client, prompt)
-        raise RuntimeError("사용 가능한 AI 클라이언트가 없습니다. 환경변수(.env)에 API 키를 설정해주세요.")
+        """자유 형식의 프롬프트를 처리. Gemini→Claude→OpenAI 순으로 폴백한다.
+        (Gemini 레이트리밋·빈응답·안전필터로 한 provider가 실패해도 다음 provider로 이어가
+        글감 수집/원고 생성이 끊기지 않도록 함.)"""
+        attempts = [
+            ("Gemini", self.gemini_client, self._call_gemini_client),
+            ("Claude", self.claude_client, self._call_claude_client),
+            ("OpenAI", self.openai_client, self._call_openai_client),
+        ]
+        errors = []
+        for name, client, caller in attempts:
+            if not client:
+                continue
+            try:
+                return await caller(client, prompt)
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+                print(f"[Soul] {name} 생성 실패 → 다음 provider 폴백: {e}")
+        if errors:
+            raise RuntimeError("모든 AI provider 실패 (" + " | ".join(errors) + ")")
+        raise RuntimeError("사용 가능한 AI 클라이언트가 없습니다. 설정에서 API 키를 저장해주세요.")
 
     # 세 메서드 모두 예외를 raise — 호출자(orchestrator)가 retry/폴백 결정.
     # 예외를 string으로 swallow하면 "Gemini Error: 401" 같은 텍스트가 그대로 블로그 본문이 됨.
