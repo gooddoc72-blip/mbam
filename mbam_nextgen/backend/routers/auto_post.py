@@ -299,7 +299,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 account_id=account_id,
                 cafe_id=req.cafe_url,
                 board_name=req.board_name,
-                keyword=req.target_keyword or "테스트",
+                # 빈 키워드일 때 개발용 'テスト' 값이 실제 글에 새던 문제 → 제목/후기로 대체
+                keyword=(req.target_keyword or "").strip() or (req.title or "").strip()[:30] or "방문 후기",
+                title=req.title,   # 저장 원고 제목을 그대로 사용(누락 시 키워드로 파생돼 '테스트'가 됐음)
                 auto_submit=True if req.publish_mode == "instant" else False,
                 ai_provider=req.ai_provider,
                 action_type=req.cafe_action_type,
