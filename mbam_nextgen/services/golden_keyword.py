@@ -113,6 +113,36 @@ def extract_news_topics(items: list) -> list:
     return out
 
 
+async def extract_news_topics_ai(items: list) -> list:
+    """[클라우드용] 형태소분석기(Kiwi) 없이 AI로 뉴스 제목에서 '검색 가능한 핵심 주제어'만 추출.
+    공백 분리 폴백이 조사/동사/조각(화재에·갔다·대부분 등)을 키워드로 올리는 문제를 해결한다.
+    (추출된 키워드는 이후 keywordstool 월검색량 조회로 다시 걸러지므로 엉뚱한 값은 제거됨)"""
+    titles = [(it.get("title") or "").strip() for it in items]
+    titles = [t for t in titles if t][:25]
+    if not titles:
+        return []
+    joined = "\n".join(f"- {t}" for t in titles)
+    prompt = (
+        "다음은 오늘의 인기 뉴스 제목 목록입니다. 각 제목에서 사람들이 검색창에 칠 법한 "
+        "핵심 주제어(고유명사·사건명·인물·장소·이슈·브랜드)를 뽑아주세요.\n"
+        "규칙: 조사·동사·형용사·형식어(속보·단독 등)·언론사명은 제외하고 명사 위주로, "
+        "1~3어절의 검색 키워드로. 너무 일반적인 단어(사람·사고·최소·대부분·수도 등)는 제외.\n"
+        "출력 형식: 키워드만 쉼표로 구분해서 한 줄로(설명·번호 금지). 최대 20개.\n\n" + joined
+    )
+    try:
+        from mbam_nextgen.services.soul import SoulRewriter
+        txt = await SoulRewriter().generate_content(prompt)
+    except Exception:
+        return []
+    seen, out = set(), []
+    for raw in re.split(r"[,\n]", txt or ""):
+        k = re.sub(r"[^가-힣A-Za-z0-9 ]", "", raw).strip()
+        if 1 < len(k) <= 20 and k not in _NEWS_STOP and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out[:20]
+
+
 async def _volumes_map(client: httpx.AsyncClient, keywords: list) -> dict:
     """주어진 키워드들의 월검색량/경쟁도를 keywordstool 로 조회 (5개씩 청크). {정규화키워드: row}."""
     vmap = {}
@@ -363,7 +393,11 @@ async def analyze(category: str, items: list, max_candidates: int = 20, use_ai: 
 
         if is_news:
             # === 뉴스 경로: 제목 주제어 추출 → 검색량 조회 → 화제성(검색량) 우선 ===
-            topics = extract_news_topics(items)
+            if _kiwi is None:
+                # 클라우드: 형태소분석기 없음 → AI로 정제 추출(실패 시 공백분리 폴백)
+                topics = await extract_news_topics_ai(items) or extract_news_topics(items)
+            else:
+                topics = extract_news_topics(items)
             seed_out = topics[:5]
             candidate_count = len(topics)
             # 검색량 조회 (상위 후보 일부만; keywordstool 호출 절약)
