@@ -59,6 +59,15 @@ async def job_status(job_id: str, current_user: dict = Depends(get_current_user)
     return info
 
 
+@router.post("/pick-folder", summary="웹: 내 PC 에이전트에 폴더 선택창을 띄우도록 요청")
+async def pick_folder(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """웹에서 '폴더 찾기'를 누르면 이 잡을 적재 → 내 PC 에이전트가 네이티브 폴더 선택창을 띄우고
+    고른 경로를 job 결과로 돌려준다. 프론트는 /jobs/{job_id} 를 폴링해 result.path 를 받는다."""
+    user_id = current_user.get("sub")
+    job_id = jobsvc.enqueue_job(db, user_id, "pick_folder", {}, priority=1)  # 즉시성 최우선
+    return {"job_id": job_id}
+
+
 class TaskLog(BaseModel):
     task_id: str
     line: Optional[str] = None

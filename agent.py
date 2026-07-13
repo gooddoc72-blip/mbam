@@ -249,6 +249,29 @@ async def _handle_matjip_collect(payload: dict, log=None) -> dict:
     return await collect_matjip_source(payload.get("place_url", ""), payload.get("keyword", ""), log=log)
 
 
+async def _handle_pick_folder(payload: dict) -> dict:
+    """웹의 '폴더 찾기' 요청 → 이 PC에 네이티브 폴더 선택창을 띄워 고른 경로를 돌려준다.
+    (브라우저는 로컬 경로를 못 얻지만, 이 PC에 있는 에이전트는 진짜 폴더 선택창을 띄울 수 있다.)"""
+    def _pick():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.askdirectory(title="발행 글에 넣을 사진 폴더를 선택하세요")
+            try:
+                root.update()
+                root.destroy()
+            except Exception:
+                pass
+            return path or ""
+        except Exception:
+            return ""
+    path = await asyncio.to_thread(_pick)
+    return {"success": True, "path": path}
+
+
 async def _handle_cafe_targeted_comment(payload: dict, log=None) -> dict:
     # 카페 다중 타겟 댓글(소통육성): 클라우드가 위임한 잡을 집 IP·화면 있는 PC에서 실행.
     # log(callable)이 오면 진행 로그를 클라우드(task_status_store)로 실시간 중계한다.
@@ -401,6 +424,7 @@ HANDLERS = {
     "tistory_post": _handle_tistory_post,
     "cafe_rank_check": _handle_cafe_rank_check,
     "matjip_collect": _handle_matjip_collect,
+    "pick_folder": _handle_pick_folder,
 }
 
 

@@ -171,6 +171,7 @@ export default function PostTab({ s }) {
     setPlaceUrl,
     collectingMatjip,
     collectMatjipSource,
+    handlePickFolder,
   } = s;
 
   const matjip = mainTab === "matjip";
@@ -299,11 +300,17 @@ export default function PostTab({ s }) {
                 {/* 맛집: 내 사진 폴더 지정 (업로드 X). 발행하는 내 PC(에이전트)의 폴더 사진을 글에 넣는다. */}
                 {matjip && (
                   <div style={{ marginBottom: "1rem", padding: "0.8rem 1rem", background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: "8px" }}>
-                    <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#3730a3", marginBottom: "0.4rem" }}>🖼 내 사진 폴더 지정 (선택)</div>
-                    <input type="text" placeholder="발행 PC의 이미지 폴더 경로 (예: C:\사진\맛집)" value={imageFolder || ""} onChange={e => setImageFolder(e.target.value)}
-                      style={{ width: "100%", padding: "0.6rem", border: "1px solid #c7d2fe", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.9rem" }} />
+                    <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#3730a3", marginBottom: "0.4rem" }}>🖼 내 사진 폴더 (선택)</div>
+                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <input type="text" placeholder="예: C:\사진\맛집  (또는 오른쪽 '폴더 찾기')" value={imageFolder || ""} onChange={e => setImageFolder(e.target.value)}
+                        style={{ flex: 1, minWidth: "180px", padding: "0.6rem", border: "1px solid #c7d2fe", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.9rem" }} />
+                      <button type="button" onClick={handlePickFolder}
+                        style={{ flexShrink: 0, padding: "0.6rem 1rem", background: "#4f46e5", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", whiteSpace: "nowrap" }}>
+                        📁 폴더 찾기
+                      </button>
+                    </div>
                     <p style={{ margin: "0.45rem 0 0", fontSize: "0.78rem", color: "#4338ca" }}>
-                      * 이 폴더의 사진(.jpg/.png)을 발행 시 글에 넣습니다. <b>발행하는 내 PC(에이전트) 기준 경로</b>예요(업로드 아님). 비워두면 아래 설정대로 AI 카드뉴스가 자동 생성됩니다.
+                      * <b>'폴더 찾기'</b>를 누르면 <b>내 PC에 폴더 선택창</b>이 뜹니다(에이전트 실행 중이어야 함). 고른 폴더의 사진(.jpg/.png)이 발행 글에 들어가요. 비워두면 AI 카드뉴스가 자동 생성됩니다.
                     </p>
                   </div>
                 )}

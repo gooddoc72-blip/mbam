@@ -355,6 +355,29 @@ export function useCafeAuto() {
   };
 
   // AI 원고 생성(미리보기) 시작 — 발행 전에 실제 원고를 만들어 검토/수정
+  // 내 PC 에이전트에 네이티브 폴더 선택창을 띄워 사진 폴더 경로를 받아온다(웹은 로컬 경로를 직접 못 얻으므로).
+  const handlePickFolder = async () => {
+    try {
+      const res = await fetchWithAuth("/api/agent/pick-folder", { method: "POST" });
+      const data = await res.json();
+      if (!data.job_id) { alert("폴더 선택 요청 실패 — 내 PC 에이전트가 켜져 있는지 확인하세요."); return; }
+      alert("내 PC에 '폴더 선택' 창이 곧 뜹니다. 사진이 든 폴더를 고르세요.\n(에이전트가 실행 중이어야 합니다)");
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const jr = await fetchWithAuth(`/api/agent/jobs/${data.job_id}`);
+        const jd = await jr.json().catch(() => ({}));
+        if (jd.status === "done") {
+          const path = (jd.result && jd.result.path) || "";
+          if (path) { setImageFolder(path); alert(`✅ 선택한 폴더:\n${path}`); }
+          else alert("폴더 선택이 취소되었습니다.");
+          return;
+        }
+        if (jd.status === "error") { alert("폴더 선택 실패: " + (jd.error || "오류")); return; }
+      }
+      alert("시간 초과 — 에이전트가 켜져 있는지 확인 후 다시 시도하세요.");
+    } catch (e) { alert("오류: " + e.message); }
+  };
+
   // 맛집 포스팅: 플레이스 리뷰 + 블로그 후기를 수집해 원고 소재(content)로 채운다.
   const collectMatjipSource = async () => {
     if (!placeUrl.trim() && !targetKeyword.trim()) { alert("플레이스 URL 또는 맛집 키워드를 입력하세요."); return; }
@@ -883,6 +906,7 @@ export function useCafeAuto() {
     setPlaceUrl,
     collectingMatjip,
     collectMatjipSource,
+    handlePickFolder,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
