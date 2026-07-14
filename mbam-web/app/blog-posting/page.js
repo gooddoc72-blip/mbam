@@ -22,6 +22,9 @@ function BlogPostingContent() {
   const pathname = usePathname();
   const isHospital = pathname === "/hospital-blog";  // 병원 블로그 전용 메뉴로 진입 시 병원 카테고리 고정
   const isShopping = pathname === "/shopping-partners-blog";  // 쇼핑파트너스: 상품 URL만으로 상품후기 자동 생성 (리뷰+상품+일반배포 고정)
+  const isPlace = pathname === "/place-blog";  // 플레이스 블로그: 플레이스 리뷰+블로그 후기 수집 + 사진 폴더 → 사진 맞춤 원고
+  const [placeUrl, setPlaceUrl] = useState("");
+  const [collectingPlace, setCollectingPlace] = useState(false);
   const [generateCardNews, setGenerateCardNews] = useState(isHospital ? false : true);  // 병원: 카드뉴스 대신 나노바나나 AI 이미지
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
@@ -416,18 +419,83 @@ function BlogPostingContent() {
     }
   };
 
+  // 플레이스 소재 수집(리뷰+블로그 후기) → 글감으로 채움. 가게 이름은 키워드로.
+  const collectPlaceSource = async () => {
+    if (!placeUrl.trim()) return alert("네이버 플레이스 URL을 입력하세요.");
+    setCollectingPlace(true);
+    try {
+      const res = await fetchWithAuth("/api/cafe-nurture/matjip-collect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ place_url: placeUrl, keyword: targetKeyword }),
+      });
+      const data = await res.json();
+      const apply = (sd) => {
+        setSourceData(sd || "");
+        const nm = (sd || "").match(/\[가게 이름\]\s*(.+)/);
+        if (nm && !targetKeyword) setTargetKeyword(nm[1].trim());
+      };
+      if (data.mode === "inline") { apply(data.source_data); alert("✅ 플레이스 소재 수집 완료! 이어서 'AI 원고 생성'."); }
+      else if (data.mode === "job" && data.job_id) {
+        let done = false;
+        for (let i = 0; i < 80 && !done; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const jr = await fetchWithAuth(`/api/agent/jobs/${data.job_id}`);
+          const jd = await jr.json().catch(() => ({}));
+          if (jd.status === "done") { apply((jd.result && jd.result.source_data) || ""); alert("✅ 플레이스 소재 수집 완료!"); done = true; }
+          else if (jd.status === "error") { alert("수집 실패: " + (jd.error || "오류")); done = true; }
+        }
+        if (!done) alert("수집이 지연됩니다. 내 PC 에이전트 실행을 확인하세요.");
+      } else if (!res.ok) alert("수집 실패: " + (data.detail || res.status));
+    } catch (e) { alert("오류: " + e.message); }
+    finally { setCollectingPlace(false); }
+  };
+
+  // 플레이스 블로그 + 사진 폴더: 에이전트가 폴더 사진을 클라우드로 보내 Claude가 사진 보고 원고 작성
+  const generatePlaceWithPhotos = async (validAccounts) => {
+    const nm = (sourceData.match(/\[가게 이름\]\s*(.+)/) || [])[1] || "";
+    const res = await fetchWithAuth("/api/cafe-nurture/matjip-generate-job", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_folder: imageFolderPath, source_data: sourceData, place_name: nm, keyword: targetKeyword }),
+    });
+    const d = await res.json();
+    if (!d.job_id) { alert("생성 요청 실패 — 내 PC 에이전트 실행을 확인하세요."); return; }
+    alert("내 PC 에이전트가 폴더 사진을 분석해 원고를 만듭니다. (최대 1~2분)");
+    for (let i = 0; i < 90; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const jr = await fetchWithAuth(`/api/agent/jobs/${d.job_id}`);
+      const jd = await jr.json().catch(() => ({}));
+      if (jd.status === "done") {
+        const rr = jd.result || {};
+        if (rr.success && rr.content) {
+          setGeneratedContents(validAccounts.map(a => ({ account_id: a.id, title: rr.title || "", content: rr.content })));
+        } else alert("원고 생성 실패: " + (rr.error || "결과 없음"));
+        return;
+      }
+      if (jd.status === "error") { alert("생성 실패: " + (jd.error || "오류")); return; }
+    }
+    alert("시간 초과 — 에이전트 실행 확인 후 다시 시도하세요.");
+  };
+
   const handleGenerateContent = async () => {
     if (isShopping && !productUrl.trim()) {
       alert("상품 URL을 입력해주세요.");
       return;
     }
-    if (!isShopping && !targetKeyword) {
+    if (!isShopping && !isPlace && !targetKeyword) {
       alert("타겟 키워드를 입력해주세요.");
       return;
     }
     const validAccounts = accounts.filter(a => a.id.trim() !== "" && a.checked !== false);
     if (validAccounts.length === 0) {
       alert("원고를 생성할 계정을 최소 1개 이상 입력해주세요.");
+      return;
+    }
+
+    // 플레이스 블로그 + 사진 폴더: 사진 보고 쓰는 전용 경로(에이전트→클라우드 Claude 비전)
+    if (isPlace && (imageFolderPath || "").trim()) {
+      setIsGenerating(true); setGeneratedContents([]);
+      try { await generatePlaceWithPhotos(validAccounts); }
+      finally { setIsGenerating(false); }
       return;
     }
 
@@ -801,8 +869,8 @@ function BlogPostingContent() {
         {/* Left Control Panel */}
         <div style={{ flex: 1.5, display: "flex", flexDirection: "column", gap: "1.5rem", paddingRight: "10px" }}>
         <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>{isHospital ? "🏥 병원 블로그 자동 포스팅" : isShopping ? "🛍 쇼핑파트너스 블로그" : "블로그 자동 포스팅"}</h1>
-          <p style={{ color: "#64748b", margin: 0 }}>{isHospital ? "병원·의원 전용 — 의료법 준수 원고 + 나노바나나 AI 이미지 자동 생성·삽입." : isShopping ? "상품 URL만 넣으면 상품명·이미지를 수집해 상품후기(일반배포) 원고를 자동으로 생성합니다." : "SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다."}</p>
+          <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#1e293b", margin: 0, marginBottom: "0.5rem" }}>{isHospital ? "🏥 병원 블로그 자동 포스팅" : isShopping ? "🛍 쇼핑파트너스 블로그" : isPlace ? "📍 플레이스 블로그" : "블로그 자동 포스팅"}</h1>
+          <p style={{ color: "#64748b", margin: 0 }}>{isHospital ? "병원·의원 전용 — 의료법 준수 원고 + 나노바나나 AI 이미지 자동 생성·삽입." : isShopping ? "상품 URL만 넣으면 상품명·이미지를 수집해 상품후기(일반배포) 원고를 자동으로 생성합니다." : isPlace ? "플레이스 리뷰·블로그 후기 수집 + 내 사진 폴더 → 사진을 보고 쓰는 방문 후기 블로그를 자동 생성·발행합니다." : "SEO 분석 및 글감 수집 데이터를 기반으로 다중 계정에 원고를 자동 발행합니다."}</p>
         </div>
 
         {/* 1. Account Settings */}
@@ -856,6 +924,17 @@ function BlogPostingContent() {
           <div style={{ padding: "1rem", background: "#f8fafc", color: "#334155", fontSize: "0.95rem", border: "1px solid #e2e8f0", marginBottom: "1.5rem" }}>
             SEO 분석기가 타겟 키워드의 상위 노출 승리 공식을 분석하고, 선택하신 <strong>포스팅 목적</strong>과 <strong>홍보 카테고리</strong>에 맞춰 AI가 최적의 원고를 100% 창작하여 포스팅합니다.
           </div>
+
+          {isPlace && (
+            <div style={{ marginBottom: "1.5rem", padding: "0.9rem 1rem", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px" }}>
+              <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#9a3412", marginBottom: "0.5rem" }}>📍 플레이스 소재 수집 (방문자 리뷰 + 블로그 후기)</div>
+              <input type="text" placeholder="네이버 플레이스 URL (예: https://map.naver.com/p/entry/place/000000)" value={placeUrl} onChange={e => setPlaceUrl(e.target.value)} style={{ width: "100%", padding: "0.7rem", marginBottom: "0.6rem", boxSizing: "border-box", border: "1px solid #fdba74", borderRadius: "6px" }} />
+              <button type="button" onClick={collectPlaceSource} disabled={collectingPlace} style={{ width: "100%", padding: "0.7rem", background: collectingPlace ? "#94a3b8" : "#ea580c", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: collectingPlace ? "wait" : "pointer" }}>
+                {collectingPlace ? "소재 수집 중..." : "🔍 플레이스 리뷰·블로그 후기 수집"}
+              </button>
+              <p style={{ margin: "0.5rem 0 0", fontSize: "0.78rem", color: "#9a3412" }}>* 수집하면 아래 글감이 채워집니다. 아래 <b>이미지 폴더</b>를 지정하면 <b>사진을 보고</b> 원고를 씁니다(사진에 맞는 자리에 이미지 삽입).</p>
+            </div>
+          )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             

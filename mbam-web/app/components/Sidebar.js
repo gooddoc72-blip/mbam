@@ -37,6 +37,7 @@ const MENU_ITEMS = [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
             { name: "형태소 분석", path: "/blog-analysis", icon: Search },
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
+            { name: "플레이스 블로그", path: "/place-blog", icon: MapPin },
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
             { name: "구글 블로그스팟", path: "/blogspot", icon: FileText },
