@@ -413,9 +413,46 @@ export function useCafeAuto() {
     finally { setCollectingMatjip(false); }
   };
 
+  // 맛집: 폴더 사진 + 리뷰 → 에이전트가 사진을 클라우드로 전송 → Claude가 사진 보고 원고 작성(사진 자리에 [이미지])
+  const generateMatjipWithPhotos = async () => {
+    setIsGenerating(true); setCafeGenerated([]);
+    try {
+      const matjipName = (content.match(/\[가게 이름\]\s*(.+)/) || [])[1] || "";
+      const res = await fetchWithAuth("/api/cafe-nurture/matjip-generate-job", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_folder: imageFolder, source_data: content, place_name: matjipName, keyword: targetKeyword }),
+      });
+      const d = await res.json();
+      if (!d.job_id) { setIsGenerating(false); return alert("생성 요청 실패 — 내 PC 에이전트가 켜져 있는지 확인하세요."); }
+      alert("내 PC 에이전트가 폴더 사진을 분석해 원고를 만듭니다. (사진 장수에 따라 최대 1~2분)");
+      for (let i = 0; i < 90; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const jr = await fetchWithAuth(`/api/agent/jobs/${d.job_id}`);
+        const jd = await jr.json().catch(() => ({}));
+        if (jd.status === "done") {
+          const rr = jd.result || {};
+          if (rr.success && rr.content) {
+            setTitle(rr.title || "");
+            setContent(rr.content);
+            setCafeGenerated([{ account_id: "preview", title: rr.title || "", content: rr.content }]);
+          } else {
+            alert("원고 생성 실패: " + (rr.error || "결과 없음"));
+          }
+          setIsGenerating(false); return;
+        }
+        if (jd.status === "error") { alert("생성 실패: " + (jd.error || "오류")); setIsGenerating(false); return; }
+      }
+      alert("시간 초과 — 에이전트 실행 확인 후 다시 시도하세요."); setIsGenerating(false);
+    } catch (e) { setIsGenerating(false); alert("오류: " + e.message); }
+  };
+
   const handleGenerateCafe = async () => {
     if (!content.trim() && !targetKeyword.trim()) {
       return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
+    }
+    // 맛집 + 내 사진 폴더 지정 시: 사진을 보고 쓰는 전용 경로(에이전트→클라우드 Claude 비전)
+    if (mainTab === "matjip" && (imageFolder || "").trim()) {
+      return await generateMatjipWithPhotos();
     }
     setIsGenerating(true);
     setCafeGenerated([]);

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -341,6 +341,61 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
 class MatjipCollectRequest(BaseModel):
     place_url: Optional[str] = None
     keyword: Optional[str] = None
+
+
+class MatjipGenJob(BaseModel):
+    image_folder: str = ""
+    source_data: str = ""
+    place_name: str = ""
+    keyword: str = ""
+
+
+@router.post("/matjip-generate-job", summary="맛집: 사진+리뷰 원고 생성 잡 적재(에이전트가 폴더 사진 전송)")
+async def matjip_generate_job(req: MatjipGenJob, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    """웹이 이 잡을 적재하면 → 내 PC 에이전트가 폴더 사진을 클라우드로 올려(위 matjip-generate)
+    사진+리뷰 원고를 받아 결과로 반환한다. 프론트는 /api/agent/jobs/{id} 를 폴링."""
+    from mbam_nextgen.backend import jobs as jobsvc
+    payload = {"image_folder": req.image_folder, "source_data": req.source_data,
+               "place_name": req.place_name, "keyword": req.keyword}
+    job_id = jobsvc.enqueue_job(db, get_user_id(current_user), "matjip_generate", payload, priority=3)
+    return {"success": True, "job_id": job_id}
+
+
+@router.post("/matjip-generate", summary="맛집: 사진+리뷰로 원고 생성(Claude 비전+작성)")
+async def matjip_generate(
+    images: List[UploadFile] = File(default=[]),
+    source_data: str = Form(""),
+    place_name: str = Form(""),
+    keyword: str = Form(""),
+    current_user: dict = Depends(get_current_user),
+):
+    """에이전트가 폴더 사진을 멀티파트로 올리면, 클라우드(마스터 키)가 사진+리뷰를 한 번에 보고
+    사진에 맞는 자리에 [이미지] 마커를 넣은 맛집 후기 원고를 생성해 반환한다."""
+    import os, re, tempfile
+    from mbam_nextgen.services.soul import SoulRewriter
+    paths = []
+    tmpdir = tempfile.mkdtemp(prefix="matjip_gen_")
+    for i, f in enumerate(images or []):
+        try:
+            ext = os.path.splitext(f.filename or "")[1].lower() or ".jpg"
+            p = os.path.join(tmpdir, f"img_{i}{ext}")
+            with open(p, "wb") as out:
+                out.write(await f.read())
+            paths.append(p)
+        except Exception:
+            pass
+    try:
+        txt = await SoulRewriter().generate_matjip_with_photos(source_data, paths, place_name or keyword)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"원고 생성 실패: {e}")
+    txt = re.sub(r"(\*\*|~~|__)", "", txt or "").strip()
+    title = (place_name or keyword or "맛집") + " 방문 후기"
+    body = txt
+    m = re.match(r"^\s*(?:제목\s*[:：]\s*|#\s*|\[제목\]\s*)(.+)", body)
+    if m:
+        title = m.group(1).strip()
+        body = body[m.end():].strip()
+    return {"success": True, "title": title, "content": body, "image_count": len(paths)}
 
 
 @router.post("/matjip-collect", summary="맛집 소재 수집(플레이스 리뷰+블로그 후기)")

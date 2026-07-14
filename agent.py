@@ -36,6 +36,9 @@ _bundled_browsers = os.path.join(APP_DIR, "runtime", "ms-playwright")
 if os.path.isdir(_bundled_browsers):
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _bundled_browsers)
 
+# 로그인 후 채워짐 — 일부 핸들러가 클라우드로 파일 업로드 등 인증 요청을 할 때 사용
+_AGENT_AUTH = {"cloud_url": "", "token": ""}
+
 
 def _load_config() -> dict:
     cfg = {
@@ -256,6 +259,51 @@ async def _handle_matjip_collect(payload: dict, log=None) -> dict:
     return await collect_matjip_source(payload.get("place_url", ""), payload.get("keyword", ""), log=log)
 
 
+async def _handle_matjip_generate(payload: dict, log=None) -> dict:
+    """[맛집] 폴더 사진을 클라우드로 올려 '사진+리뷰' 원고 생성(클라우드가 Claude 비전+작성).
+    에이전트엔 AI 키가 없으므로, 사진만 마스터 키가 있는 클라우드로 전송한다."""
+    import os, glob
+    folder = (payload.get("image_folder") or "").strip()
+    imgs = []
+    if folder and os.path.isdir(folder):
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.PNG"):
+            imgs += glob.glob(os.path.join(folder, ext))
+        imgs = sorted(set(imgs))[:5]
+    if not _AGENT_AUTH.get("cloud_url"):
+        return {"success": False, "error": "에이전트 인증 없음(로그인 필요)"}
+    data = {
+        "source_data": payload.get("source_data", ""),
+        "place_name": payload.get("place_name", ""),
+        "keyword": payload.get("keyword", ""),
+    }
+    files, handles = [], []
+    for p in imgs:
+        try:
+            fh = open(p, "rb")
+            handles.append(fh)
+            files.append(("images", (os.path.basename(p), fh, "image/jpeg")))
+        except Exception:
+            pass
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                f"{_AGENT_AUTH['cloud_url']}/api/cafe-nurture/matjip-generate",
+                data=data, files=files or None,
+                headers={"Authorization": f"Bearer {_AGENT_AUTH['token']}"}, timeout=180,
+            )
+        if r.status_code != 200:
+            return {"success": False, "error": f"생성 실패 {r.status_code}: {r.text[:200]}"}
+        return r.json()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        for fh in handles:
+            try:
+                fh.close()
+            except Exception:
+                pass
+
+
 async def _handle_pick_folder(payload: dict) -> dict:
     """웹의 '폴더 찾기' 요청 → 이 PC에 네이티브 폴더 선택창을 띄워 고른 경로를 돌려준다.
     (브라우저는 로컬 경로를 못 얻지만, 이 PC에 있는 에이전트는 진짜 폴더 선택창을 띄울 수 있다.)"""
@@ -431,6 +479,7 @@ HANDLERS = {
     "tistory_post": _handle_tistory_post,
     "cafe_rank_check": _handle_cafe_rank_check,
     "matjip_collect": _handle_matjip_collect,
+    "matjip_generate": _handle_matjip_generate,
     "pick_folder": _handle_pick_folder,
 }
 
@@ -450,6 +499,8 @@ class AgentClient:
             )
             if r.status_code == 200:
                 self.token = r.json().get("access_token")
+                _AGENT_AUTH["cloud_url"] = self.cfg["cloud_url"]
+                _AGENT_AUTH["token"] = self.token
                 print(f"[agent] 로그인 성공 (agent_id={self.agent_id})")
                 return True
             print(f"[agent] 로그인 실패 {r.status_code}: {r.text[:200]}")

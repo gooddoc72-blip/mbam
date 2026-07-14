@@ -288,6 +288,59 @@ class SoulRewriter:
 
         return ""
 
+    async def generate_matjip_with_photos(self, source_data: str, image_paths: list, place_name: str = "") -> str:
+        """[맛집] 사진 + 리뷰를 한 모델에 함께 주고, 사진에 맞는 자리에 [이미지] 마커를 넣은
+        방문 후기(카페글)를 한 번에 생성. 사진을 '직접 본 모델이 글도 쓰므로' 사진↔글이 정확히 맞는다.
+        Claude(비전+작성) 우선 → 실패 시 Gemini(비전+작성) → 사진 없이 텍스트 생성 순 폴백."""
+        import os
+        valid = [p for p in (image_paths or [])[:5] if p and os.path.exists(p)]
+        n = len(valid)
+        place = (place_name or "맛집").strip()
+        rules = (
+            f"당신은 '{place}'을(를) 실제로 다녀온 손님입니다. 아래 [참고 리뷰]를 사실 근거로 "
+            f"내돈내산 1인칭 방문 후기(네이버 카페용)를 자연스럽게 작성하세요.\n"
+            + (f"사진이 {n}장 첨부돼 있습니다(순서대로 1~{n}번).\n"
+               f"규칙:\n- 각 사진을 실제로 보고, 그 사진 내용을 이야기하는 문단 '바로 뒤'에 '[이미지]' 마커를 넣으세요. "
+               f"총 {n}개, 첨부 사진 순서대로.\n" if n else "규칙:\n")
+            + "- 소제목은 '■ 소제목' 형식. 마크다운(**, ~~) 금지, 이모지 3개 이하.\n"
+              "- 800~1300자. 사진에 안 보이는 내용은 리뷰 근거로만.\n"
+              "- 첫 줄은 '제목: ...' 형식으로 시작.\n\n"
+            + f"[참고 리뷰]\n{source_data or ''}"
+        )
+        # 1) Claude 비전+작성 (한 번의 호출로 사진 보고 바로 작성)
+        if self.claude_client and valid:
+            try:
+                import base64
+                blocks = []
+                for p in valid:
+                    ext = os.path.splitext(p)[1].lower()
+                    media = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(ext, "image/jpeg")
+                    with open(p, "rb") as f:
+                        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+                blocks.append({"type": "text", "text": rules})
+                resp = await self.claude_client.messages.create(
+                    model="claude-opus-4-8", max_tokens=6000,
+                    messages=[{"role": "user", "content": blocks}])
+                txt = resp.content[0].text if resp.content else ""
+                if txt:
+                    return txt
+            except Exception as e:
+                print(f"[Soul] 맛집 Claude 비전+작성 실패 → Gemini 폴백: {e}")
+        # 2) Gemini 비전+작성 폴백
+        if self.gemini_client and valid:
+            try:
+                from PIL import Image
+                parts = [rules] + [Image.open(p) for p in valid]
+                resp = await asyncio.to_thread(
+                    self.gemini_client.models.generate_content, model="gemini-2.5-flash", contents=parts)
+                if resp.text:
+                    return resp.text
+            except Exception as e:
+                print(f"[Soul] 맛집 Gemini 비전+작성 실패: {e}")
+        # 3) 사진 없이라도 텍스트 생성(폴백)
+        return await self.generate_content(rules)
+
     async def generate_content(self, prompt: str) -> str:
         """자유 형식의 프롬프트를 처리. Gemini→Claude→OpenAI 순으로 폴백한다.
         (Gemini 레이트리밋·빈응답·안전필터로 한 provider가 실패해도 다음 provider로 이어가
