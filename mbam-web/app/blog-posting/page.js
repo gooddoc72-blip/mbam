@@ -30,6 +30,11 @@ function BlogPostingContent() {
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
   const [includeSourceLink, setIncludeSourceLink] = useState(pathname === "/shopping-partners-blog"); // 본문 끝 상품/출처 링크 (쇼핑파트너스=유입용 기본 ON)
+  // 쿠팡 파트너스 필수 고지 문구 (쇼핑파트너스 기본 ON) — 발행 시 본문에 그대로 삽입(법적 필수, 정확 문구 유지)
+  const COUPANG_DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
+  const [includeDisclosure, setIncludeDisclosure] = useState(pathname === "/shopping-partners-blog");
+  const [disclosure, setDisclosure] = useState(COUPANG_DISCLOSURE);
+  const [disclosurePos, setDisclosurePos] = useState("top"); // top | bottom
   const [aiSupplementCount, setAiSupplementCount] = useState(pathname === "/shopping-partners-blog" ? 2 : 0); // 실사진 + AI 연출컷 N장 보조
 
   const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
@@ -678,7 +683,14 @@ function BlogPostingContent() {
         map_query: mapQuery,
         images: imageUploadMode === "direct" ? directImages.split("\n").filter(p => p.trim()) : [],
         post_mode: "manual_text", // We always send generated contents as manual_text now
-        generated_contents: generatedContents.map((gc, idx) => ({ ...gc, account_id: validAccounts[idx]?.id })),
+        generated_contents: generatedContents.map((gc, idx) => {
+          let body = gc.content || "";
+          const dz = (disclosure || "").trim();
+          if (includeDisclosure && dz && !body.includes(dz)) {
+            body = disclosurePos === "top" ? `${dz}\n\n${body}` : `${body}\n\n${dz}`;
+          }
+          return { ...gc, content: body, account_id: validAccounts[idx]?.id };
+        }),
         publish_mode: publishMode,
         schedule_date: scheduleDate,
         schedule_time: scheduleTime,
@@ -992,6 +1004,21 @@ function BlogPostingContent() {
                   <input type="checkbox" checked={includeSourceLink} onChange={e => setIncludeSourceLink(e.target.checked)} />
                   🔗 본문에 상품 링크 삽입 (유입용 — 블로그→상품 방문)
                 </label>
+                {/* 쿠팡 파트너스 필수 고지 문구 */}
+                <div style={{ marginTop: "0.9rem", padding: "0.8rem", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontSize: "0.88rem", fontWeight: "bold", color: includeDisclosure ? "#b45309" : "#64748b" }}>
+                    <input type="checkbox" checked={includeDisclosure} onChange={e => setIncludeDisclosure(e.target.checked)} />
+                    ⚖️ 쿠팡 파트너스 필수 고지 문구 삽입 (법적 필수)
+                  </label>
+                  <textarea value={disclosure} onChange={e => setDisclosure(e.target.value)} rows={2}
+                    style={{ width: "100%", marginTop: "0.5rem", padding: "0.6rem", border: "1px solid #fcd34d", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.85rem", resize: "vertical" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.8rem", marginTop: "0.5rem", fontSize: "0.83rem", color: "#78350f" }}>
+                    삽입 위치:
+                    <label style={{ cursor: "pointer" }}><input type="radio" name="dzpos" checked={disclosurePos === "top"} onChange={() => setDisclosurePos("top")} /> 상단(권장)</label>
+                    <label style={{ cursor: "pointer" }}><input type="radio" name="dzpos" checked={disclosurePos === "bottom"} onChange={() => setDisclosurePos("bottom")} /> 하단</label>
+                  </div>
+                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.76rem", color: "#92400e" }}>* 발행 시 본문에 <b>그대로</b> 삽입됩니다(문구 임의 변경 자제 — 법적 필수). 미기재 시 파트너스 정책 위반 소지가 있습니다.</p>
+                </div>
               </div>
               )}
             </div>
