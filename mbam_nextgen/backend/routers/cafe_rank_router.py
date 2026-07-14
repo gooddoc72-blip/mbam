@@ -44,6 +44,7 @@ def list_items(db: Session = Depends(get_db), current_user: dict = Depends(get_c
             "latest_tongsearch_rank": r.latest_tongsearch_rank,
             "latest_cafetab_rank": r.latest_cafetab_rank,
             "last_checked_date": r.last_checked_date,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
             "history": [{"date": h.date_str, "tongsearch_rank": h.tongsearch_rank, "cafetab_rank": h.cafetab_rank} for h in reversed(hist)],
         })
     return {"success": True, "items": out}
