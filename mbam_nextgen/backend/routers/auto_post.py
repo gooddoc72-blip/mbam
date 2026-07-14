@@ -289,6 +289,18 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 )
             if result.get("success"):
                 log("✅ 블로그 포스팅이 성공적으로 완료되었습니다!")
+                # 발행 글 URL·키워드를 결과에 담아 → persister 가 블로그 순위추적 자동 등록
+                task_status_store[task_id]["result"] = {
+                    "result_url": result.get("result_url", ""),
+                    "keyword": req.target_keyword or "",
+                    "target_type": "blog",
+                    "track_rank": bool(getattr(req, "track_rank", False)),
+                }
+                if getattr(req, "track_rank", False):
+                    if result.get("result_url"):
+                        log("📈 발행 글을 블로그 순위 추적에 등록합니다.")
+                    else:
+                        log("⚠️ 발행 글 URL을 확보하지 못해 순위추적 자동등록을 건너뜁니다(수동 등록 필요).")
             else:
                 log(f"⚠️ 블로그 워크플로우 실패: {result.get('error')}")
                 

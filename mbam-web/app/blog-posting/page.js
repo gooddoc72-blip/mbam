@@ -25,6 +25,7 @@ function BlogPostingContent() {
   const isPlace = pathname === "/place-blog";  // 플레이스 블로그: 플레이스 리뷰+블로그 후기 수집 + 사진 폴더 → 사진 맞춤 원고
   const [placeUrl, setPlaceUrl] = useState("");
   const [collectingPlace, setCollectingPlace] = useState(false);
+  const [trackRank, setTrackRank] = useState(false);  // 발행 후 이 글을 통검 순위 추적에 자동 등록
   const [generateCardNews, setGenerateCardNews] = useState(isHospital ? false : true);  // 병원: 카드뉴스 대신 나노바나나 AI 이미지
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
@@ -667,6 +668,8 @@ function BlogPostingContent() {
     try {
       const payload = {
         target_type: "blog",
+        target_keyword: targetKeyword,
+        track_rank: trackRank,   // 발행 후 (키워드+글URL) 블로그 통검 순위 추적 자동 등록
         accounts: validAccounts,
         interval_mins: parseInt(intervalMins) || 0,
         wash_images: washImages,
@@ -1095,6 +1098,12 @@ function BlogPostingContent() {
              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: washImages ? "#3b82f6" : "#64748b" }}>
                <input type="checkbox" checked={washImages} onChange={e => setWashImages(e.target.checked)} style={{ transform: "scale(1.2)" }} />
                ✨ 이미지 자동 세탁 적용 (메타데이터 제거 및 노이즈 추가)
+             </label>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
+             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: trackRank ? "#16a34a" : "#64748b" }}>
+               <input type="checkbox" checked={trackRank} onChange={e => setTrackRank(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+               📈 발행 후 이 글을 블로그 통검 순위 추적에 자동 등록
              </label>
           </div>
           <div>

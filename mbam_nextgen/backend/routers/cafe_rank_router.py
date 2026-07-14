@@ -114,10 +114,12 @@ except Exception as _e:
 
 # ─────────────── 카페 발행 → 순위추적 자동 등록 ───────────────
 def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str, name: str = None) -> bool:
-    """카페 글 발행 성공 시, (키워드, URL)을 순위추적에 자동 등록(중복이면 건너뜀)."""
+    """카페/블로그 글 발행 성공 시, (키워드, URL)을 순위추적에 자동 등록(중복이면 건너뜀).
+    순위추적은 URL(cafe.naver.com / blog.naver.com)로 블로그·카페를 구분한다."""
     keyword = (keyword or "").strip()
     target_url = (target_url or "").strip()
-    if not user_id or not keyword or not target_url or "cafe.naver.com" not in target_url:
+    if not user_id or not keyword or not target_url or not (
+        "cafe.naver.com" in target_url or "blog.naver.com" in target_url):
         return False
     exists = (db.query(CafeRankItem)
               .filter(CafeRankItem.user_id == user_id, CafeRankItem.keyword == keyword,
@@ -129,9 +131,9 @@ def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str
 
 
 def _persist_auto_post(db, user_id, payload, result):
-    """에이전트 auto_post(카페) 완료 시, track_rank 이면 발행 글을 순위추적에 자동 등록(클라우드)."""
+    """에이전트 auto_post(카페/블로그) 완료 시, track_rank 이면 발행 글을 순위추적에 자동 등록(클라우드)."""
     p = payload or {}
-    if p.get("target_type") != "cafe" or not p.get("track_rank"):
+    if p.get("target_type") not in ("cafe", "blog") or not p.get("track_rank"):
         return
     url = (result or {}).get("result_url") or ""
     kw = p.get("target_keyword") or (result or {}).get("keyword") or ""
