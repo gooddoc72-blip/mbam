@@ -282,12 +282,28 @@ class WorkflowOrchestrator:
                 f"{', '.join(sub_list)}"
             )
 
+        # 검색량 기반 '메인+롱테일' 제목 최적화 — 재시도 전 1회만 계산(실패해도 원고 생성엔 지장 없음)
+        title_main = (keyword or "").splitlines()[0].strip() if keyword else ""
+        long_tail = None
+        if title_main:
+            try:
+                from mbam_nextgen.services.keyword_seo import suggest_seo_title_keywords
+                _sk = await suggest_seo_title_keywords(title_main)
+                long_tail = _sk.get("long_tail")
+                if long_tail:
+                    logger.info(f"📊 [Orchestrator] 제목 SEO: 메인='{title_main}' + 롱테일='{long_tail}'")
+                else:
+                    logger.info(f"📊 [Orchestrator] 제목 SEO: 롱테일 후보 없음(메인만 사용) — '{title_main}'")
+            except Exception as e:
+                logger.warning(f"⚠️ [Orchestrator] 제목 SEO 키워드 계산 실패(무시): {e}")
+
         for attempt in range(1, max_attempts + 1):
             try:
                 content = await asyncio.wait_for(
                     self.soul.rewrite_for_blog("", enhanced_keyword, provider=ai_provider,
                                                post_purpose=post_purpose, promo_type=promo_type, distribution_mode=distribution_mode, api_key=api_key,
-                                               prompt_category=prompt_category, custom_prompt=custom_prompt),
+                                               prompt_category=prompt_category, custom_prompt=custom_prompt,
+                                               long_tail=long_tail, title_main=title_main),
                     timeout=timeout,
                 )
                 logger.info(f"✅ [Orchestrator] 원고 생성 완료 ({attempt}회차)")

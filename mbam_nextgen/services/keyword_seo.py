@@ -118,6 +118,79 @@ async def fetch_search_ad_keywords(keyword: str) -> List[Dict[str, Any]]:
             print("Error fetching search ad keywords:", e)
     return []
 
+def _parse_vol(v):
+    """네이버 검색광고 월간검색량 파싱('< 10' 문자열/숫자 모두 안전 처리)."""
+    if isinstance(v, str):
+        if '<' in v:
+            return 10
+        try:
+            return int(float(v.replace(',', '').strip()))
+        except (ValueError, TypeError):
+            return 0
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return 0
+
+
+async def suggest_seo_title_keywords(main_keyword: str) -> Dict[str, Any]:
+    """제목용 SEO 키워드 추천 — 메인 키워드(대표) + 롱테일 키워드 1개(검색량 기반).
+
+    - 롱테일 = 메인 키워드를 '포함'하는 더 긴 실제 검색어 중, 검색량이 있으면서 경쟁이 낮은 것.
+      (검색되면서도 상위노출이 상대적으로 쉬운 확장 키워드)
+    - 네이버 검색광고 keywordstool(월간검색량·경쟁도)로 판단, 실패 시 자동완성(무료) 폴백.
+    반환: {"main": str, "long_tail": Optional[str], "candidates": [{keyword, volume, comp}]}
+    """
+    main = (main_keyword or "").strip()
+    # 여러 줄/부가정보가 섞여 들어와도 첫 줄·앞부분만 키워드로 사용
+    main = main.splitlines()[0].strip()[:40] if main else ""
+    result = {"main": main, "long_tail": None, "candidates": []}
+    if not main:
+        return result
+
+    main_norm = main.replace(" ", "")
+    comp_rank = {"낮음": 0, "중간": 1, "높음": 2}
+
+    try:
+        ad = await fetch_search_ad_keywords(main)
+    except Exception as e:
+        print(f"[suggest_seo_title] 검색광고 조회 실패: {e}")
+        ad = []
+
+    cands = []
+    for k in ad:
+        kw = (k.get("relKeyword") or "").strip()
+        if not kw:
+            continue
+        kw_norm = kw.replace(" ", "")
+        # 메인 키워드를 포함하는 '더 긴' 확장형만 롱테일 후보로
+        if main_norm and main_norm in kw_norm and len(kw_norm) > len(main_norm):
+            vol = _parse_vol(k.get('monthlyPcQcCnt', 0)) + _parse_vol(k.get('monthlyMobileQcCnt', 0))
+            comp = comp_rank.get((k.get('compIdx') or "").strip(), 1)
+            cands.append({"keyword": kw, "volume": vol, "comp": comp})
+
+    # 실제 검색되는(볼륨>=10) 후보 우선 → 경쟁 낮은 순 → 검색량 높은 순
+    searched = [c for c in cands if c["volume"] >= 10] or cands
+    searched.sort(key=lambda c: (c["comp"], -c["volume"]))
+    result["candidates"] = searched[:10]
+    if searched:
+        result["long_tail"] = searched[0]["keyword"]
+        return result
+
+    # 폴백: 검색광고 API 결과 없음 → 자동완성 연관어(키 불필요)
+    try:
+        rel = await fetch_autocomplete_related(main)
+    except Exception:
+        rel = []
+    for r in rel:
+        r = (r or "").strip()
+        rn = r.replace(" ", "")
+        if main_norm and main_norm in rn and len(rn) > len(main_norm):
+            result["long_tail"] = r
+            break
+    return result
+
+
 async def analyze_seo_keyword(seed: str) -> Dict[str, Any]:
     titles = await fetch_top_10_shopping(seed)
     

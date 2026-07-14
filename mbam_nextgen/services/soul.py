@@ -65,9 +65,10 @@ class SoulRewriter:
 
     async def rewrite_for_blog(self, raw_data: str, keyword: str, provider: str = None,
                                post_purpose: str = None, promo_type: str = None, distribution_mode: str = None, api_key: str = None,
-                               prompt_category: str = None, custom_prompt: str = None) -> str:
+                               prompt_category: str = None, custom_prompt: str = None,
+                               long_tail: str = None, title_main: str = None) -> str:
         target_provider = (provider or self.provider).lower()
-        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode, prompt_category, custom_prompt)
+        prompt = self._get_blog_prompt(target_provider, raw_data, keyword, post_purpose, promo_type, distribution_mode, prompt_category, custom_prompt, long_tail=long_tail, title_main=title_main)
 
         if target_provider == "gemini":
             if api_key and genai:
@@ -99,7 +100,28 @@ class SoulRewriter:
         # 설정 오류는 raise — 호출자(orchestrator)가 폴백 처리. string 반환 시 본문에 그대로 게시됨
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 없음 또는 라이브러리 미설치)")
 
-    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None, prompt_category=None, custom_prompt_text=None):
+    def _get_blog_prompt(self, target_provider, raw_data, keyword, post_purpose=None, promo_type=None, distribution_mode=None, prompt_category=None, custom_prompt_text=None, long_tail=None, title_main=None):
+        # 검색량 기반 '메인+롱테일' 제목 지시(있을 때만). title_main = 원본(깨끗한) 메인 키워드
+        _main_kw = (str(title_main).strip() if title_main else "") or (str(keyword).splitlines()[0].strip() if keyword else "")
+        _lt = str(long_tail).strip() if long_tail else ""
+        _has_lt = bool(_lt) and _lt.replace(" ", "") != _main_kw.replace(" ", "")
+        if _has_lt:
+            title_seo_block = (
+                "[제목 규칙 — 검색량 기반 SEO]\n"
+                f"        - 메인 키워드 '{_main_kw}'를 제목 맨 앞쪽에 배치\n"
+                f"        - 롱테일 키워드 '{_lt}'를 제목에 자연스럽게 함께 녹여 '메인+롱테일' 조합으로 완성\n"
+                "        - 전체 32자 이내, 숫자·기간·경험 등 클릭 유발 요소 1개 포함\n"
+                "        - 이모지·특수기호 금지, 키워드 억지 나열 금지(하나의 자연스러운 문장/구로)"
+            )
+            title_seo_inline = f" (제목엔 메인 키워드 '{_main_kw}'를 앞쪽에, 롱테일 키워드 '{_lt}'를 자연스럽게 함께 포함)"
+        else:
+            title_seo_block = (
+                "[제목 규칙 — SEO]\n"
+                "        - 타겟 키워드를 제목 앞쪽에 배치하고, 25자 이내로 작성\n"
+                "        - 숫자·기간·경험 등 클릭 유발 요소를 1개 포함 (예: \"3가지\", \"일주일 써보니\")\n"
+                "        - 이모지·특수기호 금지"
+            )
+            title_seo_inline = ""
         # 1. 포스팅 목적 (Tone & Manner)
         if post_purpose == "intro":
             tone_guide = "객관적이고 전문적인 어조로 매장이나 상품의 장점을 소개하는 '홍보/소개' 글로 작성해주세요. (3인칭 관찰자 혹은 브랜드 에디터 시점)"
@@ -178,6 +200,8 @@ class SoulRewriter:
         if custom_prompt.strip():
             if "{keyword}" not in custom_prompt:
                 custom_prompt += "\n\n위 가이드라인에 따라 아래의 타겟 키워드로 블로그 원고를 작성해주세요.\n\n[기본 정보]\n- 타겟(핵심) 키워드: {keyword}\n- 참고 데이터: {raw_data}\n\n[작성 가이드라인]\n1. 어조: {tone_guide}\n2. 분량 및 구조: {length_guide}\n3. 마크다운 기호 금지: 별표(*), 물결표(~), 샵(#) 등 마크다운 기호를 절대 사용하지 마세요. (단, 해시태그에는 샵 허용)\n4. 이모지 금지: 글에 어떠한 이모지(아이콘)도 절대 사용하지 마세요.\n5. 이미지 삽입 위치 지정: 내용이 전환되거나 문단이 끝나는 적절한 위치(본문 사이사이)에 `[이미지]` 라는 특수 태그를 3~5회 정도 삽입하세요.\n6. 해시태그 추가: 본문 작성이 모두 끝난 후, 맨 마지막 줄에는 이 글과 관련된 검색용 해시태그를 5개 내외로 작성해 주세요. (예: `#해시태그1 #해시태그2`)\n{special_guide}\n\n첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요."
+            if _has_lt:
+                custom_prompt += f"\n\n[제목 필수 규칙] 첫 줄 제목은 메인 키워드 '{_main_kw}'를 앞쪽에 두고, 롱테일 키워드 '{_lt}'를 자연스럽게 함께 녹여 '메인+롱테일' 조합으로 작성하세요(전체 32자 이내, 억지 나열 금지)."
             return custom_prompt.replace("{keyword}", str(keyword)).replace("{raw_data}", str(raw_data)).replace("{combined_text}", str(raw_data)).replace("{tone_guide}", str(tone_guide)).replace("{length_guide}", str(length_guide)).replace("{special_guide}", str(special_guide))
         
         # 기본 프롬프트에 첨부파일이 있다면 추가
@@ -190,10 +214,7 @@ class SoulRewriter:
         - 타겟(핵심) 키워드: {keyword}
         - 참고 데이터: {raw_data}
 
-        [제목 규칙 — SEO]
-        - 타겟 키워드를 제목 앞쪽에 배치하고, 25자 이내로 작성
-        - 숫자·기간·경험 등 클릭 유발 요소를 1개 포함 (예: "3가지", "일주일 써보니")
-        - 이모지·특수기호 금지
+        {title_seo_block}
 
         [본문 구조 — 반드시 이 순서로]
         1) 서론: 독자의 상황에 공감하는 도입 3~4문장 (첫 문단에 타겟 키워드 1회 자연 포함)
