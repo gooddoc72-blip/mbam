@@ -30,16 +30,11 @@ function BlogPostingContent() {
   const [sourceData, setSourceData] = useState("");
   const [promptCategory, setPromptCategory] = useState(null);
   const [includeSourceLink, setIncludeSourceLink] = useState(pathname === "/shopping-partners-blog"); // 본문 끝 상품/출처 링크 (쇼핑파트너스=유입용 기본 ON)
-  // 쇼핑 플랫폼(쿠팡/네이버) 분리 — 플랫폼별 필수 고지 문구·링크 안내가 다름
-  const DISCLOSURES = {
-    coupang: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
-    naver: "이 포스팅은 제휴 마케팅 활동의 일환으로, 이에 따라 일정액의 수수료를 제공받을 수 있습니다.",
-  };
-  const [shopPlatform, setShopPlatform] = useState("coupang"); // coupang | naver
+  // 쿠팡 파트너스 필수 고지 문구 (쇼핑파트너스 기본 ON) — 발행 시 본문에 그대로 삽입(법적 필수, 정확 문구 유지)
+  const COUPANG_DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
   const [includeDisclosure, setIncludeDisclosure] = useState(pathname === "/shopping-partners-blog");
-  const [disclosure, setDisclosure] = useState(DISCLOSURES.coupang);
+  const [disclosure, setDisclosure] = useState(COUPANG_DISCLOSURE);
   const [disclosurePos, setDisclosurePos] = useState("top"); // top | bottom
-  const changePlatform = (pf) => { setShopPlatform(pf); setDisclosure(DISCLOSURES[pf] || ""); };
   const [aiSupplementCount, setAiSupplementCount] = useState(pathname === "/shopping-partners-blog" ? 2 : 0); // 실사진 + AI 연출컷 N장 보조
 
   const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
@@ -994,15 +989,8 @@ function BlogPostingContent() {
               </div>
               {isShopping && (
               <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.6rem", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#334155" }}>플랫폼:</span>
-                  {[["coupang", "🟠 쿠팡 파트너스"], ["naver", "🟢 네이버 쇼핑"]].map(([k, label]) => (
-                    <button key={k} type="button" onClick={() => changePlatform(k)} style={{ padding: "0.4rem 0.9rem", borderRadius: "999px", border: shopPlatform === k ? "1px solid #2563eb" : "1px solid #cbd5e1", background: shopPlatform === k ? "#2563eb" : "white", color: shopPlatform === k ? "white" : "#475569", fontWeight: "bold", fontSize: "0.85rem", cursor: "pointer" }}>{label}</button>
-                  ))}
-                </div>
-                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>{shopPlatform === "coupang" ? "쿠팡 파트너스 링크 (필수)" : "네이버 상품 URL (필수)"}</label>
-                <input type="text" placeholder={shopPlatform === "coupang" ? "예: 쿠팡 파트너스 딥링크 https://link.coupang.com/a/..." : "예: https://smartstore.naver.com/..."} value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
-                {shopPlatform === "coupang" && <p style={{ margin: "0.35rem 0 0", fontSize: "0.76rem", color: "#b45309" }}>* 수수료가 발생하려면 <b>내 추적 ID가 포함된 파트너스 딥링크</b>를 넣어야 합니다(일반 상품 URL은 수익 X).</p>}
+                <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>타겟 상품 URL (필수)</label>
+                <input type="text" placeholder="예: https://smartstore.naver.com/..." value={productUrl} onChange={e => setProductUrl(e.target.value)} style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem", cursor: "pointer", fontSize: "0.85rem", color: extractUrlImages ? "#2563eb" : "#64748b" }}>
                   <input type="checkbox" checked={extractUrlImages} onChange={e => setExtractUrlImages(e.target.checked)} />
                   ✨ 타겟 URL에서 상품 이미지 자동 수집하여 사용하기 (실사진)
@@ -1020,7 +1008,7 @@ function BlogPostingContent() {
                 <div style={{ marginTop: "0.9rem", padding: "0.8rem", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontSize: "0.88rem", fontWeight: "bold", color: includeDisclosure ? "#b45309" : "#64748b" }}>
                     <input type="checkbox" checked={includeDisclosure} onChange={e => setIncludeDisclosure(e.target.checked)} />
-                    {shopPlatform === "coupang" ? "⚖️ 쿠팡 파트너스 필수 고지 문구 삽입 (법적 필수)" : "⚖️ 제휴/광고 고지 문구 삽입 (공정위 표시 권장)"}
+                    ⚖️ 쿠팡 파트너스 필수 고지 문구 삽입 (법적 필수)
                   </label>
                   <textarea value={disclosure} onChange={e => setDisclosure(e.target.value)} rows={2}
                     style={{ width: "100%", marginTop: "0.5rem", padding: "0.6rem", border: "1px solid #fcd34d", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.85rem", resize: "vertical" }} />
