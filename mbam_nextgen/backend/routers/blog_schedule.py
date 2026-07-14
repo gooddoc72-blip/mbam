@@ -232,6 +232,14 @@ def _persist_blog_daily_post(db, user_id, payload, result):
         sch.last_run_url = url
     if title:
         sch.last_run_title = title
+    # 매일 자동발행 글도 블로그 통검 순위 추적에 자동 등록 (수동 발행과 동일) → 누락(저품질) 감시로 이어짐
+    kw = (payload or {}).get("keyword") or ""
+    if url and kw:
+        try:
+            from mbam_nextgen.backend.routers.cafe_rank_router import register_cafe_rank_if_absent
+            register_cafe_rank_if_absent(db, user_id, kw, url, name="매일 자동발행")
+        except Exception as e:
+            print(f"[blog_schedule] 순위 자동등록 실패: {e}")
     # complete_job 이 이 세션을 commit 한다.
 
 
