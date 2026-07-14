@@ -10,6 +10,7 @@ function CafeRankInner() {
   const [targetUrl, setTargetUrl] = useState("");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(null);  // 순위 변동 그래프/분석 모달 대상
   const type = searchParams.get("type") || "";  // "blog" | "cafe" | "" (전체)
 
   const load = async () => {
@@ -126,26 +127,192 @@ function CafeRankInner() {
           <tbody>
             {shownItems.length === 0 ? (
               <tr><td style={td} colSpan={8}><span style={{ color: "#94a3b8" }}>아직 추적 중인 {typeLabel} 글이 없습니다. 위에서 추가하세요.</span></td></tr>
-            ) : shownItems.map(it => (
-              <tr key={it.id}>
-                <td style={td}><b>{it.keyword}</b>{it.name ? <div style={{ color: "#64748b", fontSize: "0.8rem" }}>{it.name}</div> : null}</td>
-                <td style={{ ...td, maxWidth: "260px" }}><a href={it.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb", wordBreak: "break-all", fontSize: "0.8rem" }}>{it.target_url}</a></td>
-                <td style={{ ...td, fontWeight: "bold", color: it.latest_tongsearch_rank ? "#16a34a" : "#94a3b8" }}>{rankText(it.latest_tongsearch_rank)}</td>
-                <td style={{ ...td, fontWeight: "bold", color: it.latest_cafetab_rank ? "#16a34a" : "#94a3b8" }}>{rankText(it.latest_cafetab_rank)}</td>
-                <td style={td}>{(() => { const s = missingState(it); return s === "missing" ? <span style={{ color: "#dc2626", fontWeight: "bold" }}>🔴 누락</span> : s === "warn" ? <span style={{ color: "#d97706" }}>⚠️ 미노출</span> : s === "ok" ? <span style={{ color: "#16a34a", fontWeight: "bold" }}>✅ 노출</span> : <span style={{ color: "#94a3b8" }}>⏳ 미검사</span>; })()}</td>
+            ) : shownItems.map(it => {
+              const st = missingState(it);
+              const unchecked = st === "unchecked";
+              const stop = (e) => e.stopPropagation();
+              return (
+              <tr key={it.id} onClick={() => setSelected(it)} title="클릭하면 순위 변동 그래프와 매일 순위 분석을 볼 수 있습니다" style={{ cursor: "pointer" }}>
+                <td style={td}><b style={{ color: "#2563eb" }}>{it.keyword}</b>{it.name ? <div style={{ color: "#64748b", fontSize: "0.8rem" }}>{it.name}</div> : null}<div style={{ color: "#94a3b8", fontSize: "0.72rem", marginTop: "0.2rem" }}>📊 클릭 → 순위 분석</div></td>
+                <td style={{ ...td, maxWidth: "260px" }}><a href={it.target_url} target="_blank" rel="noreferrer" onClick={stop} style={{ color: "#2563eb", wordBreak: "break-all", fontSize: "0.8rem" }}>{it.target_url}</a></td>
+                <td style={{ ...td, fontWeight: "bold", color: unchecked ? "#cbd5e1" : it.latest_tongsearch_rank ? "#16a34a" : "#94a3b8" }}>{unchecked ? "-" : rankText(it.latest_tongsearch_rank)}</td>
+                <td style={{ ...td, fontWeight: "bold", color: unchecked ? "#cbd5e1" : it.latest_cafetab_rank ? "#16a34a" : "#94a3b8" }}>{unchecked ? "-" : rankText(it.latest_cafetab_rank)}</td>
+                <td style={td}>{st === "missing" ? <span style={{ color: "#dc2626", fontWeight: "bold" }}>🔴 누락</span> : st === "warn" ? <span style={{ color: "#d97706" }}>⚠️ 미노출</span> : st === "ok" ? <span style={{ color: "#16a34a", fontWeight: "bold" }}>✅ 노출</span> : <span style={{ color: "#94a3b8" }} title="아직 순위 수집이 한 번도 안 됐습니다. '지금 수집'을 눌러 확인하세요.">⏳ 미검사</span>}</td>
                 <td style={{ ...td, color: "#64748b", fontSize: "0.82rem" }}>{it.last_checked_date || "-"}</td>
                 <td style={{ ...td, fontSize: "0.78rem", color: "#475569" }}>{(it.history || []).map(h => h.tongsearch_rank ?? "-").join(" → ") || "-"}</td>
-                <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  {missingState(it) === "missing" && (
+                <td style={{ ...td, whiteSpace: "nowrap" }} onClick={stop}>
+                  {st === "missing" && (
                     <button onClick={() => window.open(it.target_url, "_blank")} title="블로그 글로 이동해 직접 삭제하세요" style={{ padding: "0.35rem 0.7rem", background: "#dc2626", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>🗑 열어서 삭제</button>
                   )}
+                  <button onClick={() => setSelected(it)} style={{ padding: "0.35rem 0.7rem", background: "#0ea5e9", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>📊 분석</button>
                   <button onClick={() => checkNow(it.id)} style={{ padding: "0.35rem 0.7rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>지금 수집</button>
                   <button onClick={() => removeItem(it.id)} title="순위 추적 목록에서만 제거(블로그 글은 안 지워짐)" style={{ padding: "0.35rem 0.7rem", background: "#ef4444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>삭제</button>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
+      </div>
+
+      {selected && (
+        <RankDetailModal item={selected} tabLabel={tabLabel} onClose={() => setSelected(null)} onCheck={checkNow} />
+      )}
+    </div>
+  );
+}
+
+// ─────────────── 순위 변동 그래프 (인버트 축: 1위=맨 위) ───────────────
+function RankChart({ history, tabLabel }) {
+  const pts = (history || []).map((h, i) => ({ i, date: h.date, t: h.tongsearch_rank, c: h.cafetab_rank }));
+  const ranks = [];
+  pts.forEach(p => { if (p.t != null) ranks.push(p.t); if (p.c != null) ranks.push(p.c); });
+  if (pts.length === 0 || ranks.length === 0) {
+    return <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>아직 그래프로 그릴 순위 데이터가 없습니다.<br />‘지금 수집’을 며칠 반복하면 변동 추이가 쌓입니다.</div>;
+  }
+  const maxR = Math.max(...ranks, 5);
+  const minR = 1;
+  const W = 660, H = 260, pl = 40, pr = 78, ptop = 18, pbot = 34;
+  const iw = W - pl - pr, ih = H - ptop - pbot;
+  const x = (i) => pts.length === 1 ? pl + iw / 2 : pl + iw * (i / (pts.length - 1));
+  const y = (r) => ptop + ih * ((r - minR) / ((maxR - minR) || 1));  // r=1 → 위, r=max → 아래
+  const md = (d) => (d || "").slice(5).replace("-", "/");
+
+  const path = (key) => {
+    let d = "", pen = false;
+    pts.forEach(p => { const v = p[key]; if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + x(p.i).toFixed(1) + " " + y(v).toFixed(1) + " "; pen = true; });
+    return d.trim();
+  };
+  // y 눈금
+  const ticks = []; const step = Math.max(1, Math.round(maxR / 4));
+  for (let r = 1; r <= maxR; r += step) ticks.push(r);
+  if (ticks[ticks.length - 1] !== maxR) ticks.push(maxR);
+  // x 라벨(너무 촘촘하면 솎아냄)
+  const xEvery = pts.length > 8 ? Math.ceil(pts.length / 7) : 1;
+  const lastOf = (key) => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i][key] != null) return pts[i]; return null; };
+  const lt = lastOf("t"), lc = lastOf("c");
+  const series = [
+    { key: "t", label: "통합검색", color: "#2563eb", last: lt },
+    { key: "c", label: tabLabel, color: "#d97706", last: lc },
+  ];
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "1.2rem", alignItems: "center", marginBottom: "0.4rem", fontSize: "0.82rem", color: "#475569" }}>
+        {series.map(s => (
+          <span key={s.key} style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+            <span style={{ width: "14px", height: "3px", background: s.color, borderRadius: "2px", display: "inline-block" }} />{s.label}
+          </span>
+        ))}
+        <span style={{ marginLeft: "auto", color: "#94a3b8" }}>↑ 위쪽일수록 상위 노출 · 선이 끊긴 곳 = 미노출</span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: "480px", height: "auto", display: "block" }}>
+          {/* 가로 눈금선 */}
+          {ticks.map(r => (
+            <g key={r}>
+              <line x1={pl} y1={y(r)} x2={W - pr} y2={y(r)} stroke="#eef2f7" strokeWidth="1" />
+              <text x={pl - 6} y={y(r) + 3} textAnchor="end" fontSize="10" fill="#94a3b8">{r}위</text>
+            </g>
+          ))}
+          {/* x축 날짜 */}
+          {pts.map((p, i) => (i % xEvery === 0 || i === pts.length - 1) ? (
+            <text key={p.i} x={x(p.i)} y={H - pbot + 16} textAnchor="middle" fontSize="10" fill="#94a3b8">{md(p.date)}</text>
+          ) : null)}
+          {/* 라인 + 포인트 */}
+          {series.map(s => (
+            <g key={s.key}>
+              <path d={path(s.key)} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              {pts.map(p => p[s.key] != null ? (
+                <circle key={p.i} cx={x(p.i)} cy={y(p[s.key])} r="4" fill="#fff" stroke={s.color} strokeWidth="2">
+                  <title>{p.date} · {s.label} {p[s.key]}위</title>
+                </circle>
+              ) : null)}
+              {/* 끝점 직접 라벨 */}
+              {s.last ? (
+                <text x={x(s.last.i) + 8} y={y(s.last[s.key]) + 3} fontSize="11" fontWeight="bold" fill={s.color}>{s.last[s.key]}위</text>
+              ) : null}
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function RankDetailModal({ item, tabLabel, onClose, onCheck }) {
+  const hist = item.history || [];
+  const best = (key) => { const v = hist.map(h => h[key]).filter(x => x != null); return v.length ? Math.min(...v) : null; };
+  const rk = (v) => (v == null ? "미노출" : `${v}위`);
+  const delta = (cur, prev) => {
+    if (cur == null || prev == null) return null;
+    const d = prev - cur;  // 순위는 작아질수록 상승
+    if (d === 0) return <span style={{ color: "#94a3b8" }}>—</span>;
+    return d > 0 ? <span style={{ color: "#16a34a", fontWeight: "bold" }}>▲ {d}</span> : <span style={{ color: "#dc2626", fontWeight: "bold" }}>▼ {-d}</span>;
+  };
+  const tile = { flex: "1 1 120px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "0.7rem 0.9rem" };
+  const tileLbl = { fontSize: "0.72rem", color: "#64748b", marginBottom: "0.2rem" };
+  const tileVal = { fontSize: "1.15rem", fontWeight: "bold", color: "#0f172a" };
+  const th = { padding: "0.45rem 0.7rem", textAlign: "left", fontSize: "0.76rem", color: "#64748b", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+  const td2 = { padding: "0.45rem 0.7rem", fontSize: "0.82rem", borderBottom: "1px solid #f1f5f9" };
+  const rows = [...hist].reverse();  // 최신 먼저
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "1.5rem", zIndex: 1000, overflowY: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "white", borderRadius: "12px", width: "100%", maxWidth: "720px", boxShadow: "0 20px 50px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "1.1rem 1.3rem", borderBottom: "1px solid #f1f5f9" }}>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ margin: 0, fontSize: "1.15rem", color: "#0f172a" }}>📊 {item.keyword} <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: "normal" }}>순위 분석</span></h3>
+            {item.name ? <div style={{ color: "#64748b", fontSize: "0.82rem", marginTop: "0.15rem" }}>{item.name}</div> : null}
+            <a href={item.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontSize: "0.76rem", wordBreak: "break-all" }}>{item.target_url}</a>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: "1.4rem", cursor: "pointer", color: "#94a3b8", lineHeight: 1, flexShrink: 0 }}>×</button>
+        </div>
+
+        <div style={{ padding: "1.1rem 1.3rem" }}>
+          {/* 요약 타일 */}
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", marginBottom: "1.1rem" }}>
+            <div style={tile}><div style={tileLbl}>현재 통합검색</div><div style={{ ...tileVal, color: item.latest_tongsearch_rank ? "#2563eb" : "#94a3b8" }}>{rk(item.latest_tongsearch_rank)}</div></div>
+            <div style={tile}><div style={tileLbl}>현재 {tabLabel}</div><div style={{ ...tileVal, color: item.latest_cafetab_rank ? "#d97706" : "#94a3b8" }}>{rk(item.latest_cafetab_rank)}</div></div>
+            <div style={tile}><div style={tileLbl}>최고 통합검색</div><div style={tileVal}>{rk(best("tongsearch_rank"))}</div></div>
+            <div style={tile}><div style={tileLbl}>검사 횟수</div><div style={tileVal}>{hist.length}회</div></div>
+          </div>
+
+          {/* 순위 변동 그래프 */}
+          <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#334155", marginBottom: "0.5rem" }}>순위 변동 그래프</div>
+          <RankChart history={hist} tabLabel={tabLabel} />
+
+          {/* 매일 순위 분석 표 */}
+          <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#334155", margin: "1.3rem 0 0.5rem" }}>매일 검색 순위 분석</div>
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>
+                <th style={th}>날짜</th><th style={th}>통합검색</th><th style={th}>전일대비</th>
+                <th style={th}>{tabLabel}</th><th style={th}>전일대비</th>
+              </tr></thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td style={td2} colSpan={5}><span style={{ color: "#94a3b8" }}>아직 수집된 기록이 없습니다. ‘지금 수집’을 눌러 첫 순위를 확인하세요.</span></td></tr>
+                ) : rows.map((h, idx) => {
+                  const prev = rows[idx + 1];  // 하루 전(정렬상 다음)
+                  return (
+                    <tr key={h.date}>
+                      <td style={td2}>{h.date}</td>
+                      <td style={{ ...td2, fontWeight: "bold", color: h.tongsearch_rank ? "#2563eb" : "#94a3b8" }}>{rk(h.tongsearch_rank)}</td>
+                      <td style={td2}>{prev ? delta(h.tongsearch_rank, prev.tongsearch_rank) : "-"}</td>
+                      <td style={{ ...td2, fontWeight: "bold", color: h.cafetab_rank ? "#d97706" : "#94a3b8" }}>{rk(h.cafetab_rank)}</td>
+                      <td style={td2}>{prev ? delta(h.cafetab_rank, prev.cafetab_rank) : "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", marginTop: "1.1rem" }}>
+            <button onClick={() => onCheck(item.id)} style={{ padding: "0.55rem 1.1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>지금 수집</button>
+            <button onClick={onClose} style={{ padding: "0.55rem 1.1rem", background: "white", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer" }}>닫기</button>
+          </div>
+        </div>
       </div>
     </div>
   );
