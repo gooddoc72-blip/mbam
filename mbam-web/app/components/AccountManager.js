@@ -47,27 +47,29 @@ export default function AccountManager() {
     }
   };
 
-  // 엑셀/CSV 일괄등록 — A열: 네이버 아이디, B열: 블로그 주소(URL도 허용, 자동으로 blog id 추출).
+  // 엑셀/CSV 일괄등록 — A열: 아이디, B열: 블로그 주소(URL 허용, blog id 자동추출), C열(선택): 비밀번호.
   const importBlogExcel = async (file) => {
     if (!file) return;
     const normBlog = (v) => (v || "").replace(/^https?:\/\//i, "").replace(/^blog\.naver\.com\//i, "").replace(/[/?#].*$/, "").trim();
     try {
       const { parseSpreadsheet } = await import("../utils/spreadsheet");
       const rows = await parseSpreadsheet(file);
-      const body = rows.map((r) => ({ nid: (r[0] || "").trim(), blog: normBlog(r[1] || "") })).filter((x) => x.nid);
-      if (!body.length) return notify("error", "등록할 행이 없습니다. (A열: 아이디, B열: 블로그 주소)");
-      let ok = 0, fail = 0;
+      const body = rows.map((r) => ({ nid: (r[0] || "").trim(), blog: normBlog(r[1] || ""), pw: (r[2] || "").trim() })).filter((x) => x.nid);
+      if (!body.length) return notify("error", "등록할 행이 없습니다. (A열: 아이디, B열: 블로그 주소, C열(선택): 비밀번호)");
+      let ok = 0, fail = 0, pwSet = 0;
       for (const x of body) {
         try {
+          const payload = { naver_id: x.nid, blog_addr: x.blog || null };
+          if (x.pw) { payload.naver_pw = x.pw; }
           const res = await fetchWithAuth("/api/accounts", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ naver_id: x.nid, blog_addr: x.blog || null }),
+            body: JSON.stringify(payload),
           });
-          if (res.ok) ok++; else fail++;
+          if (res.ok) { ok++; if (x.pw) pwSet++; } else fail++;
         } catch (e) { fail++; }
       }
       load();
-      notify(ok ? "success" : "error", `블로그 매핑 ${ok}건 등록${fail ? ` · 실패 ${fail}건` : ""}`);
+      notify(ok ? "success" : "error", `블로그 매핑 ${ok}건 등록${pwSet ? ` · 비번 ${pwSet}개 저장` : ""}${fail ? ` · 실패 ${fail}건` : ""}`);
     } catch (e) { notify("error", "엑셀 처리 오류: " + e.message); }
   };
 
@@ -163,12 +165,12 @@ export default function AccountManager() {
         <input style={{ ...inp, flex: 1, minWidth: "140px" }} type="password" placeholder="비밀번호(선택)" value={form.naver_pw} onChange={(e) => setForm({ ...form, naver_pw: e.target.value })} />
         <input style={{ ...inp, flex: 1, minWidth: "160px" }} placeholder="블로그 주소(선택, 예: bonetacasa)" value={form.blog_addr} onChange={(e) => setForm({ ...form, blog_addr: e.target.value })} />
         <button onClick={addAccount} style={{ padding: "0.6rem 1.2rem", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>+ 계정 추가</button>
-        <label style={{ padding: "0.6rem 1.2rem", background: "#0ea5e9", color: "white", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }} title="엑셀/CSV로 아이디→블로그 주소 일괄 등록 (A열 아이디, B열 블로그 주소)">
+        <label style={{ padding: "0.6rem 1.2rem", background: "#0ea5e9", color: "white", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }} title="엑셀/CSV로 일괄 등록 (A열 아이디, B열 블로그 주소, C열 비밀번호)">
           📄 엑셀 일괄등록
           <input type="file" accept=".xlsx,.csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importBlogExcel(f); }} />
         </label>
       </div>
-      <p style={{ margin: "-0.6rem 0 1.2rem", fontSize: "0.8rem", color: "#94a3b8" }}>엑셀 형식 — A열: 네이버 아이디, B열: 블로그 주소(예: bonetacasa 또는 https://blog.naver.com/bonetacasa). 기존 아이디는 블로그 주소만 갱신됩니다.</p>
+      <p style={{ margin: "-0.6rem 0 1.2rem", fontSize: "0.8rem", color: "#94a3b8" }}>엑셀 형식 — A열: 아이디, B열: 블로그 주소(bonetacasa 또는 https://blog.naver.com/bonetacasa), C열(선택): 비밀번호. 기존 아이디는 값만 갱신됩니다.</p>
 
       {/* 목록 */}
       <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>

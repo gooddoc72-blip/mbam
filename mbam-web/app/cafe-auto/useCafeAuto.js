@@ -777,16 +777,16 @@ export function useCafeAuto() {
     } catch (e) { alert("오류"); }
   };
 
-  // 엑셀/CSV 일괄등록 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판.
-  // 계정 풀에 없는 아이디는 자동 생성(아이디만) 후 매핑을 붙인다.
+  // 엑셀/CSV 일괄등록 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판, D열(선택): 비밀번호.
+  // 계정 풀에 없는 아이디는 자동 생성하고, 비밀번호가 있으면 계정 비번도 함께 저장한다.
   const importCafeExcel = async (file) => {
     if (!file) return;
     try {
       const { parseSpreadsheet } = await import("../utils/spreadsheet");
       const rows = await parseSpreadsheet(file);
-      const body = rows.map(r => ({ nid: (r[0] || "").trim(), url: (r[1] || "").trim(), board: (r[2] || "").trim() }))
+      const body = rows.map(r => ({ nid: (r[0] || "").trim(), url: (r[1] || "").trim(), board: (r[2] || "").trim(), pw: (r[3] || "").trim() }))
                        .filter(x => x.nid && x.url);
-      if (!body.length) { alert("등록할 행이 없습니다.\n형식 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판"); return; }
+      if (!body.length) { alert("등록할 행이 없습니다.\n형식 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판, D열(선택): 비밀번호"); return; }
       const fetchMap = async () => {
         const res = await fetchWithAuth("/api/cafe-nurture/accounts");
         const list = res.ok ? await res.json() : [];
@@ -795,12 +795,19 @@ export function useCafeAuto() {
         return m;
       };
       let idMap = await fetchMap();
-      const missing = [...new Set(body.map(x => x.nid).filter(n => !idMap[n.toLowerCase()]))];
-      let created = 0;
-      for (const nid of missing) {
+      // 아이디별 비밀번호(마지막 비어있지 않은 값)
+      const pwByNid = {};
+      body.forEach(x => { if (x.pw) pwByNid[x.nid.toLowerCase()] = x.pw; });
+      // 신규 계정 생성 + (비번이 있으면) 비번 저장 — 아이디+비번 한 번에
+      let created = 0, pwSet = 0;
+      for (const nid of [...new Set(body.map(x => x.nid))]) {
+        const wasNew = !idMap[nid.toLowerCase()];
+        const pw = pwByNid[nid.toLowerCase()];
+        if (!wasNew && !pw) continue;  // 기존 계정 + 비번 없음 → 건너뜀
         try {
-          const r = await fetchWithAuth("/api/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naver_id: nid }) });
-          if (r.ok) created++;
+          const payload = pw ? { naver_id: nid, naver_pw: pw } : { naver_id: nid };
+          const r = await fetchWithAuth("/api/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          if (r.ok) { if (wasNew) created++; if (pw) pwSet++; }
         } catch (e) { /* ignore */ }
       }
       if (created) idMap = await fetchMap();
@@ -814,7 +821,7 @@ export function useCafeAuto() {
         } catch (e) { fail++; }
       }
       await fetchAccounts();
-      let msg = `✅ 카페 매핑 ${ok}건 등록` + (created ? ` · 신규 아이디 ${created}개 생성` : "") + (fail ? ` · 실패 ${fail}건` : "");
+      let msg = `✅ 카페 매핑 ${ok}건 등록` + (created ? ` · 신규 아이디 ${created}개 생성` : "") + (pwSet ? ` · 비번 ${pwSet}개 저장` : "") + (fail ? ` · 실패 ${fail}건` : "");
       if (skipped.length) msg += `\n건너뜀 ${skipped.length}건: ${skipped.slice(0, 8).join(", ")}${skipped.length > 8 ? " …" : ""}`;
       alert(msg);
     } catch (e) { alert("엑셀 처리 오류: " + e.message); }
