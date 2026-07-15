@@ -165,6 +165,7 @@ export default function PostTab({ s }) {
     handleAddAccount,
     handleDeleteAccount,
     handleAddCafe,
+    importCafeExcel,
     handleAddSchedule,
     handleDeleteSchedule,
     placeUrl,
@@ -222,8 +223,15 @@ export default function PostTab({ s }) {
                 <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
                     <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#334155", margin: 0 }}>2. 계정별 타겟 카페·게시판 매칭</h2>
-                    <button onClick={prefillTargets} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>📥 가입 카페 매핑 불러오기</button>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <label style={{ padding: "0.4rem 0.8rem", background: "#2563eb", color: "white", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }} title="엑셀/CSV 파일로 아이디→카페 URL 일괄 등록 (A열 아이디, B열 카페 URL, C열 게시판)">
+                        📄 엑셀 일괄등록
+                        <input type="file" accept=".xlsx,.csv" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; e.target.value = ""; if (f) importCafeExcel(f); }} />
+                      </label>
+                      <button onClick={prefillTargets} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>📥 가입 카페 매핑 불러오기</button>
+                    </div>
                   </div>
+                  <p style={{ margin: "0 0 0.8rem", fontSize: "0.78rem", color: "#94a3b8" }}>엑셀 형식 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판. (계정 풀에 없는 아이디는 자동 생성)</p>
 
                   {/* 카페 추가(매핑) — 여기서 바로 계정에 카페·게시판 등록 */}
                   <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.8rem", padding: "0.8rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "6px", flexWrap: "wrap", alignItems: "center" }}>

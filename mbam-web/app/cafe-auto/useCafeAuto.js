@@ -777,6 +777,49 @@ export function useCafeAuto() {
     } catch (e) { alert("오류"); }
   };
 
+  // 엑셀/CSV 일괄등록 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판.
+  // 계정 풀에 없는 아이디는 자동 생성(아이디만) 후 매핑을 붙인다.
+  const importCafeExcel = async (file) => {
+    if (!file) return;
+    try {
+      const { parseSpreadsheet } = await import("../utils/spreadsheet");
+      const rows = await parseSpreadsheet(file);
+      const body = rows.map(r => ({ nid: (r[0] || "").trim(), url: (r[1] || "").trim(), board: (r[2] || "").trim() }))
+                       .filter(x => x.nid && x.url);
+      if (!body.length) { alert("등록할 행이 없습니다.\n형식 — A열: 네이버 아이디, B열: 카페 URL, C열(선택): 게시판"); return; }
+      const fetchMap = async () => {
+        const res = await fetchWithAuth("/api/cafe-nurture/accounts");
+        const list = res.ok ? await res.json() : [];
+        const m = {};
+        (list || []).forEach(a => { m[(a.naver_id || "").trim().toLowerCase()] = a.id; });
+        return m;
+      };
+      let idMap = await fetchMap();
+      const missing = [...new Set(body.map(x => x.nid).filter(n => !idMap[n.toLowerCase()]))];
+      let created = 0;
+      for (const nid of missing) {
+        try {
+          const r = await fetchWithAuth("/api/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naver_id: nid }) });
+          if (r.ok) created++;
+        } catch (e) { /* ignore */ }
+      }
+      if (created) idMap = await fetchMap();
+      let ok = 0, fail = 0; const skipped = [];
+      for (const x of body) {
+        const accId = idMap[x.nid.toLowerCase()];
+        if (!accId) { skipped.push(x.nid); continue; }
+        try {
+          const res = await fetchWithAuth("/api/cafe-nurture/cafes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ account_id: accId, cafe_url: x.url, board_name: x.board }) });
+          if (res.ok) ok++; else fail++;
+        } catch (e) { fail++; }
+      }
+      await fetchAccounts();
+      let msg = `✅ 카페 매핑 ${ok}건 등록` + (created ? ` · 신규 아이디 ${created}개 생성` : "") + (fail ? ` · 실패 ${fail}건` : "");
+      if (skipped.length) msg += `\n건너뜀 ${skipped.length}건: ${skipped.slice(0, 8).join(", ")}${skipped.length > 8 ? " …" : ""}`;
+      alert(msg);
+    } catch (e) { alert("엑셀 처리 오류: " + e.message); }
+  };
+
   const handleAddSchedule = async () => {
     if (!newSchAccId || !newSchCafeId || !newSchTime) {
       alert("계정, 매핑된 카페, 예약 시간을 모두 선택해주세요.");
@@ -990,6 +1033,7 @@ export function useCafeAuto() {
     handleAddAccount,
     handleDeleteAccount,
     handleAddCafe,
+    importCafeExcel,
     handleAddSchedule,
     handleDeleteSchedule,
   };
