@@ -458,9 +458,34 @@ async def _handle_cafe_rank_check(payload: dict) -> dict:
     }
 
 
+async def _handle_engagement(payload: dict) -> dict:
+    # 소통&이웃(공감/댓글/서로이웃): 사용자 PC에서 브라우저 자동화 실행(다계정 순차)
+    from mbam_nextgen.backend.routers.communication import run_engagement_loop
+    from mbam_nextgen.orchestrator import task_logger
+    logs = []
+
+    def log(m):
+        try:
+            print(m)
+        except Exception:
+            pass
+        logs.append(str(m))
+
+    task_logger.set(log)
+    accounts = payload.get("accounts") or []
+    if not accounts:
+        raise RuntimeError("실행할 계정이 없습니다.")
+    multi = len(accounts) > 1
+    log(f"소통&이웃 다계정 시작 — 계정 {len(accounts)}개" if multi else "소통&이웃 시작")
+    total_visited, total_ok = await run_engagement_loop(accounts, payload, log, stop_event=None)
+    log(f"✅ 소통&이웃 완료 (총 방문 {total_visited}곳 / 성공 {total_ok}곳)")
+    return {"success": True, "visited": total_visited, "ok": total_ok, "logs": logs[-8:]}
+
+
 HANDLERS = {
     "seo_search": _handle_seo_search,
     "auto_post": _handle_auto_post,
+    "engagement": _handle_engagement,
     "register_account": _handle_register_account,
     "seo_analyze": _handle_seo_analyze,
     "seo_cafe_urls": _handle_seo_cafe_urls,

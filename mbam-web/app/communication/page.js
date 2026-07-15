@@ -1,5 +1,5 @@
 "use client";
-import { fetchWithAuth } from "../utils/api";
+import { fetchWithAuth, pollAgentJob } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
@@ -206,11 +206,29 @@ export default function CommunicationPage() {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.success && data.task_id) {
+      if (data.mode === "agent" && data.job_id) {
+        // 클라우드: 내 PC 에이전트가 실행 — 잡 완료까지 폴링
+        try { addHistory("communication", { summary: `소통·이웃 자동화 시작(에이전트)` }); } catch (e) {}
+        const skips = (data.skipped || []);
+        setStatusLogs([
+          "🖥 내 PC 에이전트가 소통&이웃을 실행합니다. (에이전트가 실행 중이어야 합니다)",
+          ...(skips.length ? [`⏭ 건너뜀(내 계정 아님/없음): ${skips.join(", ")}`] : []),
+        ]);
+        try {
+          const result = await pollAgentJob(data.job_id, { tries: 300, intervalMs: 4000 }); // 최대 ~20분
+          const logs = (result && result.logs) || [];
+          setStatusLogs((prev) => [...prev, ...logs, "✅ 완료"]);
+          setTaskStatus("completed");
+        } catch (e2) {
+          setStatusLogs((prev) => [...prev, "⚠️ " + e2.message]);
+          setTaskStatus("failed");
+        }
+        setLoading(false);
+      } else if (data.success && data.task_id) {
         setTaskId(data.task_id);
         try { addHistory("communication", { summary: `소통·이웃 자동화 시작` }); } catch (e) {}
       } else {
-        alert("자동화 시작에 실패했습니다.");
+        alert("자동화 시작에 실패했습니다." + (data.detail ? `\n${data.detail}` : ""));
         setLoading(false);
       }
     } catch (e) {
