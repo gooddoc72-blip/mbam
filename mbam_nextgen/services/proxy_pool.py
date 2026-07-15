@@ -42,6 +42,21 @@ def parse_proxy_line(line: str):
     return {"server": f"{scheme}://{host_port}", "username": (user or None), "password": (pw or None)}
 
 
+def to_url(cfg) -> str:
+    """{"server","username","password"} → 인증정보 포함 단일 URL 문자열(잡 payload 전송용).
+    get_browser_proxy_config 가 다시 파싱하므로 왕복 안전. None 이면 None."""
+    if not cfg:
+        return None
+    server = cfg.get("server")
+    if not server:
+        return None
+    if cfg.get("username"):
+        scheme, host = server.split("://", 1) if "://" in server else ("http", server)
+        cred = cfg["username"] + (f":{cfg['password']}" if cfg.get("password") else "")
+        return f"{scheme}://{cred}@{host}"
+    return server
+
+
 def to_playwright(proxy) -> dict:
     """ProxyServer 행 → Playwright proxy config."""
     if not proxy or not getattr(proxy, "server", None):

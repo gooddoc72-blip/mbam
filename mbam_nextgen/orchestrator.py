@@ -379,6 +379,7 @@ class WorkflowOrchestrator:
                     manual_content=manual_content,
                     wash_images=wash_images,
                     image_folder_path=image_folder_path,
+                    proxy=acc.get("proxy"),
                     **kwargs
                 )
             except Exception as e:
@@ -446,8 +447,9 @@ class WorkflowOrchestrator:
         **kwargs
     ):
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
-        proxy_label = f"프록시: {proxy[:30]}..." if proxy else "직접 연결"
-        
+        # 로그엔 인증정보 노출 없이 서버 호스트만 표기
+        proxy_label = f"프록시: {(proxy_config or {}).get('server', '?')}" if proxy_config else "직접 연결"
+
         logger.info(f"🚀 [Orchestrator] 워크플로우 시작: {account_id} / {keyword}")
         logger.info(f"⚡ 속도: {speed_mode} x{speed_multiplier} | 발행: {publish_mode} | {proxy_label}")
         

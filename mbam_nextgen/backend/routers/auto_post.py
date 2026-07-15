@@ -130,6 +130,7 @@ class AutoPostRequest(BaseModel):
     
     # Proxy / Tethering
     use_tethering: Optional[bool] = False
+    proxy: Optional[str] = None            # 서버가 프록시 풀에서 자동 배정(요청 시 비움) — URL 문자열
 
 # In-memory status store for monitoring (prototype level)
 task_status_store = {}
@@ -271,6 +272,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                     account_id=account_id,
                     account_pw=req.naver_pw,
                     keyword=req.target_keyword or "테스트",
+                    proxy=req.proxy,
                     publish_mode=req.publish_mode,
                     schedule_date=req.schedule_date,
                     schedule_time=req.schedule_time,
@@ -326,6 +328,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 include_source_link=req.include_source_link,
                 image_folder_path=req.image_folder_path,
                 use_tethering=req.use_tethering,
+                proxy=req.proxy,
                 generate_card_news=bool(req.generate_card_news),
                 card_count=int(getattr(req, "card_count", 3) or 3),
             )
@@ -370,6 +373,25 @@ async def trigger_auto_post(req: AutoPostRequest,
     import uuid
     # 일일 자동화 한도(관리자 설정값) 집행 — 초과 시 403
     enforce_daily_for_request(db, _q, req)
+
+    # 프록시 자동 배정 — IP 방식=proxy 이면 풀에서 정책(하이브리드: 발행=계정별 고정)에 맞게 배정.
+    # 여기(인증+DB)서 URL 문자열로 해소해 req/payload 에 심으면 로컬·클라우드(에이전트) 모두 동일 적용.
+    try:
+        from mbam_nextgen.services import proxy_pool
+        _uid = current_user.get("sub")
+        _tk = "cafe" if req.target_type == "cafe" else "blog"
+        if req.accounts:
+            for _acc in req.accounts:
+                _pc = proxy_pool.resolve_proxy(db, _uid, account_id=(_acc.get("id") or ""), task_kind=_tk)
+                if _pc:
+                    _acc["proxy"] = proxy_pool.to_url(_pc)
+        else:
+            _pc = proxy_pool.resolve_proxy(db, _uid, account_id=(req.naver_id or ""), task_kind=_tk)
+            if _pc:
+                req.proxy = proxy_pool.to_url(_pc)
+    except Exception as _e:
+        print(f"[auto_post] 프록시 배정 건너뜀: {_e}")
+
     # [방법 B] 발행은 네이버 로그인+글쓰기 브라우저 자동화라 클라우드 불가 → 로컬 에이전트에 위임
     from mbam_nextgen.backend import jobs as jobsvc
     if jobsvc.is_cloud_mode():
