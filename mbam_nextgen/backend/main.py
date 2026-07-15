@@ -26,7 +26,7 @@ if sys.platform == 'win32':
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path)
 
-from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router, account_router, blog_schedule, agent_router, tistory_router, cafe_rank_router
+from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router, account_router, blog_schedule, agent_router, tistory_router, cafe_rank_router, proxy_router
 from mbam_nextgen.backend.database import engine, Base
 from mbam_nextgen.backend.auth import get_current_user, verify_admin
 from mbam_nextgen.backend.ai_context import setup_ai_context
@@ -174,6 +174,7 @@ app.include_router(admin_router.router)
 app.include_router(blogspot_router.router, dependencies=[Depends(setup_ai_context)])
 app.include_router(tistory_router.router, dependencies=[Depends(setup_ai_context)])
 app.include_router(cafe_rank_router.router, dependencies=[Depends(get_current_user)])
+app.include_router(proxy_router.router, dependencies=[Depends(get_current_user)])
 app.include_router(cafe_nurture.router, dependencies=[Depends(get_current_user)])
 app.include_router(blog_schedule.router, dependencies=[Depends(get_current_user)])
 app.include_router(coupang.router, prefix="/api/coupang", tags=["Coupang"], dependencies=[Depends(get_current_user)])

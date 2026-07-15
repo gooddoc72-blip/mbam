@@ -11,9 +11,22 @@ class ProxyManager:
     
     @staticmethod
     def get_browser_proxy_config(proxy_url: str = None) -> dict:
-        """Playwright 브라우저 프록시 설정 반환"""
+        """Playwright 브라우저 프록시 설정 반환.
+        인증형('user:pass@host:port' 또는 'scheme://user:pass@host:port')도 파싱해
+        {"server","username","password"} 로 분리한다(Playwright 요구 형식)."""
         if not proxy_url:
             return None
+        # 이미 dict(config)로 들어오면 그대로 사용
+        if isinstance(proxy_url, dict):
+            return proxy_url or None
+        try:
+            from mbam_nextgen.services.proxy_pool import parse_proxy_line
+            cfg = parse_proxy_line(proxy_url)
+            if cfg:
+                return cfg
+        except Exception:
+            pass
+        # 파싱 실패 시 최소한 server 로라도 전달
         return {"server": proxy_url}
     
     @staticmethod

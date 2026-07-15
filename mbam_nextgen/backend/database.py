@@ -490,6 +490,22 @@ class AppSetting(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ProxyServer(Base):
+    """프록시 풀 — 계정 IP 우회용(테더링 대안). 여러 개 등록해두면 자동 로테이션/계정고정에 사용.
+    server 예: 'http://host:port' 또는 'socks5://host:port'. username/password 는 인증형 프록시용
+    (Playwright 는 server 와 username/password 를 별도 키로 받음)."""
+    __tablename__ = "proxy_servers"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    server = Column(String)                     # scheme://host:port
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True)
+    label = Column(String, nullable=True)       # 표시용 메모(지역/업체 등)
+    is_active = Column(Integer, default=1)       # 1=사용, 0=일시중지
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:
