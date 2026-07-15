@@ -136,7 +136,14 @@ function CafeRankInner() {
               return (
               <React.Fragment key={it.id}>
               <tr onClick={toggle} title="클릭하면 순위 변동 그래프와 매일 순위 분석이 아래로 펼쳐집니다" style={{ cursor: "pointer", background: open ? "#f8fafc" : "transparent" }}>
-                <td style={td}><span style={{ color: "#94a3b8", marginRight: "0.35rem", fontSize: "0.75rem", display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span><b style={{ color: "#2563eb" }}>{it.keyword}</b>{it.name ? <div style={{ color: "#64748b", fontSize: "0.8rem", marginLeft: "1.1rem" }}>{it.name}</div> : null}</td>
+                <td style={td}>
+                  <span style={{ color: "#94a3b8", marginRight: "0.35rem", fontSize: "0.75rem", display: "inline-block", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+                  <b style={{ color: "#2563eb" }}>{it.keyword}</b>
+                  <div style={{ marginLeft: "1.1rem" }}>
+                    {it.title ? <div style={{ color: "#475569", fontSize: "0.78rem", marginTop: "0.15rem", maxWidth: "230px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.title}>{it.title}</div> : null}
+                    {it.name ? <div style={{ color: "#a3aec0", fontSize: "0.7rem", marginTop: "0.1rem" }}>{it.name}</div> : null}
+                  </div>
+                </td>
                 <td style={{ ...td, maxWidth: "260px" }}><a href={it.target_url} target="_blank" rel="noreferrer" onClick={stop} style={{ color: "#2563eb", wordBreak: "break-all", fontSize: "0.8rem" }}>{it.target_url}</a></td>
                 <td style={{ ...td, fontWeight: "bold", color: unchecked ? "#cbd5e1" : it.latest_tongsearch_rank ? "#16a34a" : "#94a3b8" }}>{unchecked ? "-" : rankText(it.latest_tongsearch_rank)}</td>
                 <td style={{ ...td, fontWeight: "bold", color: unchecked ? "#cbd5e1" : it.latest_cafetab_rank ? "#16a34a" : "#94a3b8" }}>{unchecked ? "-" : rankText(it.latest_cafetab_rank)}</td>

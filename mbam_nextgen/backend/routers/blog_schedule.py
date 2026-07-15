@@ -243,7 +243,7 @@ def _persist_blog_daily_post(db, user_id, payload, result):
     if url and kw:
         try:
             from mbam_nextgen.backend.routers.cafe_rank_router import register_cafe_rank_if_absent
-            register_cafe_rank_if_absent(db, user_id, kw, url, name="매일 자동발행")
+            register_cafe_rank_if_absent(db, user_id, kw, url, name="매일 자동발행", title=title)
         except Exception as e:
             print(f"[blog_schedule] 순위 자동등록 실패: {e}")
     # complete_job 이 이 세션을 commit 한다.

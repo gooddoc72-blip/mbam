@@ -1320,6 +1320,7 @@ class WorkflowOrchestrator:
                         "account_id": account_id,
                         "cafe_id": cafe_id,
                         "keyword": keyword,
+                        "title": (post_title or "").strip(),
                         "ip": current_ip,
                         "success": submit_result,
                         "result_url": result_url,

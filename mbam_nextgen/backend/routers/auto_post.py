@@ -293,6 +293,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 task_status_store[task_id]["result"] = {
                     "result_url": result.get("result_url", ""),
                     "keyword": req.target_keyword or "",
+                    "title": result.get("title", ""),
                     "target_type": "blog",
                     "track_rank": bool(getattr(req, "track_rank", False)),
                 }
@@ -334,6 +335,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 task_status_store[task_id]["result"] = {
                     "result_url": result.get("result_url", ""),
                     "keyword": req.target_keyword or "",
+                    "title": result.get("title", ""),
                     "target_type": "cafe",
                     "track_rank": bool(getattr(req, "track_rank", False)),
                 }

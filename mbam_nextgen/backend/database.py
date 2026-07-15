@@ -355,7 +355,8 @@ class CafeRankItem(Base):
     user_id = Column(String, index=True)
     keyword = Column(String, index=True)
     target_url = Column(String)                 # 추적할 카페 글 URL
-    name = Column(String, nullable=True)        # 표시용 별칭
+    name = Column(String, nullable=True)        # 표시용 별칭(등록 출처: '매일 자동발행' 등)
+    title = Column(String, nullable=True)       # 발행 글 제목(키워드 아래 회색으로 표시)
     latest_tongsearch_rank = Column(Integer, nullable=True)  # 통합검색 카페/VIEW 블록 내 순위(미노출=null)
     latest_cafetab_rank = Column(Integer, nullable=True)     # 카페탭 전체 순위(미노출=null)
     last_checked_date = Column(String, nullable=True)        # YYYY-MM-DD

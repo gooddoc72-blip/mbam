@@ -41,6 +41,7 @@ def list_items(db: Session = Depends(get_db), current_user: dict = Depends(get_c
                 .order_by(CafeRankHistory.date_str.desc()).limit(14).all())
         out.append({
             "id": r.id, "keyword": r.keyword, "target_url": r.target_url, "name": r.name,
+            "title": getattr(r, "title", None),
             "latest_tongsearch_rank": r.latest_tongsearch_rank,
             "latest_cafetab_rank": r.latest_cafetab_rank,
             "last_checked_date": r.last_checked_date,
@@ -114,11 +115,13 @@ except Exception as _e:
 
 
 # ─────────────── 카페 발행 → 순위추적 자동 등록 ───────────────
-def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str, name: str = None) -> bool:
+def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str, name: str = None, title: str = None) -> bool:
     """카페/블로그 글 발행 성공 시, (키워드, URL)을 순위추적에 자동 등록(중복이면 건너뜀).
-    순위추적은 URL(cafe.naver.com / blog.naver.com)로 블로그·카페를 구분한다."""
+    순위추적은 URL(cafe.naver.com / blog.naver.com)로 블로그·카페를 구분한다.
+    title = 발행 글 제목(키워드 아래 회색으로 표시). 중복이라도 title 비어있으면 채워준다."""
     keyword = (keyword or "").strip()
     target_url = (target_url or "").strip()
+    title = (title or "").strip() or None
     if not user_id or not keyword or not target_url or not (
         "cafe.naver.com" in target_url or "blog.naver.com" in target_url):
         return False
@@ -126,8 +129,10 @@ def register_cafe_rank_if_absent(db, user_id: str, keyword: str, target_url: str
               .filter(CafeRankItem.user_id == user_id, CafeRankItem.keyword == keyword,
                       CafeRankItem.target_url == target_url).first())
     if exists:
+        if title and not exists.title:  # 기존 항목에 제목이 비어있으면 보충
+            exists.title = title
         return False
-    db.add(CafeRankItem(user_id=user_id, keyword=keyword, target_url=target_url, name=(name or None)))
+    db.add(CafeRankItem(user_id=user_id, keyword=keyword, target_url=target_url, name=(name or None), title=title))
     return True
 
 
@@ -138,8 +143,9 @@ def _persist_auto_post(db, user_id, payload, result):
         return
     url = (result or {}).get("result_url") or ""
     kw = p.get("target_keyword") or (result or {}).get("keyword") or ""
+    title = (result or {}).get("title") or ""
     if url and kw:
-        register_cafe_rank_if_absent(db, user_id, kw, url)
+        register_cafe_rank_if_absent(db, user_id, kw, url, title=title)
 
 
 try:
