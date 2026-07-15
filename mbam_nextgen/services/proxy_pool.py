@@ -6,9 +6,10 @@
 
 Playwright 는 인증형 프록시를 {"server","username","password"} 로 받으므로 파싱해서 넘긴다.
 """
+import json
 import random
 import hashlib
-from mbam_nextgen.backend.database import ProxyServer
+from mbam_nextgen.backend.database import ProxyServer, AppSetting
 
 # 계정 로그인이 개입돼 '고정'이 안전한 작업 종류
 _STICKY_KINDS = {"post", "publish", "blog", "cafe", "engagement", "nurture"}
@@ -81,3 +82,26 @@ def pick(db, user_id, mode: str = "hybrid", account_id: str = None, task_kind: s
     if account_id and (task_kind in _STICKY_KINDS):
         return to_playwright(pool[_sticky_index(account_id, len(pool))])
     return to_playwright(random.choice(pool))
+
+
+def get_ip_settings(db, user_id) -> dict:
+    """사용자별 IP 방식 설정(AppSetting KV). {ip_mode, proxy_rotation}."""
+    d = {"ip_mode": "none", "proxy_rotation": "hybrid"}
+    row = db.query(AppSetting).filter(AppSetting.key == f"ip_settings:{user_id}").first()
+    if row and row.value:
+        try:
+            d.update(json.loads(row.value) or {})
+        except Exception:
+            pass
+    return d
+
+
+def resolve_proxy(db, user_id, account_id: str = None, task_kind: str = "post") -> dict:
+    """IP 설정을 읽어 '프록시 모드'면 정책에 맞는 프록시 config 반환, 아니면 None.
+    (테더링/none 은 프록시 아님 → None. 테더링 여부는 별도 use_tethering 로 처리)"""
+    if not user_id:
+        return None
+    s = get_ip_settings(db, user_id)
+    if s.get("ip_mode") != "proxy":
+        return None
+    return pick(db, user_id, mode=s.get("proxy_rotation", "hybrid"), account_id=account_id, task_kind=task_kind)

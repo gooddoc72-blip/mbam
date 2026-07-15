@@ -10,6 +10,7 @@ export default function CommunicationPage() {
   const [loginMode, setLoginMode] = useState("manual");
   const [naverId, setNaverId] = useState("");
   const [naverPw, setNaverPw] = useState("");
+  const [multiIds, setMultiIds] = useState([]);   // 다계정 동시 진행(체크된 naver_id 목록)
   
   // Load saved ID/PW on mount
   useEffect(() => {
@@ -182,10 +183,12 @@ export default function CommunicationPage() {
     setTaskStatus("running");
     
     try {
+      const useMulti = loginMode === "auto" && multiIds.length > 0;
       const payload = {
         login_mode: loginMode,
-        naver_id: loginMode === "auto" ? naverId : null,
-        naver_pw: loginMode === "auto" ? naverPw : null,
+        naver_id: loginMode === "auto" && !useMulti ? naverId : null,
+        naver_ids: useMulti ? multiIds : null,
+        naver_pw: loginMode === "auto" && !useMulti ? naverPw : null,
         target_keyword: targetKeyword,
         limit: parseInt(limit, 10),
         min_delay: parseInt(minDelay, 10),
@@ -262,6 +265,25 @@ export default function CommunicationPage() {
                   + 계정 추가
                 </button>
               </div>
+
+              {/* 다계정 동시 진행 — 체크한 계정마다 순차 실행(계정 사이 대기·프록시 계정별 고정) */}
+              {accounts.length > 0 && (
+                <div style={{ padding: "0.8rem", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#334155", marginBottom: "0.5rem" }}>
+                    다계정으로 동시 진행 <span style={{ fontWeight: "normal", color: "#64748b" }}>(체크 시 계정마다 순차 실행 · 비밀번호는 계정관리에 저장된 값 사용)</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem 1rem" }}>
+                    {accounts.map((a) => (
+                      <label key={a.id} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", cursor: "pointer" }}>
+                        <input type="checkbox" checked={multiIds.includes(a.naver_id)}
+                          onChange={(e) => setMultiIds((prev) => e.target.checked ? [...prev, a.naver_id] : prev.filter((x) => x !== a.naver_id))} />
+                        <span>{a.naver_id} {a.registered ? "✅" : "⚠️"}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {multiIds.length > 0 && <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#2563eb" }}>선택 {multiIds.length}개 계정으로 순차 실행됩니다. (위 단일 계정 선택은 무시됨)</div>}
+                </div>
+              )}
 
               {/* 계정 추가 인라인 폼 */}
               {showAddAcc && (
