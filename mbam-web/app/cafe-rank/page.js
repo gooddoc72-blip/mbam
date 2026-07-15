@@ -114,8 +114,8 @@ function CafeRankInner() {
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "760px" }}>
           <thead>
             <tr>
-              <th style={th}>키워드 / 별칭</th>
-              <th style={th}>카페 글 URL</th>
+              <th style={th}>노출 키워드 / 별칭</th>
+              <th style={th}>{typeLabel} 글 URL</th>
               <th style={th}>통합검색</th>
               <th style={th}>{tabLabel}</th>
               <th style={th}>상태</th>

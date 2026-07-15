@@ -139,12 +139,19 @@ def enqueue_due_blog_posts():
                     topic = topics[ti % len(topics)]
                     ti += 1
                     source = f"[작성 주제] {topic['title']}\n[글감]\n{topic.get('content', '')}"
+                    # 순위추적·제목 SEO에 쓰이는 '노출 키워드'는 제목이 아니라 실제 검색어여야 한다.
+                    # 폴백 글감은 keyword에 제목([EVENT].. 등)이 들어오므로 정제해서 실검색어로 만든다.
+                    try:
+                        from mbam_nextgen.services.keyword_seo import clean_search_keyword
+                        _kw = clean_search_keyword(topic.get("keyword") or topic.get("title") or "") or "정보"
+                    except Exception:
+                        _kw = topic.get("keyword") or topic.get("title") or "정보"
                     payload = {
                         "schedule_id": s.id,  # 발행 결과(제목·URL)를 이 예약에 되돌려 기록하기 위함
                         "naver_id": acc.naver_id,
                         "naver_pw": pw,
                         "blog_addr": acc.blog_addr or None,
-                        "keyword": topic.get("keyword") or topic.get("title") or "정보",
+                        "keyword": _kw,
                         "source_data": source,
                         "ai_provider": s.ai_provider or "claude",
                         "distribution_mode": s.distribution_mode or "normal",

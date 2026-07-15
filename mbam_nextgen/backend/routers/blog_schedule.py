@@ -233,7 +233,13 @@ def _persist_blog_daily_post(db, user_id, payload, result):
     if title:
         sch.last_run_title = title
     # 매일 자동발행 글도 블로그 통검 순위 추적에 자동 등록 (수동 발행과 동일) → 누락(저품질) 감시로 이어짐
+    # 순위추적 '노출 키워드'는 제목([EVENT]..)이 아니라 실제 검색어로 정제해서 등록한다.
     kw = (payload or {}).get("keyword") or ""
+    try:
+        from mbam_nextgen.services.keyword_seo import clean_search_keyword
+        kw = clean_search_keyword(kw) or kw
+    except Exception:
+        pass
     if url and kw:
         try:
             from mbam_nextgen.backend.routers.cafe_rank_router import register_cafe_rank_if_absent

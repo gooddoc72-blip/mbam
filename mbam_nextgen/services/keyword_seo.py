@@ -118,6 +118,38 @@ async def fetch_search_ad_keywords(keyword: str) -> List[Dict[str, Any]]:
             print("Error fetching search ad keywords:", e)
     return []
 
+def clean_search_keyword(text: str, max_len: int = 22) -> str:
+    """제목/문구를 '실제 검색 키워드'에 가깝게 정제(순위추적·제목 SEO 공용).
+
+    - 앞쪽 대괄호 태그 제거: '[EVENT]', '[확인필요]' 등
+    - 끝쪽 괄호 부연 제거: '(0~1세 영아 양육 지원)', '[상세]' 등
+    - 따옴표류 제거, 공백 정리, 과도하게 길면 어절 경계에서 컷.
+    예) "[확인필요] 부모급여 (0~1세 영아 양육 지원)" → "부모급여"
+        "[EVENT] 7월 '이달의 공부왕' 이벤트" → "7월 이달의 공부왕 이벤트"
+    """
+    s = (text or "").strip()
+    if not s:
+        return ""
+    # 앞쪽 [..] 태그(연속) 제거
+    s = re.sub(r'^\s*(?:\[[^\]]*\]\s*)+', '', s)
+    # 끝쪽 (..)/[..] 부연(연속) 제거
+    for _ in range(3):
+        s2 = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', s).strip()
+        if s2 == s:
+            break
+        s = s2
+    # 따옴표류 제거 + 공백 정리
+    s = re.sub(r'[\'"‘’“”]', '', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    # 과도하게 길면 어절 경계에서 컷(단어 중간 절단 방지)
+    if len(s) > max_len:
+        cut = s[:max_len]
+        if ' ' in cut:
+            cut = cut[:cut.rfind(' ')]
+        s = cut.strip()
+    return s
+
+
 def _parse_vol(v):
     """네이버 검색광고 월간검색량 파싱('< 10' 문자열/숫자 모두 안전 처리)."""
     if isinstance(v, str):
