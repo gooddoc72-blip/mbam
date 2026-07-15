@@ -40,18 +40,27 @@ function Get-File($url, $out) {
 # ── 1. 앱 소스 복사 (에이전트에 필요한 것만; 프론트/무거운 산출물 제외) ─────
 Write-Host "[1/4] 앱 소스 복사..." -ForegroundColor Yellow
 # mbam-web(프론트), node, venv, git, 개발 산출물 등은 에이전트에 불필요 → 제외
-$exDirs = @("venv",".git","installer","auth_server","mbam-web","node_modules","__pycache__",
-            ".next","db_backup_20260621","saved_images","temp_uploaded_images",
-            "temp_images","temp_clips","sessions","logs","generated_images","scratch","tests",
-            "nodejs_qa_crawler","chrome_extension","naver_place_crawler","output","payload","payload_agent")
-# 운영자 계정/키가 고객 설치본에 들어가면 안 됨 → agent_config.json / .env 반드시 제외
+# 어느 깊이에서든 '이름'으로 제외 — mbam_nextgen 내부의 profiles(운영자 로그인 세션!)·임시·생성물까지 확실히 배제
+$exDirsAny = @("__pycache__",".git","node_modules",".next",
+               "profiles","sessions","logs","scratch",
+               "saved_images","generated_images","temp_images","temp_uploaded_images","temp_clips",
+               "db_backup_20260621")
+# 루트 특정 폴더만 제외
+$exDirsRoot = @("venv","installer","auth_server","mbam-web","tests",
+                "nodejs_qa_crawler","chrome_extension","naver_place_crawler",
+                "build","dist","docs","output","payload","payload_agent")
+# 운영자 계정/키/DB/무관 산출물(크롤러 설치본 등)은 고객 설치본에 절대 포함 금지
 $exFiles = @("agent_config.json", ".env",
-             "*.log","*.pyc","crash*.txt","crash*.log","*.zip","test_*.py",
-             "*.html","*_dump.*","screenshot*.png","map_screenshot.png","naver_shopping.png",
+             "*.db","*.zip","*.log","*.pyc","*.spec",
+             "CrawlerPro*.exe","*_Setup*.exe","관리자_승인도구.exe",
+             "crash*.txt","crash*.log","test_*.py","test_image.*","editor_fail*.png",
+             "analysis_pattern_output.txt","*.html","*_dump.*",
+             "screenshot*.png","map_screenshot.png","naver_shopping.png",
              "cli_test.json","crawler_test_*.json","graphql_responses.json","debug_*.json")
 $rcArgs = @($Src, (Join-Path $Payload "."), "/E", "/NFL","/NDL","/NJH","/NJS","/NP")
-foreach ($d in $exDirs)  { $rcArgs += @("/XD", (Join-Path $Src $d)) }
-foreach ($f in $exFiles) { $rcArgs += @("/XF", $f) }
+foreach ($d in $exDirsAny)  { $rcArgs += @("/XD", $d) }                    # 이름 매칭(모든 깊이)
+foreach ($d in $exDirsRoot) { $rcArgs += @("/XD", (Join-Path $Src $d)) }   # 루트 경로 매칭
+foreach ($f in $exFiles)    { $rcArgs += @("/XF", $f) }
 & robocopy @rcArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy 실패(code $LASTEXITCODE)" }
 
