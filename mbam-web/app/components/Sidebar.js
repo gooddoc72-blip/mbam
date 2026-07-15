@@ -24,7 +24,8 @@ import {
     KeyRound,
     Image,
     Folder,
-    BookOpen
+    BookOpen,
+    Globe
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
 
@@ -91,6 +92,7 @@ const MENU_ITEMS = [
     },
     { name: "사용 가이드", path: "/guide", icon: BookOpen },
     { name: "계정관리", path: "/multi-task", icon: Layers },
+    { name: "프록시 IP", path: "/proxy", icon: Globe },
     { name: "설정", path: "/settings", icon: Settings },
     { name: "결제 및 플랜", path: "/billing", icon: CreditCard },
     { name: "로그", path: "/logs", icon: ScrollText },
