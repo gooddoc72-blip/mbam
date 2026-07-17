@@ -316,7 +316,9 @@ class SoulRewriter:
         keyword=메인 키워드(제목·본문 SEO), sub_keywords=서브(연관) 키워드(본문에 자연스럽게 녹임).
         Claude(비전+작성) 우선 → 실패 시 Gemini(비전+작성) → 사진 없이 텍스트 생성 순 폴백."""
         import os
-        valid = [p for p in (image_paths or [])[:5] if p and os.path.exists(p)]
+        # 폴더 사진을 최대한 활용(예: 17장). 사진마다 [이미지] 마커를 매칭해 본문에 분산 배치.
+        MAX_MATJIP_PHOTOS = 20
+        valid = [p for p in (image_paths or [])[:MAX_MATJIP_PHOTOS] if p and os.path.exists(p)]
         n = len(valid)
         place = (place_name or keyword or "맛집").strip()
         main_kw = (keyword or place_name or "").strip()
@@ -338,17 +340,35 @@ class SoulRewriter:
               "- 첫 줄은 '제목: ...' 형식으로 시작.\n\n"
             + f"[참고 리뷰]\n{source_data or ''}"
         )
+        # 사진을 여러 장(최대 20) 보내므로 요청 크기·토큰이 커지지 않게 긴 변 1568px·JPEG로 다운스케일해 base64 인코딩.
+        def _downscale_jpeg_b64(path, max_side=1568, quality=85):
+            import io, base64
+            from PIL import Image
+            im = Image.open(path)
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            w, h = im.size
+            if max(w, h) > max_side:
+                if w >= h:
+                    im = im.resize((max_side, max(1, round(h * max_side / w))), Image.LANCZOS)
+                else:
+                    im = im.resize((max(1, round(w * max_side / h)), max_side), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=quality)
+            return base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+
         # 1) Claude 비전+작성 (한 번의 호출로 사진 보고 바로 작성)
         if self.claude_client and valid:
             try:
-                import base64
                 blocks = []
                 for p in valid:
-                    ext = os.path.splitext(p)[1].lower()
-                    media = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(ext, "image/jpeg")
-                    with open(p, "rb") as f:
-                        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+                    try:
+                        b64 = _downscale_jpeg_b64(p)
+                    except Exception:
+                        import base64
+                        with open(p, "rb") as f:
+                            b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
                 blocks.append({"type": "text", "text": rules})
                 resp = await self.claude_client.messages.create(
                     model="claude-opus-4-8", max_tokens=6000,

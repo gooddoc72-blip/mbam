@@ -300,13 +300,14 @@ async def _handle_matjip_collect(payload: dict, log=None) -> dict:
 async def _handle_matjip_generate(payload: dict, log=None) -> dict:
     """[맛집] 폴더 사진을 클라우드로 올려 '사진+리뷰' 원고 생성(클라우드가 Claude 비전+작성).
     에이전트엔 AI 키가 없으므로, 사진만 마스터 키가 있는 클라우드로 전송한다."""
-    import os, glob
+    import os, glob, tempfile, shutil
     folder = (payload.get("image_folder") or "").strip()
     imgs = []
     if folder and os.path.isdir(folder):
-        for ext in ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.PNG"):
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG", "*.WEBP"):
             imgs += glob.glob(os.path.join(folder, ext))
-        imgs = sorted(set(imgs))[:5]
+        # 폴더 사진을 최대한 활용(최대 20장). 예전 5장 제한 → 17장 폴더도 대부분 반영.
+        imgs = sorted(set(imgs))[:20]
     if not _AGENT_AUTH.get("cloud_url"):
         return {"success": False, "error": "에이전트 인증 없음(로그인 필요)"}
     data = {
@@ -316,12 +317,34 @@ async def _handle_matjip_generate(payload: dict, log=None) -> dict:
         # 서브 키워드는 멀티파트 문자열로 전송(엔드포인트에서 쉼표 분리)
         "sub_keywords": ",".join(payload.get("sub_keywords") or []),
     }
+
+    # 여러 장(최대 20)을 올리므로 업로드 크기를 줄이려 긴 변 1600px·JPEG로 다운스케일해 전송.
+    _tmpdir = tempfile.mkdtemp(prefix="matjip_up_")
+    def _resize_jpeg(src, dst, max_side=1600, quality=85):
+        from PIL import Image
+        im = Image.open(src)
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        w, h = im.size
+        if max(w, h) > max_side:
+            if w >= h:
+                im = im.resize((max_side, max(1, round(h * max_side / w))), Image.LANCZOS)
+            else:
+                im = im.resize((max(1, round(w * max_side / h)), max_side), Image.LANCZOS)
+        im.save(dst, format="JPEG", quality=quality)
+
     files, handles = [], []
-    for p in imgs:
+    for i, p in enumerate(imgs):
         try:
-            fh = open(p, "rb")
+            dst = os.path.join(_tmpdir, f"up_{i:02d}.jpg")
+            try:
+                _resize_jpeg(p, dst)
+                use = dst
+            except Exception:
+                use = p   # 리사이즈 실패 시 원본 사용
+            fh = open(use, "rb")
             handles.append(fh)
-            files.append(("images", (os.path.basename(p), fh, "image/jpeg")))
+            files.append(("images", (os.path.basename(use), fh, "image/jpeg")))
         except Exception:
             pass
     try:
@@ -342,6 +365,10 @@ async def _handle_matjip_generate(payload: dict, log=None) -> dict:
                 fh.close()
             except Exception:
                 pass
+        try:
+            shutil.rmtree(_tmpdir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 async def _handle_pick_folder(payload: dict) -> dict:
