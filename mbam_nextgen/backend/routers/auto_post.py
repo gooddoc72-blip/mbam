@@ -70,6 +70,39 @@ async def describe_images(images: List[UploadFile] = File(...), keyword: str = F
     source_data = f"[작성 주제 키워드] {keyword}\n[첨부 이미지에서 분석한 글감]\n{desc}"
     return {"success": True, "description": desc, "source_data": source_data, "image_folder": folder, "count": len(paths)}
 
+
+def _uploaded_image_dir(folder_id: str) -> str:
+    """temp_uploaded_images/<folder_id> 절대경로. folder_id는 영숫자만 허용(경로 탈출 방지)."""
+    import os, re
+    if not re.fullmatch(r"[A-Za-z0-9]+", folder_id or ""):
+        raise HTTPException(status_code=400, detail="잘못된 폴더 ID")
+    return os.path.join(os.getcwd(), "temp_uploaded_images", folder_id)
+
+
+@router.get("/uploaded-images/{folder_id}", summary="발행용 첨부 이미지 목록 — 로컬 에이전트가 다운로드")
+async def list_uploaded_images(folder_id: str, current_user: dict = Depends(get_current_user)):
+    """클라우드에 저장된 첨부 이미지 폴더의 파일 목록을 반환한다.
+    발행은 집 PC 에이전트에서 실행되는데 이미지는 클라우드에 있으므로, 에이전트가 이 목록으로 파일을 내려받는다."""
+    import os
+    folder = _uploaded_image_dir(folder_id)
+    if not os.path.isdir(folder):
+        raise HTTPException(status_code=404, detail="이미지 폴더를 찾을 수 없습니다.")
+    files = sorted(f for f in os.listdir(folder)
+                   if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")))
+    return {"folder_id": folder_id, "files": files, "count": len(files)}
+
+
+@router.get("/uploaded-images/{folder_id}/{filename}", summary="발행용 첨부 이미지 파일 — 로컬 에이전트가 다운로드")
+async def get_uploaded_image(folder_id: str, filename: str, current_user: dict = Depends(get_current_user)):
+    import os, re
+    from fastapi.responses import FileResponse
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", filename or "") or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="잘못된 파일명")
+    fp = os.path.join(_uploaded_image_dir(folder_id), filename)
+    if not os.path.isfile(fp):
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    return FileResponse(fp)
+
 class AutoPostRequest(BaseModel):
     # For multiple accounts
     accounts: Optional[List[dict]] = None
@@ -331,6 +364,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 proxy=req.proxy,
                 generate_card_news=bool(req.generate_card_news),
                 card_count=int(getattr(req, "card_count", 3) or 3),
+                insert_map=bool(getattr(req, "insert_map", False)),
+                map_query=getattr(req, "map_query", None),
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")

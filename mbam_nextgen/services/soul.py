@@ -309,20 +309,30 @@ class SoulRewriter:
 
         return ""
 
-    async def generate_matjip_with_photos(self, source_data: str, image_paths: list, place_name: str = "") -> str:
+    async def generate_matjip_with_photos(self, source_data: str, image_paths: list, place_name: str = "",
+                                          keyword: str = "", sub_keywords: list = None) -> str:
         """[맛집] 사진 + 리뷰를 한 모델에 함께 주고, 사진에 맞는 자리에 [이미지] 마커를 넣은
         방문 후기(카페글)를 한 번에 생성. 사진을 '직접 본 모델이 글도 쓰므로' 사진↔글이 정확히 맞는다.
+        keyword=메인 키워드(제목·본문 SEO), sub_keywords=서브(연관) 키워드(본문에 자연스럽게 녹임).
         Claude(비전+작성) 우선 → 실패 시 Gemini(비전+작성) → 사진 없이 텍스트 생성 순 폴백."""
         import os
         valid = [p for p in (image_paths or [])[:5] if p and os.path.exists(p)]
         n = len(valid)
-        place = (place_name or "맛집").strip()
+        place = (place_name or keyword or "맛집").strip()
+        main_kw = (keyword or place_name or "").strip()
+        subs = [s.strip() for s in (sub_keywords or []) if s and str(s).strip()][:5]
+        kw_rule = ""
+        if main_kw:
+            kw_rule += f"- 메인 키워드 '{main_kw}'를 제목 앞쪽과 본문에 자연스럽게 포함(본문 최소 2~3회, 억지 반복 금지).\n"
+        if subs:
+            kw_rule += f"- 서브(연관) 키워드 [{', '.join(subs)}]를 본문에 자연스럽게 녹이세요(나열식 금지).\n"
         rules = (
             f"당신은 '{place}'을(를) 실제로 다녀온 손님입니다. 아래 [참고 리뷰]를 사실 근거로 "
             f"내돈내산 1인칭 방문 후기(네이버 카페용)를 자연스럽게 작성하세요.\n"
             + (f"사진이 {n}장 첨부돼 있습니다(순서대로 1~{n}번).\n"
                f"규칙:\n- 각 사진을 실제로 보고, 그 사진 내용을 이야기하는 문단 '바로 뒤'에 '[이미지]' 마커를 넣으세요. "
                f"총 {n}개, 첨부 사진 순서대로.\n" if n else "규칙:\n")
+            + kw_rule
             + "- 소제목은 '■ 소제목' 형식. 마크다운(**, ~~) 금지, 이모지 3개 이하.\n"
               "- 800~1300자. 사진에 안 보이는 내용은 리뷰 근거로만.\n"
               "- 첫 줄은 '제목: ...' 형식으로 시작.\n\n"

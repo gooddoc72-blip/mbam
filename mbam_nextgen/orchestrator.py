@@ -1132,7 +1132,9 @@ class WorkflowOrchestrator:
         image_folder_path: str = None,
         use_tethering: bool = False,
         generate_card_news: bool = True,   # 첨부 이미지 없을 때 AI 카드뉴스 자동 생성 여부
-        card_count: int = 3                # 카드뉴스 장수
+        card_count: int = 3,               # 카드뉴스 장수
+        insert_map: bool = False,          # 본문 하단에 네이버 장소(지도) 삽입
+        map_query: str = None              # 삽입할 장소명/주소
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -1298,7 +1300,15 @@ class WorkflowOrchestrator:
                         images=washed_images,
                         speed_mode=speed_mode, speed_multiplier=speed_multiplier
                     )
-                    
+
+                    # 9.5 지도(장소) 삽입 — 본문 작성 후 글 하단에 추가 (블로그와 동일)
+                    _map_q = (map_query or "").strip()
+                    if insert_map and _map_q:
+                        try:
+                            await self.cafe.insert_place_map(editor_frame, _map_q)
+                        except Exception as _e:
+                            logger.error(f"[Orchestrator] 카페 지도 삽입 중 오류(무시): {_e}")
+
                     # 10. 등록
                     if auto_submit:
                         submit_result = await self.cafe.submit_post(editor_frame)

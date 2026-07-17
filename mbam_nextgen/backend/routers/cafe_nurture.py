@@ -348,6 +348,7 @@ class MatjipGenJob(BaseModel):
     source_data: str = ""
     place_name: str = ""
     keyword: str = ""
+    sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 — 본문에 자연스럽게 녹임
 
 
 @router.post("/matjip-generate-job", summary="맛집: 사진+리뷰 원고 생성 잡 적재(에이전트가 폴더 사진 전송)")
@@ -356,7 +357,8 @@ async def matjip_generate_job(req: MatjipGenJob, db: Session = Depends(get_db), 
     사진+리뷰 원고를 받아 결과로 반환한다. 프론트는 /api/agent/jobs/{id} 를 폴링."""
     from mbam_nextgen.backend import jobs as jobsvc
     payload = {"image_folder": req.image_folder, "source_data": req.source_data,
-               "place_name": req.place_name, "keyword": req.keyword}
+               "place_name": req.place_name, "keyword": req.keyword,
+               "sub_keywords": req.sub_keywords or []}
     job_id = jobsvc.enqueue_job(db, get_user_id(current_user), "matjip_generate", payload, priority=3)
     return {"success": True, "job_id": job_id}
 
@@ -367,6 +369,7 @@ async def matjip_generate(
     source_data: str = Form(""),
     place_name: str = Form(""),
     keyword: str = Form(""),
+    sub_keywords: str = Form(""),   # 쉼표로 구분된 서브 키워드(에이전트가 멀티파트 문자열로 전송)
     current_user: dict = Depends(get_current_user),
 ):
     """에이전트가 폴더 사진을 멀티파트로 올리면, 클라우드(마스터 키)가 사진+리뷰를 한 번에 보고
@@ -384,8 +387,10 @@ async def matjip_generate(
             paths.append(p)
         except Exception:
             pass
+    sub_list = [s.strip() for s in (sub_keywords or "").split(",") if s.strip()][:5]
     try:
-        txt = await SoulRewriter().generate_matjip_with_photos(source_data, paths, place_name or keyword)
+        txt = await SoulRewriter().generate_matjip_with_photos(
+            source_data, paths, place_name=place_name, keyword=keyword, sub_keywords=sub_list)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"원고 생성 실패: {e}")
     txt = re.sub(r"(\*\*|~~|__)", "", txt or "").strip()

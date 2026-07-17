@@ -161,9 +161,47 @@ async def _handle_seo_cafe_post(payload: dict) -> dict:
     return await run_cafe_post_analysis(req)
 
 
+async def _download_uploaded_images(folder_id: str):
+    """클라우드 temp_uploaded_images/<folder_id> 의 첨부 이미지를 이 PC로 내려받아 로컬 폴더 경로를 반환.
+    발행은 이 PC에서 하지만 이미지는 클라우드에 있으므로(글감 분석 시 업로드), 발행 전에 받아와야 글에 첨부된다."""
+    import os
+    if not folder_id or not _AGENT_AUTH.get("cloud_url"):
+        return None
+    base = _AGENT_AUTH["cloud_url"]
+    hdr = {"Authorization": f"Bearer {_AGENT_AUTH.get('token', '')}"}
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{base}/api/auto_post/uploaded-images/{folder_id}", headers=hdr, timeout=30)
+            if r.status_code != 200:
+                print(f"[agent] 첨부 이미지 목록 조회 실패 {r.status_code}: {r.text[:120]}")
+                return None
+            files = (r.json() or {}).get("files") or []
+            if not files:
+                return None
+            dest = os.path.join(os.getcwd(), "temp_agent_images", folder_id)
+            os.makedirs(dest, exist_ok=True)
+            saved = 0
+            for fn in files:
+                fr = await client.get(f"{base}/api/auto_post/uploaded-images/{folder_id}/{fn}", headers=hdr, timeout=60)
+                if fr.status_code == 200:
+                    with open(os.path.join(dest, fn), "wb") as out:
+                        out.write(fr.content)
+                    saved += 1
+            print(f"[agent] 첨부 이미지 {saved}/{len(files)}장 다운로드 완료 → {dest}")
+            return dest if saved else None
+    except Exception as e:
+        print(f"[agent] 첨부 이미지 다운로드 오류: {e}")
+        return None
+
+
 async def _handle_auto_post(payload: dict) -> dict:
     # 발행(블로그/카페): 사용자 PC에서 네이버 로그인+글쓰기 브라우저 자동화 실행
-    import uuid as _uuid
+    import uuid as _uuid, os
+    # 클라우드에서 만든 첨부 이미지 폴더는 이 PC에 없다 → 다운로드 URL로 받아 로컬 폴더로 대체(없으면 이미지 없이 진행)
+    _ifp = payload.get("image_folder_path")
+    if _ifp and not os.path.isdir(str(_ifp)):
+        _local = await _download_uploaded_images(os.path.basename(str(_ifp).rstrip("/\\")))
+        payload["image_folder_path"] = _local  # None이면 오케스트레이터가 카드뉴스/텍스트로 폴백
     from mbam_nextgen.backend.routers.auto_post import run_automation_task, task_status_store, AutoPostRequest
     req = AutoPostRequest(**payload)
     tid = _uuid.uuid4().hex
@@ -275,6 +313,8 @@ async def _handle_matjip_generate(payload: dict, log=None) -> dict:
         "source_data": payload.get("source_data", ""),
         "place_name": payload.get("place_name", ""),
         "keyword": payload.get("keyword", ""),
+        # 서브 키워드는 멀티파트 문자열로 전송(엔드포인트에서 쉼표 분리)
+        "sub_keywords": ",".join(payload.get("sub_keywords") or []),
     }
     files, handles = [], []
     for p in imgs:

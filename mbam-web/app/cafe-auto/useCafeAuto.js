@@ -76,6 +76,9 @@ export function useCafeAuto() {
   const [cafeCardNews, setCafeCardNews] = useState(true); // 첨부 이미지 없을 때 AI 카드뉴스 자동 생성
   const [cafeCardCount, setCafeCardCount] = useState(3);  // 카드뉴스 장수
   const [cafeTrackRank, setCafeTrackRank] = useState(true); // 발행 후 통검 순위 추적 자동 등록
+  const [cafeInsertMap, setCafeInsertMap] = useState(false); // 본문 하단에 네이버 장소(지도) 삽입
+  const [cafeMapQuery, setCafeMapQuery] = useState("");      // 삽입할 장소명/주소
+  const [subKeywords, setSubKeywords] = useState("");        // 서브(연관) 키워드 — 쉼표 구분, 최대 5개
   const [placeUrl, setPlaceUrl] = useState("");             // 맛집 포스팅: 플레이스 URL
   const [collectingMatjip, setCollectingMatjip] = useState(false);
 
@@ -330,9 +333,10 @@ export function useCafeAuto() {
   };
 
   // 글감수집 없이: 첨부 이미지 + 키워드 → AI 비전 분석으로 글감 생성
-  const handleDescribeImages = async () => {
-    if (!imageFiles || imageFiles.length === 0) return alert("먼저 이미지를 첨부하세요.");
-    setIsGenerating(true);
+  // 이미지 분석 → 글감 생성. silent=true면 원고 생성과 연속 수행되는 중이라 자체 알림/로딩토글을 생략하고 결과만 반환.
+  const handleDescribeImages = async ({ silent = false } = {}) => {
+    if (!imageFiles || imageFiles.length === 0) { if (!silent) alert("먼저 이미지를 첨부하세요."); return null; }
+    if (!silent) setIsGenerating(true);
     try {
       const fd = new FormData();
       Array.from(imageFiles).forEach(f => fd.append("images", f));
@@ -343,14 +347,16 @@ export function useCafeAuto() {
         setContent(data.source_data);      // 이미지 분석 글감을 원고 소스로
         setImageFolder(data.image_folder || ""); // 발행 시 이 이미지들을 글에 첨부
         setPromptCategory(null);
-        alert("✅ 이미지 분석 글감 생성 완료! 이어서 '✨ AI 원고 생성'을 누르면 이미지 내용에 맞춘 원고가 만들어집니다.");
-      } else {
-        alert(data.detail || "이미지 분석에 실패했습니다.");
+        if (!silent) alert("✅ 이미지 분석 글감 생성 완료! 이어서 '✨ AI 원고 생성'을 누르면 이미지 내용에 맞춘 원고가 만들어집니다.");
+        return { source_data: data.source_data, image_folder: data.image_folder || "" };
       }
+      alert(data.detail || "이미지 분석에 실패했습니다.");
+      return null;
     } catch (e) {
       alert("서버 오류: " + e.message);
+      return null;
     } finally {
-      setIsGenerating(false);
+      if (!silent) setIsGenerating(false);
     }
   };
 
@@ -418,9 +424,10 @@ export function useCafeAuto() {
     setIsGenerating(true); setCafeGenerated([]);
     try {
       const matjipName = (content.match(/\[가게 이름\]\s*(.+)/) || [])[1] || "";
+      const subKwArr = (subKeywords || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean).slice(0, 5);
       const res = await fetchWithAuth("/api/cafe-nurture/matjip-generate-job", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_folder: imageFolder, source_data: content, place_name: matjipName, keyword: targetKeyword }),
+        body: JSON.stringify({ image_folder: imageFolder, source_data: content, place_name: matjipName, keyword: (targetKeyword || "").trim(), sub_keywords: subKwArr }),
       });
       const d = await res.json();
       if (!d.job_id) { setIsGenerating(false); return alert("생성 요청 실패 — 내 PC 에이전트가 켜져 있는지 확인하세요."); }
@@ -447,14 +454,24 @@ export function useCafeAuto() {
   };
 
   const handleGenerateCafe = async () => {
-    if (!content.trim() && !targetKeyword.trim()) {
-      return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
-    }
     // 맛집 + 내 사진 폴더 지정 시: 사진을 보고 쓰는 전용 경로(에이전트→클라우드 Claude 비전)
     if (mainTab === "matjip" && (imageFolder || "").trim()) {
+      if (!content.trim() && !targetKeyword.trim()) return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
       return await generateMatjipWithPhotos();
     }
     setIsGenerating(true);
+    // 이미지 모드: 첨부 이미지가 있으면 '원고 생성' 버튼 하나로 이미지 분석→글감 생성까지 먼저 자동 수행한 뒤 이어서 원고 생성
+    let sourceOverride = null;
+    if (sourceMode === "image" && imageFiles && imageFiles.length > 0) {
+      const described = await handleDescribeImages({ silent: true });
+      if (!described) { setIsGenerating(false); return; }  // 분석 실패 안내는 handleDescribeImages 내부에서 처리
+      sourceOverride = described.source_data;
+    }
+    const effectiveSource = sourceOverride || content;
+    if (!effectiveSource.trim() && !targetKeyword.trim()) {
+      setIsGenerating(false);
+      return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
+    }
     setCafeGenerated([]);
     try {
       // 선택한 계정 수만큼 원고 생성 (블로그와 동일). 선택 없으면 1개 미리보기.
@@ -467,13 +484,16 @@ export function useCafeAuto() {
       const isMatjip = mainTab === "matjip";
       const matjipName = (content.match(/\[가게 이름\]\s*(.+)/) || [])[1];
       const matjipKeyword = matjipName ? `${matjipName.trim()} 후기` : "맛집 방문 후기";
+      // 사용자가 입력한 메인 키워드를 최우선 사용. 맛집도 입력이 있으면 그것으로(없을 때만 가게 이름에서 파생)
+      const mainKeyword = (targetKeyword || "").trim()
+        || (isMatjip ? matjipKeyword : ((title || "").slice(0, 20) || "카페글"));
+      const subKwArr = (subKeywords || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean).slice(0, 5);
       const payload = {
         accounts: genAccounts,
-        target_keyword: isMatjip
-          ? matjipKeyword
-          : (targetKeyword || (title || "").slice(0, 20) || "카페글"),
+        target_keyword: mainKeyword,
+        sub_keywords: subKwArr,          // 서브(연관) 키워드 — 본문에 자연스럽게 녹임
         ai_provider: "claude",
-        source_data: content,            // 현재 글감/참고 내용을 소스로
+        source_data: effectiveSource,    // 현재 글감/참고 내용(이미지 모드는 방금 분석한 글감)을 소스로
         prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory), // 카페 전용 톤 프롬프트
         include_source_link: includeSourceLink,
         post_purpose: isMatjip ? "review" : "info",   // 맛집=후기 톤, 정보성=info
@@ -591,10 +611,13 @@ export function useCafeAuto() {
         const m = savedManuscripts[i];
         const payload = {
           target_type: "cafe", login_mode: "auto", naver_id: m.account_id, naver_pw: null,
-          post_mode: "manual_text", target_keyword: targetKeyword, title: m.title, content: m.content,
+          post_mode: "manual_text", target_keyword: targetKeyword,
+          sub_keywords: (subKeywords || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean).slice(0, 5),
+          title: m.title, content: m.content,
           publish_mode: "instant", cafe_url: m.cafe_url, board_name: m.board_name,
           cafe_action_type: "post", source_data: m.content, use_tethering: useTethering,
           generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
+          insert_map: cafeInsertMap, map_query: cafeMapQuery,  // 본문 하단 네이버 장소(지도) 삽입
           image_folder_path: imageFolder || null,  // 지정한 이미지 폴더(발행 PC=에이전트 기준). 있으면 카드뉴스 대신 사용
         };
         const res = await fetchWithAuth("/api/auto_post/", {
@@ -636,7 +659,9 @@ export function useCafeAuto() {
           target_type: "cafe", login_mode: "auto",
           naver_id: acc.naver_id, naver_pw: null,   // 기기 인증 프로필 자동 로그인
           post_mode: activeTab === "ai" ? "ai_generate" : "manual_text",
-          target_keyword: targetKeyword, title: postTitle, content: postContent,
+          target_keyword: targetKeyword,
+          sub_keywords: (subKeywords || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean).slice(0, 5),
+          title: postTitle, content: postContent,
           publish_mode: "instant", cafe_url: tgt.cafe_url, board_name: tgt.board_name,
           images: images, cafe_action_type: actionType, reference_data: referenceData,
           source_data: postContent, prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory),
@@ -645,13 +670,16 @@ export function useCafeAuto() {
           use_tethering: useTethering,             // USB 테더링 IP 우회(계정 발행 전 IP 회전)
           generate_card_news: cafeCardNews,        // 첨부 이미지 없을 때 카드뉴스 자동 생성 여부
           card_count: Number(cafeCardCount) || 3,  // 카드뉴스 장수
-          track_rank: cafeTrackRank                // 발행 후 통검 순위 추적 자동 등록
+          track_rank: cafeTrackRank,               // 발행 후 통검 순위 추적 자동 등록
+          insert_map: cafeInsertMap,               // 본문 하단 네이버 장소(지도) 삽입
+          map_query: cafeMapQuery                  // 삽입할 장소명/주소
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (data.success && data.task_id) { lastTaskId = data.task_id; started++; }
+        // 클라우드 모드는 발행을 로컬 에이전트 잡으로 적재하고 {mode:'agent', job_id}만 반환 → 이것도 '시작 성공'으로 인정
+        if ((data.success && data.task_id) || data.job_id) { lastTaskId = data.task_id || data.job_id; started++; }
         // 계정 간 발행 텀: 다음 계정 전 대기 (IP 회전/안전 간격 확보)
         if (i < chosen.length - 1 && accountDelay > 0) {
           await new Promise(r => setTimeout(r, accountDelay * 60 * 1000));
@@ -989,6 +1017,12 @@ export function useCafeAuto() {
     setCafeCardCount,
     cafeTrackRank,
     setCafeTrackRank,
+    cafeInsertMap,
+    setCafeInsertMap,
+    cafeMapQuery,
+    setCafeMapQuery,
+    subKeywords,
+    setSubKeywords,
     placeUrl,
     setPlaceUrl,
     collectingMatjip,

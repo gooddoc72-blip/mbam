@@ -119,6 +119,12 @@ export default function PostTab({ s }) {
     setCafeCardCount,
     cafeTrackRank,
     setCafeTrackRank,
+    cafeInsertMap,
+    setCafeInsertMap,
+    cafeMapQuery,
+    setCafeMapQuery,
+    subKeywords,
+    setSubKeywords,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
@@ -290,8 +296,9 @@ export default function PostTab({ s }) {
                     </button>
                   )}
                 </div>
-                {/* 타겟 키워드 입력칸은 정보성에서만. 맛집은 아래 '맛집 소재 수집'(플레이스 URL)이 소스 */}
-                {!matjip && <input type="text" placeholder="타겟 키워드" value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem" }} />}
+                {/* 메인/서브 키워드 — 정보성·맛집 공통. 맛집은 플레이스 리뷰가 소스지만 제목·본문 SEO를 위해 메인 키워드를 받는다 */}
+                <input type="text" placeholder={matjip ? "메인 키워드 (예: 부산 하모회 / 서면 맛집)" : "타겟(메인) 키워드"} value={targetKeyword} onChange={e => setTargetKeyword(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "0.6rem", boxSizing: "border-box" }} />
+                <input type="text" placeholder="서브 키워드 (쉼표로 구분, 최대 5개 — 본문에 자연스럽게 녹임)" value={subKeywords} onChange={e => setSubKeywords(e.target.value)} style={{ width: "100%", padding: "0.7rem", marginBottom: "1rem", boxSizing: "border-box", fontSize: "0.9rem" }} />
 
                 {/* 맛집 포스팅: 플레이스 URL + 소재 자동 수집 */}
                 {matjip && (
@@ -362,14 +369,11 @@ export default function PostTab({ s }) {
                   <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
                     <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 이미지 + 키워드로 글감 만들기</div>
                     <input type="file" accept="image/*" multiple onChange={e => setImageFiles(e.target.files)} style={{ fontSize: "0.85rem", marginBottom: "0.5rem" }} />
-                    <button onClick={handleDescribeImages} disabled={isGenerating} style={{ padding: "0.5rem 1rem", background: isGenerating ? "#94a3b8" : "#10b981", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: isGenerating ? "wait" : "pointer", width: "100%" }}>
-                      {isGenerating ? "분석 중..." : "🔍 이미지 분석 → 글감 생성"}
-                    </button>
-                    <button type="button" onClick={() => setShowLibPicker(true)} style={{ marginTop: "0.5rem", padding: "0.5rem 1rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", width: "100%" }}>
+                    <button type="button" onClick={() => setShowLibPicker(true)} style={{ padding: "0.5rem 1rem", background: "#0ea5e9", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer", width: "100%" }}>
                       🗂️ 이미지 보관함에서 가져오기
                     </button>
                     {imageFolder && <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#16a34a" }}>✅ 첨부 이미지가 발행 글에도 함께 들어갑니다.</p>}
-                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>키워드(위 '타겟 키워드') + 첨부 이미지를 AI가 보고 글감을 만든 뒤, 아래 'AI 원고 생성'으로 원고를 만듭니다.</p>
+                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "#64748b" }}>키워드(위 '타겟 키워드') + 첨부 이미지를 넣고 아래 <b>'AI 원고 생성'</b>을 누르면, AI가 이미지를 분석해 글감을 만든 뒤 곧바로 원고까지 만듭니다.</p>
                   </div>
                 )}
                 {actionType === "post" && (
@@ -391,6 +395,14 @@ export default function PostTab({ s }) {
                       📈 발행 후 이 글을 카페 통검 순위 추적에 자동 등록
                     </label>
                     <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 발행 성공 시 (타겟 키워드 + 글 URL)이 '카페 통검 순위'에 등록돼 매일 자동 체크됩니다.</p>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", cursor: "pointer", color: cafeInsertMap ? "#0ea5e9" : "#64748b", fontWeight: "bold" }}>
+                      <input type="checkbox" checked={cafeInsertMap} onChange={e => setCafeInsertMap(e.target.checked)} style={{ width: 16, height: 16 }} />
+                      🗺️ 본문 하단에 네이버 지도(장소) 첨부
+                    </label>
+                    {cafeInsertMap && (
+                      <input type="text" value={cafeMapQuery} onChange={e => setCafeMapQuery(e.target.value)} placeholder="삽입할 장소명 또는 주소 (예: 부산 하모회 000점)" style={{ width: "100%", marginTop: "0.5rem", padding: "0.5rem 0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.85rem" }} />
+                    )}
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 작성한 글 맨 아래에 네이버 검색 결과 첫 장소가 지도로 삽입됩니다. (장소명이 정확할수록 정확히 잡힙니다)</p>
                   </div>
                 )}
                 {actionType === "post" && (

@@ -434,6 +434,84 @@ class CafeService:
             print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False
 
+    async def insert_place_map(self, frame, query: str) -> bool:
+        """카페 SE3(스마트에디터) 본문에 네이버 장소(지도)를 삽입한다. query=장소명/주소.
+        카페 글쓰기 에디터도 블로그와 동일한 SE3라 셀렉터가 같다:
+        se-map-toolbar-button / react-autosuggest__input / se-place-search-button /
+        se-place-map-search-result-item / se-place-add-button / se-popup-button-confirm.
+        (블로그 insert_place_map 과 동일 흐름 — 카페용 body 셀렉터만 사용)"""
+        if not query or not query.strip():
+            return False
+        query = query.strip()
+        try:
+            if logger: logger.info(f"[CafeService] 🗺️ 장소(지도) 삽입 시도: {query}")
+            # 커서를 본문 맨 끝으로(지도는 글 하단에 삽입)
+            try:
+                await frame.locator(self.selectors["body"]).first.evaluate("""el => {
+                    el.focus();
+                    const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+                    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+                }""")
+            except Exception:
+                pass
+            # 1. 장소 버튼
+            await frame.locator(".se-map-toolbar-button").first.click(timeout=6000)
+            await asyncio.sleep(2)
+            # 2. 검색 입력
+            inp = frame.locator("input.react-autosuggest__input").first
+            await inp.wait_for(timeout=8000)
+            await inp.click()
+            await inp.fill(query)
+            await asyncio.sleep(1.2)
+            # 3. 검색 실행 (autosuggest 드롭다운 닫고 검색)
+            try:
+                await inp.press("Escape")
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+            try:
+                await frame.locator("button.se-place-search-button").first.click(timeout=3000)
+            except Exception:
+                await inp.press("Enter")
+            # 4. 첫 결과 대기 → '추가' (hover 후 클릭, 안 되면 force)
+            first_item = frame.locator("li.se-place-map-search-result-item").first
+            await first_item.wait_for(timeout=12000)
+            await asyncio.sleep(1.0)
+            try:
+                await first_item.hover()
+            except Exception:
+                pass
+            add_btn = first_item.locator("button.se-place-add-button").first
+            try:
+                await add_btn.click(timeout=4000)
+            except Exception:
+                await add_btn.click(timeout=4000, force=True)
+            await asyncio.sleep(1)
+            # 5. 확인 → 본문에 삽입 (확인 버튼이 여러 개라 '보이는' 것만 클릭)
+            confirms = frame.locator("button.se-popup-button-confirm")
+            done = False
+            for i in range(await confirms.count()):
+                b = confirms.nth(i)
+                try:
+                    if await b.is_visible():
+                        await b.click(timeout=4000)
+                        done = True
+                        break
+                except Exception:
+                    continue
+            if not done:
+                await frame.locator(".se-popup-footer button.se-popup-button-confirm, .se-popup-button-container button.se-popup-button-confirm").first.click(timeout=4000)
+            await asyncio.sleep(2)
+            if logger: logger.info("[CafeService] ✅ 장소(지도) 삽입 완료")
+            return True
+        except Exception as e:
+            if logger: logger.error(f"[CafeService] 장소 삽입 실패: {e}")
+            try:
+                await frame.locator("button.se-popup-close-button").first.click(timeout=2000)
+            except Exception:
+                pass
+            return False
+
     # ═══════════════════════════════════════════════
     # 카페 댓글 자동화 관련 기능
     # ═══════════════════════════════════════════════
