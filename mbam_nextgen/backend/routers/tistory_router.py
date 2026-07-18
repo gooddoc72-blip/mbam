@@ -137,6 +137,19 @@ def delete_schedule(schedule_id: str, db: Session = Depends(get_db), current_use
     return {"message": "예약이 삭제되었습니다."}
 
 
+@router.post("/schedules/{schedule_id}/toggle", summary="티스토리 매일 발행 예약 일시정지/재개")
+def toggle_schedule(schedule_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    sch = db.query(TistorySchedule).filter(
+        TistorySchedule.id == schedule_id, TistorySchedule.user_id == _uid(current_user)
+    ).first()
+    if not sch:
+        raise HTTPException(status_code=404, detail="예약을 찾을 수 없습니다.")
+    sch.is_active = 0 if sch.is_active else 1
+    db.commit()
+    return {"message": ("재개되었습니다." if sch.is_active else "일시정지되었습니다."),
+            "is_active": sch.is_active}
+
+
 # ─────────────── 발행 결과 영속화(persister) ───────────────
 def _persist_tistory_post(db, user_id, payload, result):
     sid = (payload or {}).get("schedule_id")

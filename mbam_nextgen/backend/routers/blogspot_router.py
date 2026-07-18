@@ -236,3 +236,18 @@ def delete_blogspot_schedule(schedule_id: str, db: Session = Depends(get_db),
         db.delete(sch)
         db.commit()
     return {"message": "예약이 삭제되었습니다."}
+
+
+@router.post("/schedules/{schedule_id}/toggle", summary="블로그스팟 매일 발행 예약 일시정지/재개")
+def toggle_blogspot_schedule(schedule_id: str, db: Session = Depends(get_db),
+                             current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("sub")
+    sch = db.query(BlogspotSchedule).filter(
+        BlogspotSchedule.id == schedule_id, BlogspotSchedule.user_id == user_id
+    ).first()
+    if not sch:
+        raise HTTPException(status_code=404, detail="예약을 찾을 수 없습니다.")
+    sch.is_active = 0 if sch.is_active else 1
+    db.commit()
+    return {"message": ("재개되었습니다." if sch.is_active else "일시정지되었습니다."),
+            "is_active": sch.is_active}

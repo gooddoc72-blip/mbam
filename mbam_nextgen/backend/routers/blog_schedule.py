@@ -131,6 +131,35 @@ async def delete_blog_schedule(
     return {"message": "예약이 삭제되었습니다."}
 
 
+@router.post("/schedules/{schedule_id}/toggle", summary="블로그 매일 발행 예약 일시정지/재개")
+async def toggle_blog_schedule(
+    schedule_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """매일 자동발행 예약을 삭제하지 않고 껐다 켠다(is_active 토글).
+    클라우드: due 조회 시 is_active==1 만 적재 / 로컬: apscheduler 잡도 상태에 맞춰 정리."""
+    user_id = get_user_id(current_user)
+    sch = db.query(BlogSchedule).filter(
+        BlogSchedule.id == schedule_id, BlogSchedule.user_id == user_id
+    ).first()
+    if not sch:
+        raise HTTPException(status_code=404, detail="예약을 찾을 수 없습니다.")
+    sch.is_active = 0 if sch.is_active else 1
+    db.commit()
+    # 로컬 모드: apscheduler 잡을 상태에 맞춰 추가/제거(클라우드는 is_active 필터라 별도 불필요)
+    try:
+        from mbam_nextgen.services.scheduler_service import scheduler_service
+        if sch.is_active:
+            scheduler_service.add_blog_schedule_job(sch.id, sch.schedule_time)
+        else:
+            scheduler_service.remove_blog_schedule_job(sch.id)
+    except Exception:
+        pass
+    return {"message": ("재개되었습니다." if sch.is_active else "일시정지되었습니다."),
+            "is_active": sch.is_active}
+
+
 # ===================== 예약 포스팅 (1회) =====================
 class BlogReservationCreate(BaseModel):
     account_id: str

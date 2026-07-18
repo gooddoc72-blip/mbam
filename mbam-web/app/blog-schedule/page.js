@@ -177,6 +177,17 @@ export default function BlogSchedulePage() {
     }
   };
 
+  // 매일 자동발행 일시정지/재개 (삭제하지 않고 껐다 켜기)
+  const handleToggle = async (id) => {
+    try {
+      const res = await fetchWithAuth(`${scheduleBase}/${id}/toggle`, { method: "POST" });
+      if (res.ok) loadAll();
+      else alert("상태 변경 실패");
+    } catch (e) {
+      alert("오류: " + e.message);
+    }
+  };
+
   const labelStyle = { display: "block", fontSize: "0.85rem", fontWeight: "bold", marginBottom: "0.4rem", color: "#334155" };
   const inputStyle = { width: "100%", padding: "0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" };
 
@@ -451,10 +462,11 @@ export default function BlogSchedulePage() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
                 {activeSchedules.map((s) => (
-                  <div key={s.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "1rem 1.2rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem" }}>
+                  <div key={s.id} style={{ background: s.is_active ? "#f8fafc" : "#fef2f2", border: s.is_active ? "1px solid #e2e8f0" : "1px solid #fecaca", borderRadius: "8px", padding: "1rem 1.2rem", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", opacity: s.is_active ? 1 : 0.75 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.3rem" }}>
                         ⏰ 매일 {s.schedule_time} · {s.naver_id}
+                        {!s.is_active && <span style={{ marginLeft: "0.5rem", fontSize: "0.75rem", background: "#f59e0b", color: "white", padding: "0.1rem 0.5rem", borderRadius: "999px", fontWeight: "bold" }}>⏸ 일시정지</span>}
                       </div>
                       <div style={{ fontSize: "0.85rem", color: "#64748b" }}>
                         카테고리: <b>{s.content_category || "—"}</b> · 1일 {s.post_count_per_day}개 · {s.ai_provider} · {s.distribution_mode === "quick" ? "막배포" : "일반배포"} · {s.generate_card_news ? "🎨 카드뉴스 ON" : "카드뉴스 OFF"}
@@ -468,11 +480,18 @@ export default function BlogSchedulePage() {
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleDelete(s.id)}
-                      style={{ padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
-                      삭제
-                    </button>
+                    <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+                      <button
+                        onClick={() => handleToggle(s.id)}
+                        style={{ padding: "0.5rem 1rem", background: s.is_active ? "#f59e0b" : "#16a34a", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                        {s.is_active ? "⏸ 일시정지" : "▶ 재개"}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(s.id)}
+                        style={{ padding: "0.5rem 1rem", background: "#ef4444", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", whiteSpace: "nowrap" }}>
+                        삭제
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
