@@ -250,7 +250,8 @@ class CafeService:
                     });
                     return out.slice(0, 10);
                 }""")
-                logger.error(f"[CafeService] 이미지버튼 후보({len(imgcand)}개): {imgcand} | 본문 [이미지] 마커 {content.count('[이미지]')}개")
+                _n_marker = len(re.findall(r'\[이미지(?::\s*\d+)?\]', content))
+                logger.error(f"[CafeService] 이미지버튼 후보({len(imgcand)}개): {imgcand} | 본문 [이미지]/[이미지:N] 마커 {_n_marker}개")
             except Exception:
                 pass
 
@@ -282,34 +283,58 @@ class CafeService:
                 if logger: logger.error(f"[CafeService] 이미지 업로드 실패(건너뜀): {e}")
                 return False
 
-        chunks = re.split(r'\[이미지\]', content)
+        # 마커([이미지] 또는 [이미지:N])를 캡처하며 분리.
+        # [이미지:N] → N번(1-based) 사진을 그 자리에 삽입(AI가 입구컷부터 순서로 지정).
+        # [이미지](번호 없음)·무효·중복 번호 → 다음 미사용 사진으로 순차 폴백.
         images = images or []
-        img_idx = 0
+        n_imgs = len(images)
+        used = [False] * n_imgs
+        parts = re.split(r'(\[이미지(?::\s*\d+)?\])', content)
         pending_text = ""
-        if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {len(images)}장, 청크 {len(chunks)}개)")
-        for i, chunk in enumerate(chunks):
-            if chunk.strip():
-                pending_text += chunk.strip() + "\n\n"
-            if i < len(chunks) - 1 and img_idx < len(images):
-                img_path = images[img_idx]
-                if img_path and os.path.exists(img_path):
-                    if pending_text.strip():
-                        await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
-                        pending_text = ""
-                    if logger: logger.info(f"[CafeService] 이미지 업로드 {img_idx+1}/{len(images)}")
-                    await _safe_upload(img_path)
-                img_idx += 1
+        inserted = 0
+
+        def _next_seq_idx():
+            for k in range(n_imgs):
+                if not used[k]:
+                    return k
+            return -1
+
+        if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {n_imgs}장, 조각 {len(parts)}개)")
+        for part in parts:
+            mk = re.fullmatch(r'\[이미지(?::\s*(\d+))?\]', part or "")
+            if mk:
+                idx = -1
+                if mk.group(1):                       # 번호 지정 [이미지:N]
+                    cand = int(mk.group(1)) - 1
+                    if 0 <= cand < n_imgs and not used[cand]:
+                        idx = cand
+                if idx < 0:                            # 번호 없음/무효/중복 → 순차 폴백
+                    idx = _next_seq_idx()
+                if 0 <= idx < n_imgs:
+                    img_path = images[idx]
+                    if img_path and os.path.exists(img_path):
+                        if pending_text.strip():
+                            await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+                            pending_text = ""
+                        inserted += 1
+                        if logger: logger.info(f"[CafeService] 이미지 업로드 {inserted}/{n_imgs} (사진 #{idx+1})")
+                        await _safe_upload(img_path)
+                    used[idx] = True
+            elif part and part.strip():
+                pending_text += part.strip() + "\n\n"
 
         if pending_text.strip():
             await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
 
-        # 남은 이미지는 글 맨 하단에 추가 (안전장치)
-        while img_idx < len(images):
-            img_path = images[img_idx]
-            if img_path and os.path.exists(img_path):
-                if logger: logger.info(f"[CafeService] (하단)이미지 업로드 {img_idx+1}/{len(images)}")
-                await _safe_upload(img_path)
-            img_idx += 1
+        # 남은(미사용) 이미지는 글 맨 하단에 추가 (안전장치)
+        for k in range(n_imgs):
+            if not used[k]:
+                img_path = images[k]
+                if img_path and os.path.exists(img_path):
+                    inserted += 1
+                    if logger: logger.info(f"[CafeService] (하단)이미지 업로드 {inserted}/{n_imgs} (사진 #{k+1})")
+                    await _safe_upload(img_path)
+                used[k] = True
 
         if logger: logger.info("[CafeService] ✅ 카페 원고 타이핑(이미지 교차) 완료")
         print("✅ [CafeService] 카페 원고 타이핑(이미지 교차) 완료")

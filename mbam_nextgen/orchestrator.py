@@ -1223,7 +1223,14 @@ class WorkflowOrchestrator:
                 else:
                     # 3. AI 콘텐츠 생성
                     logger.info("[Orchestrator] AI 카페 원고 생성 중...")
-                    if prompt_category and (content or source_data):
+                    # 사진 매핑 원고: 맛집 사진 비전 생성이 이미 '[이미지:N]'(입구컷부터 순서)로 사진 자리를
+                    # 정해둔 경우 → 재생성/재정렬하지 않고 그대로 사용(사진↔글 매칭·순서 보존).
+                    import re as _re_map
+                    has_photo_map = bool(content and _re_map.search(r'\[이미지:\s*\d+\]', content))
+                    if has_photo_map:
+                        logger.info("[Orchestrator] 사진 매핑 원고 감지 — 재생성/재정렬 없이 그대로 사용([이미지:N] 순서 보존)")
+                        cafe_content = content
+                    elif prompt_category and (content or source_data):
                         # 글감수집 등 지정 프롬프트로 AI 생성 (content/source_data를 소스로 사용)
                         cafe_content = await self._generate_content_with_retry(
                             keyword, ai_provider=ai_provider, reference_data=reference_data,
@@ -1291,7 +1298,9 @@ class WorkflowOrchestrator:
                             cafe_content = re.sub(r'^\s*\[제목\].*?\n+', '', cafe_content, count=1).strip()
 
                     # 카드(표지+소제목별)를 소제목 위치에 맞춰 배치 (블로그와 동일)
-                    cafe_content = self._align_card_markers(cafe_content, len(washed_images))
+                    # 단, 사진 매핑 원고([이미지:N])는 이미 AI가 순서·위치를 정했으므로 재정렬하지 않는다.
+                    if not has_photo_map:
+                        cafe_content = self._align_card_markers(cafe_content, len(washed_images))
 
                     # 8. 원고 타이핑 (이미지를 [이미지] 마커 위치에 인라인 삽입)
                     post_title = title if title else f"{keyword} 관련 테스트"
