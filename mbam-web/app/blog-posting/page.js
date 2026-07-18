@@ -518,6 +518,8 @@ function BlogPostingContent() {
         sub_keywords: subKeywords,
         product_url: productUrl,
         extract_url_images: extractUrlImages,
+        // 발행용 이미지(스크랩+AI 연출컷)를 원고 생성 시점에 클라우드에서 미리 확보하기 위해 전달
+        ai_supplement_count: Number(aiSupplementCount) || 0,
         ai_provider: aiProvider,
         post_purpose: postPurpose,
         promo_type: promoType,

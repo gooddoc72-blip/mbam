@@ -556,6 +556,66 @@ async def cancel_task(task_id: str):
         return {"success": True, "message": "작업이 중단되었습니다."}
     return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
 
+async def _build_post_images_cloud(req: AutoPostRequest, results: list, keyword: str, scraped_folder: str):
+    """[쇼핑파트너스/상품 블로그] 발행용 이미지를 '클라우드에서' 모두 확보해 한 폴더로 합친다.
+    ① 상세페이지 스크랩 이미지 + ② 본문 기반 AI 이미지(나노바나나) 를 temp_uploaded_images/<id> 에 모아
+    그 폴더 경로를 반환한다. 발행(집 PC 에이전트)은 이 폴더를 다운로드해 글에 삽입한다.
+    (에이전트엔 AI 키가 없으므로 이미지 생성은 반드시 클라우드에서 선행해야 실제로 삽입된다.)"""
+    import os, glob, shutil, uuid
+    want_scrape = bool(scraped_folder and os.path.isdir(scraped_folder))
+    # 병원 카테고리는 백엔드(run_automation_task)와 동일하게 AI 이미지 자동 생성 대상
+    full_ai = bool(req.generate_ai_images) or (req.promo_type == "hospital") or (req.prompt_category == "hospital")
+    want_ai = full_ai or int(req.ai_supplement_count or 0) > 0
+    if not (want_scrape or want_ai):
+        return None
+    dest = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
+    os.makedirs(dest, exist_ok=True)
+    idx = 0
+    # 1) 상세페이지 스크랩 이미지 복사
+    if want_scrape:
+        for fp in sorted(glob.glob(os.path.join(scraped_folder, "*"))):
+            if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                try:
+                    ext = os.path.splitext(fp)[1].lower()
+                    shutil.copy(fp, os.path.join(dest, f"scrape_{idx:02d}{ext}"))
+                    idx += 1
+                except Exception:
+                    pass
+    # 2) 본문 기반 AI 이미지(클라우드 마스터 키) — 실사진 없으면 5장, 실사진 있으면 연출컷 보강
+    if want_ai:
+        try:
+            from mbam_nextgen.services.soul import SoulRewriter
+            soul = SoulRewriter()
+            first = next((r for r in (results or []) if r.get("content") and r.get("title") != "오류 발생"), None)
+            c_title = (first or {}).get("title") or keyword
+            c_body = (first or {}).get("content") or ""
+            n = 5 if (full_ai and not want_scrape) else max(1, min(int(req.ai_supplement_count or 0) or 2, 3))
+            prompts = await soul.generate_blog_image_prompts(
+                title=c_title, content=c_body, keyword=keyword, category=(req.promo_type or "product"), n=n)
+            if prompts:
+                ai_out = os.path.join(dest, "_aigen")
+                paths = await soul.generate_images(prompts, ai_out, filename_prefix="ai")
+                for p in paths:
+                    if p and os.path.exists(p):
+                        try:
+                            shutil.move(p, os.path.join(dest, f"ai_{idx:02d}{os.path.splitext(p)[1].lower() or '.png'}"))
+                            idx += 1
+                        except Exception:
+                            pass
+                shutil.rmtree(ai_out, ignore_errors=True)
+        except Exception as e:
+            print(f"[generate] 클라우드 AI 이미지 생성 실패(무시): {e}")
+    files = [f for f in os.listdir(dest) if not f.startswith("_")]
+    if not files:
+        try:
+            os.rmdir(dest)
+        except Exception:
+            pass
+        return None
+    print(f"[generate] 발행용 이미지 {len(files)}장 준비 완료 → {dest}")
+    return dest
+
+
 async def _generate_impl(req: AutoPostRequest):
     print(f"[DEBUG] generate_multiple_contents called. product_url: {req.product_url}")
     results = []
@@ -640,12 +700,21 @@ async def _generate_impl(req: AutoPostRequest):
 
     # Run all generations concurrently
     results = await asyncio.gather(*(generate_single(i) for i in range(num_accounts)))
-    
+
+    # 발행용 이미지를 클라우드에서 전부 확보(스크랩 + 본문기반 AI) → 한 폴더로 합쳐 반환.
+    # 실패해도 원고 생성은 성공 처리(이미지는 폴백: 스크랩 폴더 or 없음).
+    post_image_folder = None
+    try:
+        post_image_folder = await _build_post_images_cloud(req, results, effective_keyword, scraped_image_folder)
+    except Exception as e:
+        print(f"[generate] 발행 이미지 준비 실패(무시): {e}")
+
     return {
         "success": True,
         "generated_contents": results,
         "effective_keyword": effective_keyword,   # URL에서 자동 추출된 키워드(쇼핑파트너스) — 발행 제목 폴백용
-        "scraped_image_folder": scraped_image_folder if scraped_image_folder else None
+        # 스크랩+AI를 합친 폴더(temp_uploaded_images/<id>)를 우선 반환 → 에이전트가 다운로드해 삽입.
+        "scraped_image_folder": post_image_folder or (scraped_image_folder if scraped_image_folder else None)
     }
 
 
