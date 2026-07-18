@@ -396,8 +396,8 @@ export function useCafeAuto() {
       });
       const data = await res.json();
       if (!res.ok) { alert("수집 실패: " + (data.detail || res.status)); return; }
-      // 이전 정보성/글감수집에서 남은 제목·키워드를 비운다(맛집 주제는 리뷰 소스 기반으로 AI가 작성)
-      const applySource = (sd) => { setTitle(""); setTargetKeyword(""); setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
+      // 수집 결과(리뷰)를 글감(content)으로만 채운다. 사용자가 입력한 메인/서브 키워드는 그대로 보존한다.
+      const applySource = (sd) => { setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
       if (data.mode === "inline") {
         applySource(data.source_data);
         setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
