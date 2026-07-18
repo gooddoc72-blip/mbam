@@ -323,8 +323,21 @@ class SoulRewriter:
         place = (place_name or keyword or "맛집").strip()
         main_kw = (keyword or place_name or "").strip()
         subs = [s.strip() for s in (sub_keywords or []) if s and str(s).strip()][:5]
-        kw_rule = ""
+        # 롱테일 키워드(검색량 기반) — 제목을 '메인+롱테일'로 최적화 (텍스트 경로와 동일, 실패 시 메인만)
+        long_tail = ""
         if main_kw:
+            try:
+                from mbam_nextgen.services.keyword_seo import suggest_seo_title_keywords
+                _sk = await suggest_seo_title_keywords(main_kw)
+                long_tail = (_sk.get("long_tail") or "").strip()
+            except Exception as _e:
+                print(f"[Soul] 맛집 롱테일 키워드 계산 실패(메인만 사용): {_e}")
+        kw_rule = ""
+        if main_kw and long_tail:
+            kw_rule += (f"- 제목은 메인 키워드 '{main_kw}'를 앞쪽에 두고 롱테일 키워드 '{long_tail}'를 "
+                        f"자연스럽게 함께 녹여 '메인+롱테일' 조합으로 작성(전체 32자 이내, 억지 나열 금지). "
+                        f"본문에도 메인 키워드를 최소 2~3회 자연 포함.\n")
+        elif main_kw:
             kw_rule += f"- 메인 키워드 '{main_kw}'를 제목 앞쪽과 본문에 자연스럽게 포함(본문 최소 2~3회, 억지 반복 금지).\n"
         if subs:
             kw_rule += f"- 서브(연관) 키워드 [{', '.join(subs)}]를 본문에 자연스럽게 녹이세요(나열식 금지).\n"
