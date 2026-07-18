@@ -44,11 +44,33 @@ router = APIRouter()
 seo_analyzer = SeoAnalyzer()
 
 
+def _cleanup_old_temp_dirs(max_age_hours: float = 24.0):
+    """발행용 임시 이미지 폴더 중 오래된 것 삭제(디스크 누수 방지). best-effort — 실패해도 무시.
+    temp_uploaded_images(업로드/스크랩+AI 합본) + temp_scraped_images(스크랩 원본)."""
+    import os, time, shutil
+    cutoff = time.time() - max_age_hours * 3600
+    for root_name in ("temp_uploaded_images", "temp_scraped_images"):
+        root = os.path.join(os.getcwd(), root_name)
+        if not os.path.isdir(root):
+            continue
+        try:
+            for name in os.listdir(root):
+                p = os.path.join(root, name)
+                try:
+                    if os.path.isdir(p) and os.path.getmtime(p) < cutoff:
+                        shutil.rmtree(p, ignore_errors=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 @router.post("/describe-images", summary="첨부 이미지+키워드로 글감(원고 소스) 생성 — 글감수집 없이")
 async def describe_images(images: List[UploadFile] = File(...), keyword: str = Form("")):
     """업로드 이미지를 비전(Gemini)으로 분석해 원고용 글감 텍스트를 만들고,
     이미지는 폴더에 저장해 발행 시 글에 첨부할 수 있도록 폴더 경로를 반환한다."""
     import os, uuid
+    _cleanup_old_temp_dirs()   # 오래된 임시 폴더 정리(디스크 누수 방지)
     folder = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
     os.makedirs(folder, exist_ok=True)
     paths = []
@@ -568,6 +590,7 @@ async def _build_post_images_cloud(req: AutoPostRequest, results: list, keyword:
     want_ai = full_ai or int(req.ai_supplement_count or 0) > 0
     if not (want_scrape or want_ai):
         return None
+    _cleanup_old_temp_dirs()   # 오래된 임시 폴더 정리(디스크 누수 방지)
     dest = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
     os.makedirs(dest, exist_ok=True)
     idx = 0

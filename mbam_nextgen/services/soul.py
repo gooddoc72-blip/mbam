@@ -316,8 +316,8 @@ class SoulRewriter:
         keyword=메인 키워드(제목·본문 SEO), sub_keywords=서브(연관) 키워드(본문에 자연스럽게 녹임).
         Claude(비전+작성) 우선 → 실패 시 Gemini(비전+작성) → 사진 없이 텍스트 생성 순 폴백."""
         import os
-        # 폴더 사진을 최대한 활용(예: 17장). 사진마다 [이미지] 마커를 매칭해 본문에 분산 배치.
-        MAX_MATJIP_PHOTOS = 20
+        # 사진 최대 10장(비용·발행속도 균형). 사진마다 [이미지:N] 마커를 매칭해 본문에 분산 배치.
+        MAX_MATJIP_PHOTOS = 10
         valid = [p for p in (image_paths or [])[:MAX_MATJIP_PHOTOS] if p and os.path.exists(p)]
         n = len(valid)
         place = (place_name or keyword or "맛집").strip()
@@ -812,7 +812,11 @@ Example: ["a photorealistic ... no text, no watermark, high quality.", "..."]"""
                 for rp in list(reference_images)[:3]:
                     if rp and os.path.exists(rp):
                         try:
-                            ref_imgs.append(_PILImage.open(rp))
+                            _ri = _PILImage.open(rp)
+                            if _ri.mode not in ("RGB", "L"):
+                                _ri = _ri.convert("RGB")
+                            _ri.thumbnail((1024, 1024))   # 참조 이미지 다운스케일(입력 크기·비용 절감)
+                            ref_imgs.append(_ri)
                         except Exception:
                             pass
             except Exception as _e:
@@ -854,4 +858,9 @@ Example: ["a photorealistic ... no text, no watermark, high quality.", "..."]"""
                     print(f"[SoulRewriter] 이미지 part 없음 (프롬프트 {idx+1}, 안전필터 가능성)")
             except Exception as e:
                 print(f"[SoulRewriter] 이미지 생성 실패 {idx+1}: {e}")
+        for _ri in ref_imgs:   # 참조 이미지 핸들 정리(누수 방지)
+            try:
+                _ri.close()
+            except Exception:
+                pass
         return paths

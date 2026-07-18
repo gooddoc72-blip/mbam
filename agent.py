@@ -166,9 +166,20 @@ async def _handle_seo_cafe_post(payload: dict) -> dict:
 async def _download_uploaded_images(folder_id: str):
     """클라우드 temp_uploaded_images/<folder_id> 의 첨부 이미지를 이 PC로 내려받아 로컬 폴더 경로를 반환.
     발행은 이 PC에서 하지만 이미지는 클라우드에 있으므로(글감 분석 시 업로드), 발행 전에 받아와야 글에 첨부된다."""
-    import os
+    import os, time, shutil
     if not folder_id or not _AGENT_AUTH.get("cloud_url"):
         return None
+    # 오래된(24h+) 다운로드 폴더 정리(디스크 누수 방지) — best-effort
+    try:
+        _root = os.path.join(os.getcwd(), "temp_agent_images")
+        if os.path.isdir(_root):
+            _cutoff = time.time() - 24 * 3600
+            for _n in os.listdir(_root):
+                _p = os.path.join(_root, _n)
+                if os.path.isdir(_p) and os.path.getmtime(_p) < _cutoff:
+                    shutil.rmtree(_p, ignore_errors=True)
+    except Exception:
+        pass
     base = _AGENT_AUTH["cloud_url"]
     hdr = {"Authorization": f"Bearer {_AGENT_AUTH.get('token', '')}"}
     try:
@@ -308,8 +319,8 @@ async def _handle_matjip_generate(payload: dict, log=None) -> dict:
     if folder and os.path.isdir(folder):
         for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG", "*.WEBP"):
             imgs += glob.glob(os.path.join(folder, ext))
-        # 폴더 사진을 최대한 활용(최대 20장). 예전 5장 제한 → 17장 폴더도 대부분 반영.
-        imgs = sorted(set(imgs))[:20]
+        # 폴더 사진 최대 10장(비용·발행속도 균형). soul MAX_MATJIP_PHOTOS와 일치.
+        imgs = sorted(set(imgs))[:10]
     if not _AGENT_AUTH.get("cloud_url"):
         return {"success": False, "error": "에이전트 인증 없음(로그인 필요)"}
     data = {
@@ -583,6 +594,7 @@ class AgentClient:
         self.cfg = cfg
         self.token = None
         self.agent_id = _agent_id()
+        self._relogin_lock = asyncio.Lock()   # 2-레인 동시 재로그인 방지
 
     async def login(self, client: httpx.AsyncClient) -> bool:
         try:
@@ -627,15 +639,19 @@ class AgentClient:
         lane = "fast" if interactive else "bg"
         while True:
             try:
+                sent_token = self.token   # 이 요청에 쓴 토큰(재로그인 중복 판단용)
                 r = await client.get(
                     f"{self.cfg['cloud_url']}/api/agent/next-job",
                     params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0"},
-                    headers=self._headers(), timeout=30,
+                    headers={"Authorization": f"Bearer {sent_token}"}, timeout=30,
                 )
                 if r.status_code == 401:
-                    print(f"[agent:{lane}] 토큰 만료 → 재로그인")
-                    self.token = None
-                    await self.login(client)
+                    # 두 레인이 동시에 만료를 봐도 재로그인은 한 번만(다른 레인이 이미 갱신했으면 스킵)
+                    async with self._relogin_lock:
+                        if self.token == sent_token:
+                            print(f"[agent:{lane}] 토큰 만료 → 재로그인")
+                            self.token = None
+                            await self.login(client)
                     continue
                 job = (r.json() or {}).get("job")
                 if not job:

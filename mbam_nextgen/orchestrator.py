@@ -556,7 +556,9 @@ class WorkflowOrchestrator:
             # (A) 폴더 연동 방식
             if image_folder_path and os.path.exists(image_folder_path):
                 logger.info(f"📂 [Orchestrator] 로컬 폴더 연동 시작: {image_folder_path}")
-                img_paths = glob.glob(os.path.join(image_folder_path, "*.jpg")) + glob.glob(os.path.join(image_folder_path, "*.png"))
+                img_paths = []
+                for _ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+                    img_paths += glob.glob(os.path.join(image_folder_path, _ext))
                 if len(img_paths) > 0:
                     selected_imgs = random.sample(img_paths, min(3, len(img_paths))) # 최대 3장 추출
                     for idx, img in enumerate(selected_imgs):

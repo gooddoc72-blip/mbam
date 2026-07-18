@@ -250,7 +250,7 @@ class CafeService:
                     });
                     return out.slice(0, 10);
                 }""")
-                _n_marker = len(re.findall(r'\[이미지(?::\s*\d+)?\]', content))
+                _n_marker = len(re.findall(r'\[이미지\s*:?\s*\d*\]', content))
                 logger.error(f"[CafeService] 이미지버튼 후보({len(imgcand)}개): {imgcand} | 본문 [이미지]/[이미지:N] 마커 {_n_marker}개")
             except Exception:
                 pass
@@ -289,7 +289,9 @@ class CafeService:
         images = images or []
         n_imgs = len(images)
         used = [False] * n_imgs
-        parts = re.split(r'(\[이미지(?::\s*\d+)?\])', content)
+        # 관대한 마커 인식: [이미지] / [이미지:3] / [이미지 3] / [이미지3] 모두 허용(AI 형식 이탈 대비)
+        MARKER_RE = r'\[이미지\s*:?\s*\d*\]'
+        parts = re.split(r'(' + MARKER_RE + r')', content)
         pending_text = ""
         inserted = 0
 
@@ -301,7 +303,7 @@ class CafeService:
 
         if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {n_imgs}장, 조각 {len(parts)}개)")
         for part in parts:
-            mk = re.fullmatch(r'\[이미지(?::\s*(\d+))?\]', part or "")
+            mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
             if mk:
                 idx = -1
                 if mk.group(1):                       # 번호 지정 [이미지:N]
@@ -321,7 +323,10 @@ class CafeService:
                         await _safe_upload(img_path)
                     used[idx] = True
             elif part and part.strip():
-                pending_text += part.strip() + "\n\n"
+                # 형식을 벗어나 캡처되지 않은 잔여 이미지 표기([이미지 두번째] 등)는 본문에 새지 않게 제거
+                clean = re.sub(r'\[이미지[^\]]*\]', '', part).strip()
+                if clean:
+                    pending_text += clean + "\n\n"
 
         if pending_text.strip():
             await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
