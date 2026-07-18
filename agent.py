@@ -46,7 +46,8 @@ def _load_config() -> dict:
         "cloud_url": "https://clever-transformation-production.up.railway.app",
         "email": "",
         "password": "",
-        "poll_sec": 3,
+        "poll_sec": 3,        # 배경 작업(발행/배치) 폴링 간격
+        "fast_poll_sec": 1,   # 즉시성 작업(폴더 선택 등) 폴링 간격 — 체감 반응속도
     }
     cfg_path = os.path.join(APP_DIR, "agent_config.json")
     if os.path.exists(cfg_path):
@@ -60,6 +61,7 @@ def _load_config() -> dict:
     cfg["email"] = os.environ.get("AGENT_EMAIL", cfg["email"])
     cfg["password"] = os.environ.get("AGENT_PASSWORD", cfg["password"])
     cfg["poll_sec"] = int(os.environ.get("AGENT_POLL_SEC", cfg["poll_sec"]))
+    cfg["fast_poll_sec"] = max(1, int(os.environ.get("AGENT_FAST_POLL_SEC", cfg["fast_poll_sec"])))
     return cfg
 
 
@@ -610,27 +612,39 @@ class AgentClient:
                     break
                 await asyncio.sleep(5)
 
-            print(f"[agent] 폴링 시작 → {self.cfg['cloud_url']} (간격 {self.cfg['poll_sec']}초)")
-            while True:
-                try:
-                    r = await client.get(
-                        f"{self.cfg['cloud_url']}/api/agent/next-job",
-                        params={"agent_id": self.agent_id},
-                        headers=self._headers(), timeout=30,
-                    )
-                    if r.status_code == 401:
-                        print("[agent] 토큰 만료 → 재로그인")
-                        self.token = None
-                        await self.login(client)
-                        continue
-                    job = (r.json() or {}).get("job")
-                    if not job:
-                        await asyncio.sleep(self.cfg["poll_sec"])
-                        continue
-                    await self._process(client, job)
-                except Exception as e:
-                    print(f"[agent] 폴링 오류: {e}")
-                    await asyncio.sleep(self.cfg["poll_sec"])
+            fast_sec = self.cfg.get("fast_poll_sec", 1)
+            print(f"[agent] 폴링 시작 → {self.cfg['cloud_url']} "
+                  f"(배경 {self.cfg['poll_sec']}초 / 즉시성 {fast_sec}초)")
+            # 2-레인 폴링: 즉시성 작업(폴더 선택 등)은 빠른 레인(fast_sec), 배경 작업은 기본 레인(poll_sec).
+            # 두 레인은 서로소 집합만 claim 하므로 이중 처리되지 않는다.
+            await asyncio.gather(
+                self._poll_loop(client, interactive=True, interval=fast_sec),
+                self._poll_loop(client, interactive=False, interval=self.cfg["poll_sec"]),
+            )
+
+    async def _poll_loop(self, client: httpx.AsyncClient, interactive: bool, interval: float):
+        """한 레인의 폴링 루프. interactive=True면 즉시성 작업만, False면 배경 작업만 가져온다."""
+        lane = "fast" if interactive else "bg"
+        while True:
+            try:
+                r = await client.get(
+                    f"{self.cfg['cloud_url']}/api/agent/next-job",
+                    params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0"},
+                    headers=self._headers(), timeout=30,
+                )
+                if r.status_code == 401:
+                    print(f"[agent:{lane}] 토큰 만료 → 재로그인")
+                    self.token = None
+                    await self.login(client)
+                    continue
+                job = (r.json() or {}).get("job")
+                if not job:
+                    await asyncio.sleep(interval)
+                    continue
+                await self._process(client, job)   # 잡 처리 후 즉시 다음 폴링(큐 빠르게 소진)
+            except Exception as e:
+                print(f"[agent:{lane}] 폴링 오류: {e}")
+                await asyncio.sleep(interval)
 
     async def _post_task_log(self, client: httpx.AsyncClient, task_id: str, line: str = None, status: str = None):
         """위임 작업의 진행 로그·상태를 클라우드 task_status_store 로 중계(프론트 실시간 표시)."""

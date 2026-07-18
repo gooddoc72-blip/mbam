@@ -20,9 +20,11 @@ router = APIRouter(prefix="/api/agent", tags=["Local Agent"])
 
 @router.get("/next-job", summary="로컬 에이전트: 내 작업 선점")
 async def next_job(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db),
-                   agent_id: Optional[str] = None):
+                   agent_id: Optional[str] = None, interactive: Optional[bool] = None):
+    """interactive=1 → 즉시성 작업(폴더 선택 등)만 / =0 → 배경 작업만 / 미지정 → 전체(구버전 호환).
+    에이전트가 즉시성 작업은 빠른 레인(1초), 배경은 기본 레인(3초)으로 나눠 폴링한다."""
     user_id = current_user.get("sub")
-    job = jobsvc.claim_next_job(db, user_id, agent_id=agent_id)
+    job = jobsvc.claim_next_job(db, user_id, agent_id=agent_id, only_interactive=interactive)
     if not job:
         return {"job": None}
     import json

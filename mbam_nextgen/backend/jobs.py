@@ -58,13 +58,24 @@ def enqueue_job(db: Session, user_id: str, job_type: str, payload: dict, priorit
     return job.id
 
 
-def claim_next_job(db: Session, user_id: str, agent_id: str = None) -> Optional[AgentJob]:
+# 사용자가 화면 앞에서 즉시 결과를 기다리는 '즉시성' 작업 — 에이전트가 빠른 레인(1초 폴링)으로 처리.
+# 발행/배치 등 배경 작업은 기본 레인(3초)로 두어 클라우드 폴링 부하를 낮춘다.
+INTERACTIVE_JOB_TYPES = {"pick_folder"}
+
+
+def claim_next_job(db: Session, user_id: str, agent_id: str = None,
+                   only_interactive: Optional[bool] = None) -> Optional[AgentJob]:
     """해당 유저의 가장 오래된 queued 작업 1건을 running 으로 선점(claim)해 반환.
+    only_interactive: True=즉시성 작업만 / False=즉시성 제외(배경) / None=구분 없음(구버전 호환).
+    두 레인이 서로소(disjoint) 집합만 가져가므로 이중 처리되지 않는다.
     단일 유저-단일 에이전트를 전제로 단순 트랜잭션 사용(다중 에이전트 경합은 P4에서 SKIP LOCKED 고려)."""
+    q = db.query(AgentJob).filter(AgentJob.user_id == user_id, AgentJob.status == "queued")
+    if only_interactive is True:
+        q = q.filter(AgentJob.job_type.in_(INTERACTIVE_JOB_TYPES))
+    elif only_interactive is False:
+        q = q.filter(~AgentJob.job_type.in_(INTERACTIVE_JOB_TYPES))
     job = (
-        db.query(AgentJob)
-        .filter(AgentJob.user_id == user_id, AgentJob.status == "queued")
-        .order_by(AgentJob.priority.asc(), AgentJob.created_at.asc())
+        q.order_by(AgentJob.priority.asc(), AgentJob.created_at.asc())
         .first()
     )
     if not job:
