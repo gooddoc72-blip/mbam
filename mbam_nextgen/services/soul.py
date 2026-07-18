@@ -340,6 +340,8 @@ class SoulRewriter:
             + kw_rule
             + "- 소제목은 '■ 소제목' 형식. 마크다운(**, ~~) 금지, 이모지 3개 이하.\n"
               "- 800~1300자. 사진에 안 보이는 내용은 리뷰 근거로만.\n"
+              "- 본문에 URL·링크·웹주소·파일 경로·이미지 파일명·'사진 출처' 같은 표현을 절대 쓰지 마세요. "
+              "사진은 오직 '[이미지:N]' 마커로만 표시합니다(리뷰는 '내용'만 참고).\n"
               "- 첫 줄은 '제목: ...' 형식으로 시작.\n\n"
             + f"[참고 리뷰]\n{source_data or ''}"
         )
@@ -378,7 +380,7 @@ class SoulRewriter:
                     messages=[{"role": "user", "content": blocks}])
                 txt = resp.content[0].text if resp.content else ""
                 if txt:
-                    return txt
+                    return self._scrub_post_text(txt)
             except Exception as e:
                 print(f"[Soul] 맛집 Claude 비전+작성 실패 → Gemini 폴백: {e}")
         # 2) Gemini 비전+작성 폴백
@@ -389,11 +391,29 @@ class SoulRewriter:
                 resp = await asyncio.to_thread(
                     self.gemini_client.models.generate_content, model="gemini-2.5-flash", contents=parts)
                 if resp.text:
-                    return resp.text
+                    return self._scrub_post_text(resp.text)
             except Exception as e:
                 print(f"[Soul] 맛집 Gemini 비전+작성 실패: {e}")
         # 3) 사진 없이라도 텍스트 생성(폴백)
-        return await self.generate_content(rules)
+        return self._scrub_post_text(await self.generate_content(rules))
+
+    @staticmethod
+    def _scrub_post_text(text: str) -> str:
+        """생성된 원고 본문에서 새어든 URL·파일 경로·이미지 파일명·수집 소스 구조 라벨을 제거.
+        단, 발행에 필요한 마커([이미지]/[이미지:N])와 [제목]/[소제목]은 보존한다.
+        (요구사항: 카페 글 본문엔 경로/사진 참조가 없어야 하고, 사진은 폴더 사진만 [이미지:N]로 들어감)"""
+        import re as _re
+        if not text:
+            return text
+        t = text
+        t = _re.sub(r'https?://\S+', '', t)                                    # URL
+        t = _re.sub(r'\b[A-Za-z]:[\\/][^\s\]\)"\']+', '', t)                   # 윈도우 파일경로
+        t = _re.sub(r'(?<!\w)[\w\-]+\.(?:jpg|jpeg|png|webp|gif)\b', '', t, flags=_re.IGNORECASE)  # 이미지 파일명
+        # 수집 소스에서 새어든 구조 라벨 제거([이미지]/[이미지:N]/[제목]/[소제목]은 보존)
+        t = _re.sub(r'\[(?:가게\s*이름|방문자\s*리뷰|블로그\s*후기[^\]]*|수집된\s*원문\s*데이터|참고\s*(?:리뷰|데이터|글감[^\]]*)|링크)\]\s*', '', t)
+        t = _re.sub(r'[ \t]{2,}', ' ', t)
+        t = _re.sub(r'\n{3,}', '\n\n', t)
+        return t.strip()
 
     async def generate_content(self, prompt: str) -> str:
         """자유 형식의 프롬프트를 처리. Gemini→Claude→OpenAI 순으로 폴백한다.

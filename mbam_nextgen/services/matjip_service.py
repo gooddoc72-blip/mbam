@@ -5,7 +5,25 @@
     · 클라우드 서버(browser_ok=False): 네이버 공식 블로그 검색 API(httpx, 브라우저 불필요).
     · 로컬 에이전트(browser_ok=True): playwright 로 본문까지 수집(더 풍부).
 - 원고 주제가 정확하도록 '가게 이름'을 소스 최상단에 넣는다.
+- 수집 원문에서 URL·파일 경로·이미지 파일명은 제거한다(원고 본문에 새어들지 않도록 — 발행 글엔
+  폴더의 실제 사진만 들어가고 텍스트엔 경로/사진 참조가 없어야 한다).
 """
+
+
+def sanitize_reference_text(text: str) -> str:
+    """수집 리뷰/후기 텍스트에서 URL·파일경로·이미지 파일명·'사진/이미지 출처' 류를 제거.
+    (리뷰 '내용'은 원고 참고용으로 남기되, 경로·사진 참조가 본문에 새어들지 않게 한다.)"""
+    import re as _re
+    if not text:
+        return ""
+    t = text
+    t = _re.sub(r'https?://\S+', '', t)                          # URL
+    t = _re.sub(r'\b[A-Za-z]:[\\/][^\s\]\)"\']+', '', t)         # 윈도우 파일경로 (C:\... F:/...)
+    t = _re.sub(r'(?<!\w)[\w\-]+\.(?:jpg|jpeg|png|webp|gif)\b', '', t, flags=_re.IGNORECASE)  # 이미지 파일명
+    t = _re.sub(r'(?:사진|이미지)\s*출처\s*[:：].*', '', t)       # '사진 출처: ...' 줄
+    t = _re.sub(r'[ \t]{2,}', ' ', t)
+    t = _re.sub(r'\n{3,}', '\n\n', t)
+    return t.strip()
 
 
 async def _naver_blog_search(query: str, display: int = 5) -> list:
@@ -148,4 +166,5 @@ async def collect_matjip_source(place_url: str = "", keyword: str = "", log=None
         parts.insert(0, f"[가게 이름] {place_name}")
 
     source = "\n\n".join(parts).strip()
+    source = sanitize_reference_text(source)   # URL·경로·이미지 파일명 제거(원고 본문 오염 방지)
     return {"success": True, "source_data": source, "place_name": place_name}
