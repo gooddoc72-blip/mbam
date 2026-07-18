@@ -795,22 +795,46 @@ Example: ["a photorealistic ... no text, no watermark, high quality.", "..."]"""
         return prompts[:n]
 
     async def generate_images(self, prompts: List[str], out_dir: str,
-                              filename_prefix: str = "ai_img") -> List[str]:
+                              filename_prefix: str = "ai_img",
+                              reference_images: List[str] = None) -> List[str]:
         """나노바나나(gemini-2.5-flash-image)로 프롬프트별 이미지를 생성해 PNG로 저장, 경로 리스트 반환.
+        reference_images: 참조 상품사진 경로들(있으면 image-to-image로 상품 정합성↑ — 쇼핑파트너스 연출컷).
         Gemini 클라이언트가 없거나(키 없음) part가 비면 해당 이미지는 건너뜀(예외 대신 부분 성공)."""
         if not self.gemini_client or not genai:
             print("[SoulRewriter] 이미지 생성 불가: Gemini 클라이언트 없음(GEMINI_API_KEY 확인)")
             return []
         os.makedirs(out_dir, exist_ok=True)
+        # 참조 상품사진 로드(최대 3장) — 있으면 프롬프트와 함께 모델에 입력해 실제 상품을 반영한 연출컷 생성
+        ref_imgs = []
+        if reference_images:
+            try:
+                from PIL import Image as _PILImage
+                for rp in list(reference_images)[:3]:
+                    if rp and os.path.exists(rp):
+                        try:
+                            ref_imgs.append(_PILImage.open(rp))
+                        except Exception:
+                            pass
+            except Exception as _e:
+                print(f"[SoulRewriter] 참조 이미지 로드 실패(텍스트 기반으로 진행): {_e}")
         paths: List[str] = []
         for idx, p in enumerate(prompts):
             if not p or not p.strip():
                 continue
             try:
+                # 참조 이미지가 있으면 [프롬프트 + 상품사진들]을 함께 보내 image-to-image, 없으면 텍스트→이미지
+                if ref_imgs:
+                    eff_p = ("Using the product shown in the attached reference photo(s), keep the exact "
+                             "product identity — same shape, logo, text, colors, and details; do not invent "
+                             "a different product. Create a photorealistic staged/lifestyle photo of THAT "
+                             "product for the following scene: " + p)
+                    _contents = [eff_p] + ref_imgs
+                else:
+                    _contents = [p]
                 resp = await asyncio.to_thread(
                     self.gemini_client.models.generate_content,
                     model="gemini-2.5-flash-image",
-                    contents=[p],
+                    contents=_contents,
                 )
                 saved = None
                 cand = (resp.candidates or [None])[0]

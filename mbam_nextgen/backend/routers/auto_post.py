@@ -571,17 +571,21 @@ async def _build_post_images_cloud(req: AutoPostRequest, results: list, keyword:
     dest = os.path.join(os.getcwd(), "temp_uploaded_images", uuid.uuid4().hex)
     os.makedirs(dest, exist_ok=True)
     idx = 0
+    scraped_local = []   # dest에 복사된 스크랩 상품사진 경로(연출컷 image-to-image 참조용)
     # 1) 상세페이지 스크랩 이미지 복사
     if want_scrape:
         for fp in sorted(glob.glob(os.path.join(scraped_folder, "*"))):
             if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
                 try:
                     ext = os.path.splitext(fp)[1].lower()
-                    shutil.copy(fp, os.path.join(dest, f"scrape_{idx:02d}{ext}"))
+                    _dst = os.path.join(dest, f"scrape_{idx:02d}{ext}")
+                    shutil.copy(fp, _dst)
+                    scraped_local.append(_dst)
                     idx += 1
                 except Exception:
                     pass
-    # 2) 본문 기반 AI 이미지(클라우드 마스터 키) — 실사진 없으면 5장, 실사진 있으면 연출컷 보강
+    # 2) 본문 기반 AI 이미지(클라우드 마스터 키) — 실사진 없으면 5장, 실사진 있으면 연출컷 보강.
+    #    상품사진(스크랩)이 있으면 그 사진을 참조로 넣어 image-to-image → 실제 상품을 반영한 연출컷.
     if want_ai:
         try:
             from mbam_nextgen.services.soul import SoulRewriter
@@ -594,7 +598,10 @@ async def _build_post_images_cloud(req: AutoPostRequest, results: list, keyword:
                 title=c_title, content=c_body, keyword=keyword, category=(req.promo_type or "product"), n=n)
             if prompts:
                 ai_out = os.path.join(dest, "_aigen")
-                paths = await soul.generate_images(prompts, ai_out, filename_prefix="ai")
+                # 상품사진이 있으면 앞 3장을 참조로 → 상품 정합성 있는 연출컷(image-to-image)
+                paths = await soul.generate_images(
+                    prompts, ai_out, filename_prefix="ai",
+                    reference_images=(scraped_local[:3] or None))
                 for p in paths:
                     if p and os.path.exists(p):
                         try:
