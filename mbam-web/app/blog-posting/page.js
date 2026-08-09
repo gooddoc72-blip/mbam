@@ -15,6 +15,17 @@ const HOSPITAL_DEPTS = [
   "정신건강의학과", "외과", "신경과", "검진센터",
 ];
 
+// 발행 스타일 방향성 — 상품후기·앱/서비스·맛집후기·서비스업종 프롬프트가 공통으로 정의한 문체 5종.
+// (병원블로그는 '친근체' 1종 고정이라 이 선택을 노출하지 않는다)
+const WRITING_STYLES = [
+  { id: "auto", name: "자동", desc: "유형·회차에 지정된 문체를 그대로 사용" },
+  { id: "수다체", name: "수다체", desc: "친구에게 얘기하듯 편하게 · ~거든요 ~잖아요 ~더라고요" },
+  { id: "담백체", name: "담백체", desc: "군더더기 없이 정보 중심 · ~입니다 ~이에요" },
+  { id: "감성체", name: "감성체", desc: "서정적·감각 묘사 중심 · ~했다 ~더라" },
+  { id: "털털체", name: "털털체", desc: "꾸밈없이 솔직하게 · ~했음 ~좋음 ~임" },
+  { id: "분석체", name: "분석체", desc: "객관적·항목별 조목조목 · ~됩니다 ~있습니다" },
+];
+
 // 앱/서비스 프롬프트의 '12회차 글 DNA 분화' — 회차를 지정해야 매번 다른 구조로 작성된다.
 // (미지정이면 AI가 매번 1회차 스타일로 몰려 구조적 중복이 생긴다)
 const APP_ROUNDS = [
@@ -140,6 +151,8 @@ function BlogPostingContent() {
     before: "", after: "",
   });
   const [appRound, setAppRound] = usePersistentState("blog-posting:appRound", "1");
+  // 발행 스타일 방향성 — 홍보 유형과 무관하게 공통 적용되는 문체 지정
+  const [writingStyle, setWritingStyle] = usePersistentState("blog-posting:writingStyle", "auto");
 
   // Generated Contents & Manual Contents
   // For AI, we hold an array of { account_id, title, content }
@@ -231,6 +244,17 @@ function BlogPostingContent() {
     } catch (err) {
       alert("폴더 선택 실패: " + err.message);
     }
+  };
+
+  // 발행 스타일 방향성 → 프롬프트의 '문체 가이드' 중 한 가지를 강제 지정.
+  // '자동'이면 아무것도 넘기지 않아 기존처럼 유형·회차에 지정된 문체를 따른다.
+  const buildStyleDirective = () => {
+    const s = WRITING_STYLES.find(x => x.id === writingStyle);
+    if (!s || s.id === "auto") return "";
+    return "═══ 발행 스타일 방향성 (문체 지정) ═══\n"
+      + `• 문체: ${s.name} — ${s.desc}\n`
+      + `※ 아래 프롬프트의 '문체 가이드'에서 '${s.name}' 항목의 종결어미 배합·예시를 그대로 적용하세요.\n`
+      + "※ 회차나 글 유형에 다른 문체가 지정돼 있어도 이 지정을 우선합니다.\n";
   };
 
   // 앱/서비스 입력 폼 → 프롬프트가 기대하는 【입력 정보】 블록으로 조립.
@@ -578,9 +602,12 @@ function BlogPostingContent() {
 
         reference_data: referenceData,
         generate_card_news: generateCardNews,
-        // 앱/서비스는 전용 폼에서 받은 실제 정보를 글감 앞에 붙여 사실 근거로 준다
-        source_data: [isAppPromo ? buildAppProfileText() : "", sourceData]
-          .filter(s => String(s || "").trim()).join("\n\n"),
+        // 스타일 방향성 + (앱/서비스면) 전용 폼 정보를 글감 앞에 붙여 작성 근거로 준다
+        source_data: [
+          isHospital ? "" : buildStyleDirective(),
+          isAppPromo ? buildAppProfileText() : "",
+          sourceData,
+        ].filter(s => String(s || "").trim()).join("\n\n"),
         prompt_category: promptCategory,
         include_source_link: includeSourceLink,
         post_mode: "ai_generate",
@@ -1149,6 +1176,33 @@ function BlogPostingContent() {
                 </div>
                 </>)}
               </>
+
+            {/* 발행 스타일 방향성 — 홍보 유형과 무관하게 공통 적용 (병원은 친근체 고정이라 제외) */}
+            {!isHospital && (
+            <div>
+              <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
+                발행 스타일 방향성 <span style={{ fontWeight: "normal", fontSize: "0.8rem", color: "#64748b" }}>· 모든 유형 공통</span>
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.7rem" }}>
+                {WRITING_STYLES.map(s => (
+                  <div key={s.id} onClick={() => setWritingStyle(s.id)}
+                    style={{
+                      padding: "0.8rem", borderRadius: "8px", cursor: "pointer", wordBreak: "keep-all",
+                      border: writingStyle === s.id ? "2px solid #f59e0b" : "1px solid #cbd5e1",
+                      background: writingStyle === s.id ? "#fffbeb" : "white",
+                    }}>
+                    <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>
+                      {s.id === "auto" ? "🔄 " : "✍️ "}{s.name}
+                    </div>
+                    <div style={{ fontSize: "0.75rem", color: "#64748b", lineHeight: 1.4 }}>{s.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: "0.78rem", color: "#94a3b8", marginTop: "0.4rem" }}>
+                프롬프트의 <strong>문체 가이드</strong>에 정의된 5가지 중 하나를 강제 지정합니다. <strong>자동</strong>이면 유형·회차에 지정된 문체를 그대로 씁니다.
+              </div>
+            </div>
+            )}
 
             {!isHospital && !isShopping && (
             <div>
