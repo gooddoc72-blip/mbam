@@ -187,22 +187,24 @@ function BlogPostingContent() {
   const [savedManuscripts, setSavedManuscripts] = useState([]);
   const [isLoadingManuscripts, setIsLoadingManuscripts] = useState(false);
 
+  // 브라우저는 로컬 폴더 경로를 직접 얻을 수 없으므로, 내 PC 에이전트에 네이티브 폴더 선택창을 요청한다.
+  // (구 /api/settings/select-folder 는 클라우드 백엔드에서 tkinter 를 띄우려 해 항상 500 이었음)
   const handleSelectFolder = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetchWithAuth("/api/settings/select-folder");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.path) {
-          setImageFolderPath(data.path);
-        } else {
-          alert("선택된 폴더가 없습니다.");
-        }
-      } else {
-        alert("백엔드 응답 오류: " + res.status);
+      const res = await fetchWithAuth("/api/agent/pick-folder", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.job_id) {
+        alert("폴더 선택 요청 실패 — 내 PC 에이전트가 실행 중인지 확인하세요.");
+        return;
       }
-    } catch (e) {
-      alert("네트워크 오류: " + e.message);
+      alert("내 PC에 '폴더 선택' 창이 곧 뜹니다. 사진이 든 폴더를 고르세요.\n(에이전트가 실행 중이어야 합니다)");
+      const result = await pollAgentJob(data.job_id, { tries: 60, intervalMs: 2000 });
+      const path = (result && result.path) || "";
+      if (path) setImageFolderPath(path);
+      else alert("폴더 선택이 취소되었습니다.");
+    } catch (err) {
+      alert("폴더 선택 실패: " + err.message);
     }
   };
 

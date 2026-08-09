@@ -275,11 +275,13 @@ async def update_blog_prompts(prompts: dict = Body(...)):
 
 @router.get("/select-folder")
 async def select_folder():
-    import tkinter as tk
-    from tkinter import filedialog
+    """[레거시] 클라우드 백엔드에는 디스플레이·tkinter 가 없어 항상 빈 경로를 돌려준다.
+    실제 폴더 선택은 내 PC 에이전트에 위임하는 POST /api/agent/pick-folder 를 사용할 것."""
     import asyncio
-    
+
     def open_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
