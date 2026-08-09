@@ -153,6 +153,9 @@ function BlogPostingContent() {
   const [appRound, setAppRound] = usePersistentState("blog-posting:appRound", "1");
   // 발행 스타일 방향성 — 홍보 유형과 무관하게 공통 적용되는 문체 지정
   const [writingStyle, setWritingStyle] = usePersistentState("blog-posting:writingStyle", "auto");
+  // 금지어 — 소재 필드에 "○○는 넣지마"라고 적으면 그 단어가 소재로 전달돼 오히려 본문에 들어간다.
+  // 별도 필드로 받아 '금지 지시'로만 전달하고, 생성 후 실제로 빠졌는지 검사한다.
+  const [bannedWords, setBannedWords] = usePersistentState("blog-posting:bannedWords", "");
 
   // Generated Contents & Manual Contents
   // For AI, we hold an array of { account_id, title, content }
@@ -244,6 +247,35 @@ function BlogPostingContent() {
     } catch (err) {
       alert("폴더 선택 실패: " + err.message);
     }
+  };
+
+  // 금지어 목록 파싱 (쉼표·줄바꿈 구분)
+  const bannedList = () => String(bannedWords || "")
+    .split(/[,\n]/).map(w => w.trim()).filter(Boolean);
+
+  // 금지어 → 최우선 금지 지시. 소재가 아니라 '쓰지 말 것'으로만 전달한다.
+  const buildBannedDirective = () => {
+    const list = bannedList();
+    if (!list.length) return "";
+    return "═══ 절대 금지어 — 최우선 규칙 ═══\n"
+      + "아래 단어·표현은 제목·본문·소제목·해시태그·이미지 캡션 어디에도 절대 쓰지 않습니다.\n"
+      + list.map(w => `- ${w}`).join("\n") + "\n"
+      + "※ 띄어쓰기를 바꾸거나 조사를 붙인 변형, 같은 뜻의 유사어도 쓰지 않습니다.\n"
+      + "※ 이 금지 목록 자체를 본문에 언급하거나 '~는 언급하지 않겠습니다' 식으로 쓰지 않습니다.\n"
+      + "※ 글을 다 쓴 뒤 스스로 검수해 위 단어가 하나라도 있으면 그 문장을 다시 씁니다.\n";
+  };
+
+  // 생성된 원고에 금지어가 남았는지 검사. LLM은 부정 지시를 자주 흘리므로 사람이 볼 수 있게 알린다.
+  const checkBanned = (contents) => {
+    const list = bannedList();
+    if (!list.length) return [];
+    const out = [];
+    (contents || []).forEach((c, i) => {
+      const text = `${c.title || ""}\n${c.content || ""}`;
+      const hit = list.filter(w => text.includes(w));
+      if (hit.length) out.push(`· ${i + 1}번째 원고 — ${hit.join(", ")}`);
+    });
+    return out;
   };
 
   // 발행 스타일 방향성 → 프롬프트의 '문체 가이드' 중 한 가지를 강제 지정.
@@ -602,8 +634,9 @@ function BlogPostingContent() {
 
         reference_data: referenceData,
         generate_card_news: generateCardNews,
-        // 스타일 방향성 + (앱/서비스면) 전용 폼 정보를 글감 앞에 붙여 작성 근거로 준다
+        // 금지어(최우선) + 스타일 방향성 + (앱/서비스면) 전용 폼 정보를 글감 앞에 붙인다
         source_data: [
+          buildBannedDirective(),
           isHospital ? "" : buildStyleDirective(),
           isAppPromo ? buildAppProfileText() : "",
           sourceData,
@@ -646,6 +679,12 @@ function BlogPostingContent() {
           const data = st.result || {};
           if (data.success) {
             setGeneratedContents(data.generated_contents || []);
+            // 금지어가 실제로 빠졌는지 확인 — 지시만으로는 새는 경우가 있어 발행 전에 알린다
+            const leaked = checkBanned(data.generated_contents || []);
+            if (leaked.length) {
+              alert("⚠️ 금지어가 그대로 남은 원고가 있습니다.\n\n" + leaked.join("\n")
+                + "\n\n아래 원고 미리보기에서 직접 고치거나 다시 생성하세요.");
+            }
             // 쇼핑파트너스: URL에서 자동 추출된 키워드를 채워 발행 제목·이력에 반영
             if (isShopping && !targetKeyword && data.effective_keyword) {
               setTargetKeyword(data.effective_keyword);
@@ -1203,6 +1242,27 @@ function BlogPostingContent() {
               </div>
             </div>
             )}
+
+            {/* 금지어 — 모든 유형 공통. 소재 칸에 "○○ 빼줘"라고 적으면 오히려 소재로 들어가므로 분리했다 */}
+            <div>
+              <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
+                🚫 절대 쓰면 안 되는 단어 <span style={{ fontWeight: "normal", fontSize: "0.8rem", color: "#64748b" }}>· 모든 유형 공통 (선택)</span>
+              </label>
+              <input type="text" value={bannedWords} placeholder="쉼표로 구분 · 예: 고소, 소송, 환불보장"
+                onChange={e => setBannedWords(e.target.value)}
+                style={{ width: "100%", padding: "0.8rem", border: bannedList().length ? "2px solid #ef4444" : "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} />
+              <div style={{ fontSize: "0.78rem", color: "#94a3b8", marginTop: "0.4rem", lineHeight: 1.5 }}>
+                제목·본문·해시태그·이미지 캡션 어디에도 쓰지 않도록 지시하고, <strong>원고 생성 후 실제로 빠졌는지 자동으로 검사</strong>해 남아 있으면 알려드립니다.<br />
+                <strong style={{ color: "#dc2626" }}>주의:</strong> 위쪽 소재 칸(사용 목적·글감 등)에 <em>"○○는 넣지 마"</em>라고 적으면 그 단어가 <strong>소재로 전달돼 오히려 본문에 들어갑니다.</strong> 반드시 이 칸에 적어주세요.
+              </div>
+              {bannedList().length > 0 && (
+                <div style={{ marginTop: "0.5rem", display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                  {bannedList().map((w, i) => (
+                    <span key={i} style={{ padding: "0.2rem 0.6rem", background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "999px", fontSize: "0.8rem" }}>🚫 {w}</span>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {!isHospital && !isShopping && (
             <div>
