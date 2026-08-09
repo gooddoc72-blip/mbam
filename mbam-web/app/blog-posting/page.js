@@ -15,6 +15,23 @@ const HOSPITAL_DEPTS = [
   "정신건강의학과", "외과", "신경과", "검진센터",
 ];
 
+// 앱/서비스 프롬프트의 '12회차 글 DNA 분화' — 회차를 지정해야 매번 다른 구조로 작성된다.
+// (미지정이면 AI가 매번 1회차 스타일로 몰려 구조적 중복이 생긴다)
+const APP_ROUNDS = [
+  { id: "1", label: "1회차 · 문제 발견 스토리", desc: "이야기 흐름형 / 수다체" },
+  { id: "2", label: "2회차 · 결론 먼저", desc: "두괄식 분석형 / 분석체" },
+  { id: "3", label: "3회차 · 기능 원포인트", desc: "핵심 기능 몰입형 / 감성체" },
+  { id: "4", label: "4회차 · 서비스 비교 대결", desc: "병렬 비교형 / 분석체" },
+  { id: "5", label: "5회차 · 일상 삽입", desc: "자연 서사형 / 수다체" },
+  { id: "6", label: "6회차 · 데이터 분석", desc: "정보 밀도형 / 담백체" },
+  { id: "7", label: "7회차 · 장기 사용 변화", desc: "대비 서사형 / 수다체" },
+  { id: "8", label: "8회차 · 꿀팁 가이드", desc: "실용 정보형 / 수다체" },
+  { id: "9", label: "9회차 · 솔직 고백", desc: "역발상형 / 담백체" },
+  { id: "10", label: "10회차 · 상황극", desc: "시나리오형 / 수다체" },
+  { id: "11", label: "11회차 · 스크린샷 중심", desc: "비주얼 서사형 / 감성체" },
+  { id: "12", label: "12회차 · 대화체", desc: "인터뷰형 / 털털체" },
+];
+
 function BlogPostingContent() {
 
   // 1. Account Settings
@@ -115,6 +132,14 @@ function BlogPostingContent() {
   const [promoType, setPromoType] = useState(isHospital ? "hospital" : "product");
   const [distributionMode, setDistributionMode] = useState("normal");
   const [referenceData, setReferenceData] = useState(null);
+  // 앱/서비스 홍보: 프롬프트 【입력 정보】를 실제 값으로 채우기 위한 전용 폼.
+  // 비워두면 AI가 지시를 따르려고 없는 사실(보안 사양·연동 목록 등)을 지어낸다.
+  const [appProfile, setAppProfile] = usePersistentState("blog-posting:appProfile", {
+    service_name: "", category: "", platform: "", competitors: "",
+    use_period: "", use_env: "", use_purpose: "", tips: "", pain: "",
+    before: "", after: "",
+  });
+  const [appRound, setAppRound] = usePersistentState("blog-posting:appRound", "1");
 
   // Generated Contents & Manual Contents
   // For AI, we hold an array of { account_id, title, content }
@@ -206,6 +231,30 @@ function BlogPostingContent() {
     } catch (err) {
       alert("폴더 선택 실패: " + err.message);
     }
+  };
+
+  // 앱/서비스 입력 폼 → 프롬프트가 기대하는 【입력 정보】 블록으로 조립.
+  // 빈 항목은 아예 넣지 않는다. 빈 칸을 넘기면 AI가 그 자리를 지어내기 때문.
+  const isAppPromo = !isHospital && !isShopping && promoType === "app";
+  const buildAppProfileText = () => {
+    const p = appProfile || {};
+    const li = (label, v) => (String(v || "").trim() ? `• ${label}: ${String(v).trim()}\n` : "");
+    let s = "";
+    const prof = li("서비스명", p.service_name) + li("카테고리", p.category)
+      + li("플랫폼", p.platform) + li("경쟁 서비스", p.competitors);
+    if (prof) s += `【서비스 프로필】\n${prof}\n`;
+    const use = li("사용 기간", p.use_period) + li("사용 환경", p.use_env)
+      + li("사용 목적", p.use_purpose) + li("발견한 꿀팁/커스텀 설정", p.tips)
+      + li("불편했던 점", p.pain);
+    if (use) s += `【사용 정보】\n${use}\n`;
+    const ba = li("사용 전 문제", p.before) + li("사용 후 변화", p.after);
+    if (ba) s += `【Before/After 변화】\n${ba}\n`;
+    const r = APP_ROUNDS.find(x => x.id === String(appRound));
+    if (r) s += `【글 설정】\n• 회차: ${r.id} (${r.label.replace(/^\d+회차 · /, "")} — ${r.desc})\n\n`;
+    if (!s) return "";
+    return "═══ 실제 입력 정보 — 아래 값만 사실로 사용할 것 ═══\n" + s
+      + "※ 위 목록에 없는 항목은 추측하거나 지어내지 말고 언급 자체를 생략하세요.\n"
+      + "※ 요금제·가격·결제 구조는 이번 글에서 다루지 않습니다. 관련 섹션·문구를 모두 생략하세요.\n";
   };
 
 
@@ -529,7 +578,9 @@ function BlogPostingContent() {
 
         reference_data: referenceData,
         generate_card_news: generateCardNews,
-        source_data: sourceData,
+        // 앱/서비스는 전용 폼에서 받은 실제 정보를 글감 앞에 붙여 사실 근거로 준다
+        source_data: [isAppPromo ? buildAppProfileText() : "", sourceData]
+          .filter(s => String(s || "").trim()).join("\n\n"),
         prompt_category: promptCategory,
         include_source_link: includeSourceLink,
         post_mode: "ai_generate",
@@ -1113,6 +1164,64 @@ function BlogPostingContent() {
                   <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.2rem" }}>막배포</div>
                   <div style={{ fontSize: "0.8rem", color: "#64748b" }}>1500자 이내 · 빠른 배포</div>
                 </div>
+              </div>
+            </div>
+            )}
+
+            {/* 앱/서비스 전용 — 프롬프트가 요구하는 실제 정보를 받는다(비우면 AI가 지어냄) */}
+            {isAppPromo && (
+            <div style={{ padding: "1.2rem", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: "8px" }}>
+              <div style={{ fontWeight: "bold", color: "#6d28d9", marginBottom: "0.3rem" }}>📱 서비스 정보 (앱/서비스 전용)</div>
+              <p style={{ margin: "0 0 1rem", fontSize: "0.82rem", color: "#7c3aed", lineHeight: 1.5 }}>
+                입력한 값<strong>만</strong> 사실로 쓰도록 원고 생성에 전달됩니다. <strong>비워둔 항목은 글에서 아예 언급하지 않습니다.</strong><br />
+                ※ 요금제·가격은 현재 <strong>정지</strong> 상태라 입력받지 않으며, 원고에서도 제외됩니다.
+              </p>
+
+              <div style={{ marginBottom: "1rem" }}>
+                <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "bold", marginBottom: "0.3rem", color: "#4c1d95" }}>글 구조 (회차)</label>
+                <select value={appRound} onChange={e => setAppRound(e.target.value)} style={{ width: "100%", padding: "0.7rem", border: "1px solid #c4b5fd", borderRadius: "6px", background: "white" }}>
+                  {APP_ROUNDS.map(r => (
+                    <option key={r.id} value={r.id}>{r.label} ({r.desc})</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: "0.78rem", color: "#7c3aed", marginTop: "0.3rem" }}>
+                  같은 서비스를 여러 번 쓰거나 계정을 나눠 쓸 때 <strong>회차를 바꾸면 글 구조가 완전히 달라집니다.</strong> (연속 발행 시 1↔7, 2↔6 조합은 피하세요)
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.8rem" }}>
+                {[
+                  { k: "service_name", l: "서비스명", ph: "예: 노션" },
+                  { k: "category", l: "카테고리", ph: "예: 생산성 / 협업 / AI" },
+                  { k: "platform", l: "플랫폼", ph: "예: iOS · Android · 웹" },
+                  { k: "competitors", l: "경쟁 서비스 (2개 이상)", ph: "예: 옵시디언, 에버노트" },
+                  { k: "use_period", l: "사용 기간", ph: "예: 약 2주" },
+                  { k: "use_env", l: "사용 환경", ph: "예: 갤럭시 S24 + 맥북 에어" },
+                ].map(f => (
+                  <div key={f.k}>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: "bold", marginBottom: "0.25rem", color: "#4c1d95" }}>{f.l}</label>
+                    <input type="text" value={appProfile[f.k] || ""} placeholder={f.ph}
+                      onChange={e => setAppProfile({ ...appProfile, [f.k]: e.target.value })}
+                      style={{ width: "100%", padding: "0.6rem", border: "1px solid #c4b5fd", borderRadius: "6px", boxSizing: "border-box" }} />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: "0.8rem", display: "grid", gap: "0.8rem" }}>
+                {[
+                  { k: "use_purpose", l: "사용 목적", ph: "예: 프리랜서 업무·클라이언트 관리" },
+                  { k: "pain", l: "불편했던 점 (단점 — 반드시 하나는 있어야 신뢰도가 올라갑니다)", ph: "예: 한글 폰트가 일부 깨짐, 메뉴가 3뎁스라 처음에 헤맴" },
+                  { k: "tips", l: "발견한 꿀팁 / 커스텀 설정", ph: "예: 위젯으로 바로 메모, 단축키 Ctrl+Shift+L" },
+                  { k: "before", l: "사용 전 문제 (Before)", ph: "예: 메모가 카톡·메일·포스트잇에 분산, 주간 보고 준비 2시간" },
+                  { k: "after", l: "사용 후 변화 (After)", ph: "예: 한 대시보드로 일원화, 보고 준비 30분으로 단축" },
+                ].map(f => (
+                  <div key={f.k}>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: "bold", marginBottom: "0.25rem", color: "#4c1d95" }}>{f.l}</label>
+                    <textarea value={appProfile[f.k] || ""} placeholder={f.ph}
+                      onChange={e => setAppProfile({ ...appProfile, [f.k]: e.target.value })}
+                      style={{ width: "100%", minHeight: "52px", padding: "0.6rem", border: "1px solid #c4b5fd", borderRadius: "6px", boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+                  </div>
+                ))}
               </div>
             </div>
             )}
