@@ -158,42 +158,55 @@ class SoulRewriter:
         prompts_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts.json")
         if custom_prompt_text and str(custom_prompt_text).strip():
             custom_prompt = str(custom_prompt_text)
-        elif os.path.exists(prompts_path):
+        else:
             import json
             try:
-                with open(prompts_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    # 카테고리 선택: 명시적 prompt_category(예: 글감수집 content_collect) 우선,
-                    # 없으면 홍보 카테고리(promo_type), 그것도 없으면 레거시 단일 프롬프트
-                    if prompt_category and isinstance(data.get(prompt_category), dict):
-                        cat_data = data.get(prompt_category, {})
-                    elif "claude_prompt" in data and not any(k in data for k in ["product", "hospital", "app", "place", "service", "content_collect"]):
-                        cat_data = data
-                    else:
-                        cat_data = data.get(promo_type, {}) if promo_type else {}
-                    
-                    if target_provider == "claude":
-                        custom_prompt = cat_data.get("claude_prompt", "")
-                    elif target_provider == "gemini":
-                        custom_prompt = cat_data.get("gemini_prompt", "")
-                        
-                    ref_files = []
-                    if "reference_file_content" in cat_data and cat_data["reference_file_content"]:
-                        ref_files.append({"name": cat_data.get("reference_file_name", "reference.txt"), "content": cat_data["reference_file_content"]})
-                    
-                    if "reference_files" in cat_data:
-                        ref_files.extend(cat_data["reference_files"])
-                        
-                    if ref_files:
-                        docs = []
-                        for i, file in enumerate(ref_files, 1):
-                            docs.append(f'<document index="{i}">\n<source>{file.get("name", "document")}</source>\n<document_content>\n{file.get("content", "")}\n</document_content>\n</document>')
-                        
-                        docs_str = "\n".join(docs)
-                        ref_injection = f"\n\n[프로젝트 첨부 지식/가이드라인]\n<documents>\n{docs_str}\n</documents>\n\n★중요★ 위 <documents> 태그에 포함된 파일의 내용을 완벽하게 숙지하고 가장 우선적으로 참고하여 원고를 작성하세요."
-                        
-                    if ref_injection and custom_prompt.strip():
-                        custom_prompt += ref_injection
+                # 관리자 설정의 원본은 DB(BLOG_PROMPTS_JSON)다. 클라우드는 재배포 때마다 컨테이너의
+                # prompts.json 이 '커밋 시점' 값으로 되돌아가 관리자 수정분(예: 카페 프롬프트)이 사라지므로
+                # DB를 먼저 본다. read_prompts() 는 DB 값이 없으면 스스로 로컬 파일을 읽으므로
+                # 에이전트 PC(클라우드 DB 미연결)에서는 기존과 동일하게 동작한다.
+                data = None
+                try:
+                    from mbam_nextgen.backend.routers.settings import read_prompts
+                    data = read_prompts() or None
+                except Exception:
+                    data = None
+                if data is None and os.path.exists(prompts_path):
+                    with open(prompts_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                data = data or {}
+
+                # 카테고리 선택: 명시적 prompt_category(예: 글감수집 content_collect) 우선,
+                # 없으면 홍보 카테고리(promo_type), 그것도 없으면 레거시 단일 프롬프트
+                if prompt_category and isinstance(data.get(prompt_category), dict):
+                    cat_data = data.get(prompt_category, {})
+                elif "claude_prompt" in data and not any(k in data for k in ["product", "hospital", "app", "place", "service", "content_collect"]):
+                    cat_data = data
+                else:
+                    cat_data = data.get(promo_type, {}) if promo_type else {}
+
+                if target_provider == "claude":
+                    custom_prompt = cat_data.get("claude_prompt", "")
+                elif target_provider == "gemini":
+                    custom_prompt = cat_data.get("gemini_prompt", "")
+
+                ref_files = []
+                if "reference_file_content" in cat_data and cat_data["reference_file_content"]:
+                    ref_files.append({"name": cat_data.get("reference_file_name", "reference.txt"), "content": cat_data["reference_file_content"]})
+
+                if "reference_files" in cat_data:
+                    ref_files.extend(cat_data["reference_files"])
+
+                if ref_files:
+                    docs = []
+                    for i, file in enumerate(ref_files, 1):
+                        docs.append(f'<document index="{i}">\n<source>{file.get("name", "document")}</source>\n<document_content>\n{file.get("content", "")}\n</document_content>\n</document>')
+
+                    docs_str = "\n".join(docs)
+                    ref_injection = f"\n\n[프로젝트 첨부 지식/가이드라인]\n<documents>\n{docs_str}\n</documents>\n\n★중요★ 위 <documents> 태그에 포함된 파일의 내용을 완벽하게 숙지하고 가장 우선적으로 참고하여 원고를 작성하세요."
+
+                if ref_injection and custom_prompt.strip():
+                    custom_prompt += ref_injection
             except Exception as e:
                 pass
 
