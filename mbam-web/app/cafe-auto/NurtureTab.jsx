@@ -43,10 +43,16 @@ export default function NurtureTab({ s }) {
     setTargetMultiKeyword,
     targetMultiLike,
     setTargetMultiLike,
+    targetMultiProxy,
+    setTargetMultiProxy,
     delayMin,
     setDelayMin,
     delayMax,
     setDelayMax,
+    accountDelayMin,
+    setAccountDelayMin,
+    accountDelayMax,
+    setAccountDelayMax,
     accounts,
     setAccounts,
     schedules,
@@ -161,7 +167,23 @@ export default function NurtureTab({ s }) {
     handleAddCafe,
     handleAddSchedule,
     handleDeleteSchedule,
+    commentKeyword,
+    setCommentKeyword,
+    previewItems,
+    previewLoading,
+    handlePreviewComments,
+    updatePreviewComment,
+    removePreviewComment,
+    clearPreview,
   } = s;
+
+  // 댓글 텀은 5초 단위. 타이핑 중에 맞추면 "35" 를 입력하다 "3" 에서 5로 튀므로,
+  // 입력칸을 벗어날 때(onBlur) 가장 가까운 5초로 맞춰 보여준다.
+  // (실제 전송값은 useCafeAuto 의 numOr 가 한 번 더 5초 단위로 정리한다)
+  const snapTo5 = (setter) => (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (Number.isFinite(n) && n >= 0) setter(Math.round(n / 5) * 5);
+  };
 
   return (
     <>
@@ -195,11 +217,31 @@ export default function NurtureTab({ s }) {
                 <p style={{ margin: "0 0 0.6rem", fontSize: "0.85rem", color: "#64748b" }}>달 댓글을 직접 입력하세요. <b>한 줄에 하나씩 여러 개</b>를 넣으면 게시글마다 <b>무작위로 하나</b>를 골라 자연스럽게 답니다. (비워두면 AI가 자동 생성)</p>
                 <textarea placeholder={"예시(한 줄에 하나씩):\n너무 맛있어 보이네요 저도 가보고 싶어요\n사진만 봐도 군침 도네요 ㅎㅎ\n정보 감사합니다 꼭 가볼게요"} value={targetMultiKeyword} onChange={e => setTargetMultiKeyword(e.target.value)} style={{ width: "100%", height: "110px", padding: "0.8rem", marginBottom: "1rem", border: "1px solid #cbd5e1", borderRadius: "4px", fontFamily: "inherit" }} />
                 
-                <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-                  <span>게시글 간 대기시간 (초):</span>
-                  <input type="number" value={delayMin} onChange={e => setDelayMin(e.target.value)} style={{ width: "80px", padding: "0.5rem" }} />
-                  <span>~</span>
-                  <input type="number" value={delayMax} onChange={e => setDelayMax(e.target.value)} style={{ width: "80px", padding: "0.5rem" }} />
+                {/* 댓글 작성 텀 — 두 구간을 따로 잡는다.
+                    같은 계정이 글을 옮겨가며 다는 간격과, 계정을 바꿔 다는 간격은
+                    네이버가 보는 위험도가 달라서 하나로 묶으면 조절이 안 된다. */}
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.9rem", background: "#f8fafc" }}>
+                  <div style={{ fontWeight: "bold", marginBottom: "0.6rem" }}>⏱ 댓글 작성 텀</div>
+
+                  <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ width: "160px" }}>게시글 간 대기 (초):</span>
+                    <input type="number" min="0" step="5" value={delayMin} onChange={e => setDelayMin(e.target.value)} onBlur={snapTo5(setDelayMin)} style={{ width: "80px", padding: "0.5rem" }} />
+                    <span>~</span>
+                    <input type="number" min="0" step="5" value={delayMax} onChange={e => setDelayMax(e.target.value)} onBlur={snapTo5(setDelayMax)} style={{ width: "80px", padding: "0.5rem" }} />
+                    <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>같은 계정이 다음 글로 넘어갈 때</span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.6rem" }}>
+                    <span style={{ width: "160px" }}>계정 전환 대기 (초):</span>
+                    <input type="number" min="0" step="5" value={accountDelayMin} onChange={e => setAccountDelayMin(e.target.value)} onBlur={snapTo5(setAccountDelayMin)} style={{ width: "80px", padding: "0.5rem" }} />
+                    <span>~</span>
+                    <input type="number" min="0" step="5" value={accountDelayMax} onChange={e => setAccountDelayMax(e.target.value)} onBlur={snapTo5(setAccountDelayMax)} style={{ width: "80px", padding: "0.5rem" }} />
+                    <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>다음 계정으로 넘어갈 때</span>
+                  </div>
+
+                  <div style={{ marginTop: "0.6rem", fontSize: "0.8rem", color: "#94a3b8" }}>
+                    5초 단위로 조정됩니다. 입력한 범위 안에서 매번 무작위로 쉬며, 너무 짧게 두면(10초 미만) 연속 등록으로 잡힐 수 있습니다.
+                  </div>
                 </div>
 
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "1rem", cursor: "pointer", fontWeight: "bold", color: targetMultiLike ? "#e11d48" : "#64748b" }}>
@@ -207,12 +249,89 @@ export default function NurtureTab({ s }) {
                   ❤️ 댓글과 함께 좋아요 누르기 (게시글에 공감 + 댓글)
                 </label>
 
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", cursor: "pointer", fontWeight: "bold", color: targetMultiProxy ? "#7c3aed" : "#64748b" }}>
+                  <input type="checkbox" checked={targetMultiProxy} onChange={e => setTargetMultiProxy(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+                  🛡 프록시로 IP 변경 (계정마다 다른 IP로 댓글·공감 — [프록시 IP] 메뉴에 등록된 서버 사용)
+                </label>
+                <div style={{ marginLeft: "1.9rem", marginTop: "0.25rem", fontSize: "0.8rem", color: "#94a3b8" }}>
+                  같은 계정은 항상 같은 IP로 접속합니다(계정 고정). 등록된 프록시가 없으면 현재 PC IP로 진행합니다.
+                </div>
+
                 <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b" }}>
                   <input type="checkbox" checked={useTethering} onChange={e => setUseTethering(e.target.checked)} style={{ transform: "scale(1.2)" }} />
                   📶 USB 테더링 IP 우회 (계정마다 비행기모드 토글로 새 IP 할당 — ADB 연결된 폰 필요)
                 </label>
               </div>
-              
+
+              {/* AI 댓글 미리보기 — 달기 전에 확인하고 고칠 수 있게 한다.
+                  여기에 내용이 있으면 위의 '직접 입력'보다 우선한다. */}
+              <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem", gap: "1rem", flexWrap: "wrap" }}>
+                  <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0 }}>4. AI 댓글 미리보기 (선택)</h2>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button onClick={handlePreviewComments} disabled={previewLoading || loading}
+                      style={{ padding: "0.5rem 1rem", background: previewLoading ? "#94a3b8" : "#7c3aed", color: "white", border: "none", borderRadius: "4px", fontWeight: "bold", cursor: previewLoading ? "wait" : "pointer" }}>
+                      {previewLoading ? "생성 중..." : "🤖 AI 댓글 미리 만들기"}
+                    </button>
+                    {previewItems.length > 0 && (
+                      <button onClick={clearPreview} disabled={loading}
+                        style={{ padding: "0.5rem 1rem", background: "white", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "4px", cursor: "pointer" }}>
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p style={{ margin: "0 0 0.8rem", fontSize: "0.85rem", color: "#64748b" }}>
+                  게시글 본문을 읽어 <b>실제로 달릴 문장</b>을 미리 만들어 봅니다. 여기서 <b>고친 그대로</b> 달립니다.
+                  (댓글을 달지는 않습니다 · 선택한 계정 수만큼 서로 다르게 만듭니다)
+                </p>
+
+                {/* 메인 키워드 — AI 가 이 말을 기준으로 댓글을 쓴다 */}
+                <div style={{ marginBottom: "1rem" }}>
+                  <label style={{ display: "block", fontSize: "0.9rem", fontWeight: "bold", color: "#334155", marginBottom: "0.4rem" }}>
+                    메인 키워드
+                  </label>
+                  <input type="text" value={commentKeyword} onChange={e => setCommentKeyword(e.target.value)}
+                    placeholder="예) 광안리 맛집 — 이 말이 댓글에 자연스럽게 들어갑니다"
+                    style={{ width: "100%", padding: "0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.95rem" }} />
+                  <div style={{ marginTop: "0.35rem", fontSize: "0.8rem", color: "#94a3b8" }}>
+                    AI 가 이 키워드를 기준으로 댓글을 씁니다. 비워두면 위 <b>3. 댓글 내용</b> 칸의 글을 키워드로 씁니다.
+                  </div>
+                </div>
+
+                {previewItems.length === 0 && (
+                  <div style={{ padding: "0.9rem", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "6px", fontSize: "0.85rem", color: "#94a3b8" }}>
+                    아직 만든 댓글이 없습니다. 위 버튼을 누르면 게시글별로 후보가 생성됩니다.
+                  </div>
+                )}
+
+                {previewItems.map((it, ui) => (
+                  <div key={it.url} style={{ border: "1px solid #e2e8f0", borderRadius: "6px", padding: "1rem", marginBottom: "0.8rem" }}>
+                    <div style={{ fontWeight: "bold", fontSize: "0.9rem", marginBottom: "0.2rem", wordBreak: "break-all" }}>
+                      {it.title || it.url}
+                    </div>
+                    {it.content_preview && (
+                      <div style={{ fontSize: "0.78rem", color: "#94a3b8", marginBottom: "0.6rem" }}>
+                        본문: {it.content_preview}…
+                      </div>
+                    )}
+                    {it.comments.map((c, ci) => (
+                      <div key={ci} style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+                        <input type="text" value={c} onChange={e => updatePreviewComment(ui, ci, e.target.value)}
+                          style={{ flex: 1, padding: "0.5rem", border: "1px solid #cbd5e1", borderRadius: "4px", fontFamily: "inherit" }} />
+                        <button onClick={() => removePreviewComment(ui, ci)} title="이 댓글 빼기"
+                          style={{ padding: "0.4rem 0.7rem", background: "white", color: "#ef4444", border: "1px solid #fecaca", borderRadius: "4px", cursor: "pointer" }}>✕</button>
+                      </div>
+                    ))}
+                    {it.comments.length === 0 && (
+                      <div style={{ fontSize: "0.82rem", color: "#ef4444" }}>
+                        남은 댓글이 없습니다 — 이 게시글은 위 '직접 입력' 내용으로 진행됩니다.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
               <div style={{ display: "flex", gap: "1rem" }}>
                 <button onClick={handleStartTargetMulti} disabled={loading} style={{ flex: 1, padding: "1rem", background: loading ? "#94a3b8" : "#0f172a", color: "white", fontWeight: "bold", fontSize: "1.1rem", border: "none", cursor: loading ? "wait" : "pointer" }}>
                   {loading ? "작업 중..." : "🚀 다중 타겟 댓글 작업 시작"}

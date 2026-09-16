@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 from typing import Dict, Any
 
@@ -49,6 +49,13 @@ def write_prompts(data):
     db_set_settings({"BLOG_PROMPTS_JSON": json.dumps(data, ensure_ascii=False)})
     with open(PROMPTS_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+
+# 카페 댓글 프롬프트 저장 키.
+# ⚠ 조회·저장 엔드포인트는 여기 두면 안 된다 — /api/settings 는 전체가 관리자 전용이라
+#   설치형 고객(로그인 없는 local 사용자)이 접근하면 403 이 난다.
+#   그래서 엔드포인트는 cafe_nurture 라우터에 두고, 저장소 키만 여기서 공유한다.
+CAFE_COMMENT_PROMPT_KEY = "cafe_comment_prompt"
+
 
 def read_env():
     if not os.path.exists(ENV_PATH):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -50,16 +50,96 @@ class TargetPostRequest(BaseModel):
     urls: List[str]
     account_ids: List[str]
     keyword: str
-    delay_min: int = 30
+    # 댓글 작성 텀 — 화면에서 조정한다. 짧을수록 네이버가 도배로 잡을 위험이 커진다.
+    delay_min: int = 30           # 같은 계정이 다음 게시글로 넘어가기 전 대기(초)
     delay_max: int = 60
+    account_delay_min: int = 10   # 다음 계정으로 넘어가기 전 대기(초)
+    account_delay_max: int = 30
     ai_provider: str = "claude"
     use_tethering: bool = False   # USB 테더링으로 계정마다 IP 로테이션
     comment_content: str = ""     # 직접 입력 댓글(여러 줄=후보). 비면 AI 자동 생성
     do_like: bool = True          # 댓글과 함께 게시글 좋아요(공감)도 누름
+    # 등록된 프록시 풀로 계정마다 IP를 바꿔가며 댓글/공감.
+    #   None  = [설정 > IP 방식] 을 따름 (ip_mode 가 proxy 일 때만 사용)
+    #   True  = 설정과 무관하게 등록된 프록시 풀을 사용
+    #   False = 프록시 사용 안 함
+    use_proxy: Optional[bool] = None
+    # 미리보기에서 확인·수정한 댓글 {게시글URL: [댓글, ...]}.
+    # 있으면 그 URL 에는 AI 를 다시 돌리지 않고 이 문장을 그대로 쓴다.
+    comments_by_url: Optional[dict] = None
+
+
+class CommentPreviewRequest(BaseModel):
+    """실행 전에 AI 댓글을 미리 만들어 보여주기 위한 요청.
+
+    실제로 댓글을 달지 않는다. 게시글 본문만 읽어 후보 문장을 만들어 돌려주고,
+    사용자가 화면에서 확인·수정한 뒤 그 문장으로 실행하게 한다.
+    """
+    urls: List[str]
+    keyword: str = ""
+    ai_provider: str = "claude"
+    count: int = 3                 # URL 당 만들 후보 수(계정 수만큼 다양하게 쓰라고 여러 개)
 
 # --- Utils ---
 def get_user_id(current_user: dict):
     return current_user.get("sub") # Email or Login ID
+
+
+def build_proxy_map(db, user_id: str, accounts_data: list, use_proxy) -> dict:
+    """댓글/공감 작업용 계정별 프록시 배정표 {네이버ID: 프록시URL} 을 만든다.
+
+    두 가지를 동시에 만족시켜야 한다.
+      1) 계정 고정(sticky) — 같은 계정은 늘 같은 IP. 계정 IP 가 매번 튀면
+         네이버가 이상 접속으로 잡는다. 그래서 해시(계정ID) 로 자리를 정한다.
+      2) 겹치지 않게 — 여러 계정이 한 IP 에서 댓글을 달면 도배로 보인다.
+         proxy_pool.pick 처럼 해시만 쓰면 충돌이 나서(4계정/3프록시 → IP 2개만 사용)
+         남는 프록시가 놀게 되므로, 충돌 시 빈 자리로 밀어 넣는다(선형 탐사).
+
+    결과는 (계정 목록, 프록시 목록) 이 같으면 항상 동일하다. 계정 수가 프록시 수보다
+    많으면 한 바퀴 다 쓴 뒤 다시 처음부터 채우므로 공유는 최소한으로만 생긴다.
+    """
+    if use_proxy is False:
+        return {}
+    from mbam_nextgen.services import proxy_pool
+    settings = proxy_pool.get_ip_settings(db, user_id)
+    # use_proxy 가 None(미지정)이면 [설정 > IP 방식] 을 그대로 따른다.
+    if use_proxy is None and settings.get("ip_mode") != "proxy":
+        return {}
+    pool = proxy_pool.list_active(db, user_id)
+    if not pool:
+        return {}
+
+    import hashlib
+    n = len(pool)
+
+    # ⚠ 배정은 '이번에 선택한 계정' 이 아니라 '등록된 전체 계정' 기준으로 계산한다.
+    #   선택한 계정만으로 계산하면, 고를 때마다 선형 탐사 결과가 달라져 같은 계정이
+    #   다른 IP 를 받는다(실측: 계정 8·프록시 3에서 33~41% 가 바뀜).
+    #   계정 IP 가 매번 튀면 네이버가 이상 접속으로 잡으므로, 계정 고정이 깨지면 안 된다.
+    selected = {a.get("id") for a in accounts_data if a.get("id")}
+    all_ids = {r[0] for r in db.query(NaverAccount.naver_id)
+                                .filter(NaverAccount.user_id == user_id).all() if r[0]}
+    all_ids |= selected                      # DB 에 없는 계정이 실려와도 배정은 해준다
+
+    # 배정 순서를 계정ID 해시로 고정 — 목록 순서가 바뀌어도 결과가 같다.
+    ordered = sorted(all_ids, key=lambda i: hashlib.md5(i.encode("utf-8")).hexdigest())
+    taken = set()
+    out = {}
+    for account_id in ordered:
+        if len(taken) >= n:
+            taken.clear()          # 프록시를 다 썼으면 다음 바퀴 시작
+        start = int(hashlib.md5(account_id.encode("utf-8")).hexdigest(), 16) % n
+        for step in range(n):
+            idx = (start + step) % n
+            if idx not in taken:
+                break
+        taken.add(idx)
+        if account_id not in selected:
+            continue               # 자리만 차지시키고(고정 유지) 결과에는 넣지 않는다
+        url = proxy_pool.to_url(proxy_pool.to_playwright(pool[idx]))
+        if url:
+            out[account_id] = url
+    return out
 
 # --- 1. Account Management ---
 @router.post("/accounts", summary="네이버 계정 추가")
@@ -305,7 +385,8 @@ async def delete_manuscript(manuscript_id: str, db: Session = Depends(get_db), c
 # --- 4. Targeted Auto Comment Trigger ---
 # Now uses task_status_store from auto_post.py
 
-async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_data: list):
+async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_data: list,
+                                proxy_map: dict = None):
     task_status_store[task_id] = {"status": "running", "logs": ["[다중 타겟팅] 작업을 시작합니다..."]}
     
     def log(msg: str):
@@ -325,9 +406,13 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
             ai_provider=req.ai_provider,
             delay_min=req.delay_min,
             delay_max=req.delay_max,
+            account_delay_min=req.account_delay_min,
+            account_delay_max=req.account_delay_max,
             use_tethering=req.use_tethering,
             comment_content=req.comment_content,
             do_like=req.do_like,
+            proxies=proxy_map or {},
+            comments_by_url=req.comments_by_url or {},
             logger_func=log
         )
         
@@ -349,17 +434,82 @@ class MatjipGenJob(BaseModel):
     place_name: str = ""
     keyword: str = ""
     sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 — 본문에 자연스럽게 녹임
+    post_type: str = "matjip"                 # matjip | keyword(일키 포스팅)
 
 
-@router.post("/matjip-generate-job", summary="맛집: 사진+리뷰 원고 생성 잡 적재(에이전트가 폴더 사진 전송)")
-async def matjip_generate_job(req: MatjipGenJob, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    """웹이 이 잡을 적재하면 → 내 PC 에이전트가 폴더 사진을 클라우드로 올려(위 matjip-generate)
-    사진+리뷰 원고를 받아 결과로 반환한다. 프론트는 /api/agent/jobs/{id} 를 폴링."""
+_PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+MAX_PHOTOS = 10
+
+
+async def _run_photo_generate(user_id: str, job_id: str, payload: dict):
+    """설치형: 이 PC 가 직접 폴더 사진을 읽어 원고를 만든다.
+
+    ⚠ 예전에는 모드와 상관없이 잡 큐에만 넣었는데, 설치본은 에이전트(agent.py)를
+      동봉하지도 실행하지도 않는다(설치 폴더에 파일 자체가 없다). 그래서 잡을 가져갈
+      주체가 없어 화면은 4분 30초를 기다린 뒤 '시간 초과'만 냈다.
+      카페 순위추적에서 고친 것과 같은 문제다 — 로컬에서는 직접 실행한다.
+    """
+    import os
+    import re as _re
+    from mbam_nextgen.backend import jobs as jobsvc
+    from mbam_nextgen.services.soul import SoulRewriter
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        folder = (payload.get("image_folder") or "").strip()
+        paths = []
+        if folder and os.path.isdir(folder):
+            for f in sorted(os.listdir(folder)):
+                if f.lower().endswith(_PHOTO_EXTS):
+                    paths.append(os.path.join(folder, f))
+                if len(paths) >= MAX_PHOTOS:
+                    break
+        txt = await SoulRewriter().generate_matjip_with_photos(
+            payload.get("source_data") or "", paths,
+            place_name=payload.get("place_name") or "",
+            keyword=payload.get("keyword") or "",
+            sub_keywords=payload.get("sub_keywords") or [],
+            post_type=payload.get("post_type") or "matjip")
+        txt = _re.sub(r"(\*\*|~~|__)", "", txt or "").strip()
+        if not txt:
+            raise RuntimeError("AI 가 빈 원고를 돌려줬습니다. (API 키·잔액 확인)")
+        title = (payload.get("place_name") or payload.get("keyword") or "카페글")
+        title = f"{title} 방문 후기" if (payload.get("post_type") or "matjip") != "keyword" else title
+        body = txt
+        m = _re.match(r"^\s*(?:제목\s*[:：]\s*|#\s*|\[제목\]\s*)(.+)", body)
+        if m:
+            title = m.group(1).strip()
+            body = body[m.end():].strip()
+        jobsvc.complete_job(db, job_id, user_id, "done",
+                            result={"success": True, "title": title, "content": body,
+                                    "image_count": len(paths)})
+    except Exception as e:
+        try:
+            jobsvc.complete_job(db, job_id, user_id, "error", error=str(e))
+        except Exception:
+            pass
+        print(f"[photo_generate] 실패: {e}")
+    finally:
+        db.close()
+
+
+@router.post("/matjip-generate-job", summary="사진+참고자료 원고 생성 (맛집·일키 공용)")
+async def matjip_generate_job(req: MatjipGenJob, background: BackgroundTasks,
+                              db: Session = Depends(get_db),
+                              current_user: dict = Depends(get_current_user)):
+    """클라우드면 내 PC 에이전트가 폴더 사진을 올려 처리하고, 설치형이면 이 PC 가 직접 만든다.
+    어느 쪽이든 job_id 를 돌려주므로 프론트는 /api/agent/jobs/{id} 폴링만 하면 된다."""
     from mbam_nextgen.backend import jobs as jobsvc
     payload = {"image_folder": req.image_folder, "source_data": req.source_data,
                "place_name": req.place_name, "keyword": req.keyword,
-               "sub_keywords": req.sub_keywords or []}
-    job_id = jobsvc.enqueue_job(db, get_user_id(current_user), "matjip_generate", payload, priority=3)
+               "sub_keywords": req.sub_keywords or [],
+               "post_type": (req.post_type or "matjip")}
+    user_id = get_user_id(current_user)
+    job_id = jobsvc.enqueue_job(db, user_id, "matjip_generate", payload, priority=3)
+    if not jobsvc.is_cloud_mode():
+        # ⚠ asyncio.create_task 대신 BackgroundTasks — 응답을 보낸 뒤 본래 이벤트 루프에서 돌려준다.
+        background.add_task(_run_photo_generate, user_id, job_id, payload)
     return {"success": True, "job_id": job_id}
 
 
@@ -370,6 +520,7 @@ async def matjip_generate(
     place_name: str = Form(""),
     keyword: str = Form(""),
     sub_keywords: str = Form(""),   # 쉼표로 구분된 서브 키워드(에이전트가 멀티파트 문자열로 전송)
+    post_type: str = Form("matjip"),  # matjip | keyword(일키 포스팅)
     current_user: dict = Depends(get_current_user),
 ):
     """에이전트가 폴더 사진을 멀티파트로 올리면, 클라우드(마스터 키)가 사진+리뷰를 한 번에 보고
@@ -390,11 +541,14 @@ async def matjip_generate(
     sub_list = [s.strip() for s in (sub_keywords or "").split(",") if s.strip()][:5]
     try:
         txt = await SoulRewriter().generate_matjip_with_photos(
-            source_data, paths, place_name=place_name, keyword=keyword, sub_keywords=sub_list)
+            source_data, paths, place_name=place_name, keyword=keyword,
+            sub_keywords=sub_list, post_type=post_type or "matjip")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"원고 생성 실패: {e}")
     txt = re.sub(r"(\*\*|~~|__)", "", txt or "").strip()
-    title = (place_name or keyword or "맛집") + " 방문 후기"
+    title = (place_name or keyword or "카페글")
+    if (post_type or "matjip") != "keyword":
+        title += " 방문 후기"
     body = txt
     m = re.match(r"^\s*(?:제목\s*[:：]\s*|#\s*|\[제목\]\s*)(.+)", body)
     if m:
@@ -432,6 +586,253 @@ async def matjip_collect(req: MatjipCollectRequest, db: Session = Depends(get_db
     return {"success": True, "mode": "inline", "source_data": res.get("source_data", "")}
 
 
+# ── AI 댓글 프롬프트 (고객이 직접 수정) ──────────────────────────────────
+# /api/settings 아래에 두면 그 라우터가 관리자 전용이라 고객이 못 쓴다. 그래서 여기 둔다.
+@router.get("/comment-prompt", summary="AI 댓글 프롬프트 조회")
+async def get_comment_prompt(current_user: dict = Depends(get_current_user)):
+    from mbam_nextgen.orchestrator import DEFAULT_CAFE_COMMENT_PROMPT
+    from .settings import read_prompts, CAFE_COMMENT_PROMPT_KEY
+    data = read_prompts() or {}
+    return {
+        "prompt": data.get(CAFE_COMMENT_PROMPT_KEY) or "",
+        "default": DEFAULT_CAFE_COMMENT_PROMPT,
+        "placeholders": {
+            "{keyword}": "설정한 메인 키워드 (없으면 빈 값)",
+            "{content}": "카페 게시글 본문 앞부분",
+            "{tone}": "후보마다 다르게 배정되는 톤·화자·길이·반응 지점·타이핑 습관 + 이미 쓴 댓글 목록(같은 글/다른 글) — 계정끼리, 그리고 글끼리 댓글이 겹치지 않게 합니다. 지우면 댓글이 전부 비슷해집니다",
+        },
+    }
+
+
+@router.post("/comment-prompt", summary="AI 댓글 프롬프트 저장")
+async def update_comment_prompt(body: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    from .settings import read_prompts, write_prompts, CAFE_COMMENT_PROMPT_KEY
+    data = read_prompts() or {}
+    p = (body.get("prompt") or "").strip()
+    if p:
+        data[CAFE_COMMENT_PROMPT_KEY] = p          # 빈 값으로 저장하면 기본값으로 되돌린다
+    else:
+        data.pop(CAFE_COMMENT_PROMPT_KEY, None)
+    write_prompts(data)
+    return {"success": True,
+            "message": "댓글 프롬프트를 저장했습니다." if p else "기본 프롬프트로 되돌렸습니다."}
+
+
+# ── 원고 파일 업로드 → 제목·본문 파싱 ────────────────────────────────────
+# AI 로 쓰지 않고 이미 써 둔 원고를 그대로 올려 발행하는 경로.
+# .docx 는 python-docx 없이 표준 라이브러리로 푼다 — 동봉 런타임에 패키지를 추가하면
+# 전체 재빌드(2.5GB)가 필요해지는데, docx 는 사실 zip 안의 XML 이라 그럴 이유가 없다.
+_MANUSCRIPT_EXTS = (".txt", ".md", ".docx")
+
+
+def _decode_text(raw: bytes) -> str:
+    """한글 원고는 UTF-8 아니면 CP949 다. BOM 도 여기서 벗긴다."""
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _read_docx(raw: bytes) -> str:
+    """.docx 의 word/document.xml 에서 문단 텍스트만 뽑는다."""
+    import io
+    import re as _re
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+    xml = _re.sub(r"<w:br[^>]*/>", "\n", xml)          # 줄바꿈
+    xml = _re.sub(r"</w:p>", "\n", xml)                # 문단 끝
+    xml = _re.sub(r"<[^>]+>", "", xml)                 # 나머지 태그 제거
+    from xml.sax.saxutils import unescape
+    return unescape(xml)
+
+
+def _split_title_body(text: str):
+    """원고에서 제목과 본문을 나눈다.
+
+    '[제목] ...' 으로 시작하면 그걸 제목으로 쓰고 본문에서 뺀다.
+    그 표시가 없으면 첫 번째 빈 줄이 아닌 줄을 제목으로 본다 — 원고 파일은 대개
+    첫 줄이 제목이기 때문이다. 화면에서 제목·본문 둘 다 고칠 수 있으니
+    잘못 잡혀도 사용자가 바로 바로잡을 수 있다.
+    """
+    import re as _re
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return "", ""
+    m = _re.match(r"^\s*\[제목\]\s*(.+?)\s*(?:\n|$)", text)
+    if m:
+        return m.group(1).strip(), _re.sub(r"^\s*\[제목\].*?(?:\n|$)", "", text, count=1).strip()
+    lines = text.split("\n")
+    for i, ln in enumerate(lines):
+        if ln.strip():
+            return ln.strip(), "\n".join(lines[i + 1:]).strip()
+    return "", text
+
+
+@router.post("/parse-manuscript", summary="원고 파일(txt/md/docx) → 제목·본문")
+async def parse_manuscript(files: List[UploadFile] = File(...),
+                           current_user: dict = Depends(get_current_user)):
+    import os as _os
+    import re as _re
+    items, errors = [], []
+    for f in files:
+        name = f.filename or "원고"
+        ext = _os.path.splitext(name)[1].lower()
+        if ext not in _MANUSCRIPT_EXTS:
+            errors.append({"filename": name, "error": f"지원하지 않는 형식입니다 ({ext or '확장자 없음'}). txt, md, docx 만 됩니다."})
+            continue
+        try:
+            raw = await f.read()
+            text = _read_docx(raw) if ext == ".docx" else _decode_text(raw)
+            title, body = _split_title_body(text)
+            if not body.strip():
+                errors.append({"filename": name, "error": "본문이 비어 있습니다."})
+                continue
+            items.append({
+                "filename": name,
+                "title": title,
+                "content": body,
+                # 본문에 사진 자리가 몇 개 있는지 — 화면에서 '폴더 사진 N장 필요' 안내에 쓴다
+                "image_markers": len(_re.findall(r"\[이미지(?::\s*\d+)?\]", body)),
+            })
+        except Exception as e:
+            errors.append({"filename": name, "error": f"읽지 못했습니다: {e}"})
+    if not items and errors:
+        raise HTTPException(status_code=400, detail=errors[0]["error"])
+    return {"items": items, "errors": errors}
+
+
+# ── 카페 원고 프롬프트 (정보성 / 맛집) ────────────────────────────────────
+# 기본 프롬프트를 통째로 바꾸면 출력 형식('제목: ...')이나 맛집의 '[이미지:N]' 마커 규칙이
+# 깨져 발행이 실패한다. 그래서 여기 저장하는 값은 기본 규칙 뒤에 붙는 '추가 지시'다.
+_POST_PROMPT_KEYS = {"cafe": "일키 포스팅 (일반 키워드)", "cafe_matjip": "맛집 포스팅"}
+
+
+@router.get("/post-prompt", summary="카페 원고 추가 지시 조회")
+async def get_post_prompt(current_user: dict = Depends(get_current_user)):
+    from .settings import read_prompts
+    data = read_prompts() or {}
+    out = {}
+    for key, label in _POST_PROMPT_KEYS.items():
+        v = data.get(key)
+        if isinstance(v, dict):                      # 블로그 프롬프트와 같은 구조로 저장된 경우
+            v = v.get("claude_prompt") or v.get("gemini_prompt") or ""
+        out[key] = {"label": label, "prompt": (v or "")}
+    return {"items": out,
+            "help": "여기 적은 내용이 기본 규칙 뒤에 '추가 지시'로 붙습니다. "
+                    "말투·분량·금지어·마무리 문구 같은 것을 적어주세요."}
+
+
+@router.post("/post-prompt", summary="카페 원고 추가 지시 저장")
+async def update_post_prompt(body: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    from .settings import read_prompts, write_prompts
+    key = (body.get("category") or "").strip()
+    if key not in _POST_PROMPT_KEYS:
+        raise HTTPException(status_code=400, detail="알 수 없는 분류입니다.")
+    data = read_prompts() or {}
+    p = (body.get("prompt") or "").strip()
+    if p:
+        data[key] = p
+    else:
+        data.pop(key, None)                          # 빈 값이면 추가 지시 없음(기본 동작)
+    write_prompts(data)
+    return {"success": True,
+            "message": f"{_POST_PROMPT_KEYS[key]} 지시문을 저장했습니다." if p
+                       else f"{_POST_PROMPT_KEYS[key]} 추가 지시를 비웠습니다."}
+
+
+@router.post("/preview-comments", summary="AI 댓글 미리 생성 — 확인·수정 후 실행하기 위한 것")
+async def preview_comments(req: CommentPreviewRequest,
+                           current_user: dict = Depends(get_current_user)):
+    """게시글 본문을 읽어 AI 댓글 후보를 만들어 돌려준다. 실제로 달지는 않는다.
+
+    본문 추출은 SEO 분석기(비로그인 스크래핑)를 쓴다. 실행 때처럼 계정마다 브라우저를
+    띄우지 않으므로 빠르고, 로그인 세션을 건드리지 않는다.
+    프롬프트·후처리는 실행 경로와 같은 함수를 쓰므로 여기서 본 문장이 실제로 달릴 문장이다.
+    """
+    import asyncio
+    from mbam_nextgen.orchestrator import (generate_cafe_comment, is_duplicate_comment,
+                                           comment_seed)
+    from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
+    from mbam_nextgen.services.soul import SoulRewriter
+
+    urls = [u.strip() for u in (req.urls or []) if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="게시글 URL을 입력하세요.")
+    count = max(1, min(int(req.count or 3), 20))   # 보통 '선택한 계정 수'가 그대로 들어온다
+
+    analyzer = SeoAnalyzer()
+    try:
+        details = await analyzer.analyze_multiple_urls(urls)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"본문을 가져오지 못했습니다: {e}")
+
+    # 브라우저·세션 관리자가 딸린 WorkflowOrchestrator 를 통째로 만들 필요는 없다(AI 호출만 쓴다).
+    soul = SoulRewriter()
+    items, errors = [], []
+    # 글을 가리지 않고 이번 미리보기에서 만든 모든 댓글. A글 댓글을 B글 생성 때 넘겨서
+    # '소재만 바뀐 같은 문장 틀'이 글마다 되풀이되는 걸 막는다.
+    made_all = []
+    for u in urls:
+        d = (details or {}).get(u) or {}
+        if not d or "error" in d:
+            errors.append({"url": u, "error": d.get("error", "본문을 가져올 수 없습니다.")})
+            continue
+        body = (d.get("full_text") or d.get("text_sample") or "").strip()
+        if not body:
+            errors.append({"url": u, "error": "본문이 비어 있습니다."})
+            continue
+        kw = (req.keyword or d.get("title") or "").strip()
+
+        # 요청한 개수(=계정 수)만큼, 서로 '다른' 댓글을 만든다.
+        # 후보마다 다른 '톤·화자·길이'를 주지 않으면 같은 프롬프트라 문장이 서로 비슷해진다.
+        # seed 는 게시글마다 다르다 — 이게 없으면 모든 글이 똑같이 0,1,2… 번 조건으로
+        # 시작해서 A글 1번 댓글과 B글 1번 댓글이 판박이가 된다(실제로 그랬다).
+        seed = comment_seed(u)
+
+        async def _one(idx: int, avoid: list):
+            try:
+                return await generate_cafe_comment(soul, kw, body, req.ai_provider,
+                                                   variant=idx, avoid=avoid,
+                                                   seed=seed, avoid_global=made_all)
+            except Exception:
+                return None
+
+        comments = []
+        attempt, max_attempts = 0, count * 3   # 중복이 나오면 더 뽑되, 무한정 돌지는 않게
+        while len(comments) < count and attempt < max_attempts:
+            need = count - len(comments)
+            if not comments:
+                # 첫 배치는 병렬로 빠르게. 서로를 못 보므로 겹칠 수 있는데, 그건 아래에서 거른다.
+                batch = await asyncio.gather(*[_one(i, []) for i in range(need)])
+            else:
+                # 두 번째부터는 이미 만든 문장을 넘겨 '겹치지 않게' 뽑는다(그래서 순차).
+                batch = [await _one(attempt + i, list(comments)) for i in range(need)]
+            last_round = attempt + need >= max_attempts
+            for c in batch:
+                # 완전일치만 보면 '가보고 싶네요'/'가보고 싶어요' 가 둘 다 통과한다.
+                if not c or len(comments) >= count:
+                    continue
+                if is_duplicate_comment(c, comments):
+                    continue
+                # 다른 글에 만든 댓글과도 겹치면 버린다 — 사용자가 본 문제가 바로 이것이다.
+                # 단 마지막 판에서는 받아준다. 댓글이 아예 없는 것보다는 낫다.
+                if not last_round and is_duplicate_comment(c, made_all):
+                    continue
+                comments.append(c)
+            attempt += need
+        if not comments:
+            errors.append({"url": u, "error": "AI 댓글 생성에 실패했습니다. (설정에서 API 키를 확인하세요)"})
+            continue
+        made_all.extend(comments)
+        items.append({"url": u, "title": d.get("title", ""), "used_keyword": kw,
+                      "content_preview": body[:200], "comments": comments})
+
+    return {"items": items, "errors": errors}
+
+
 @router.post("/trigger-targeted", summary="다중 아이디로 타겟 게시글 댓글 작업 시작")
 async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     import asyncio
@@ -454,6 +855,10 @@ async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db)
     if not accounts_data:
         raise HTTPException(status_code=400, detail="선택된 계정이 없거나 권한이 없습니다.")
 
+    # 계정별 프록시 배정 — 로컬 실행이든 에이전트 위임이든 배정은 서버가 한다
+    # (프록시 목록이 DB 에 있으므로). 에이전트에는 배정 결과만 payload 로 넘긴다.
+    proxy_map = build_proxy_map(db, user_id, accounts_data, req.use_proxy)
+
     task_id = str(uuid.uuid4())
 
     # 카페 댓글은 네이버 로그인·브라우저 자동화라 데이터센터 IP·무화면(클라우드)에선 불가.
@@ -472,16 +877,21 @@ async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db)
             "ai_provider": req.ai_provider,
             "delay_min": req.delay_min,
             "delay_max": req.delay_max,
+            "account_delay_min": req.account_delay_min,
+            "account_delay_max": req.account_delay_max,
             "use_tethering": req.use_tethering,
             "comment_content": req.comment_content,
             "do_like": req.do_like,
+            "proxies": proxy_map,
+            "comments_by_url": req.comments_by_url or {},
         }
         jobsvc.enqueue_job(db, user_id, "cafe_targeted_comment", payload, priority=5)
     else:
-        task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data))
+        task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data, proxy_map))
         auto_post_active_tasks[task_id] = task
 
-    return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다."}
+    return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다.",
+            "proxy_count": len(proxy_map)}
 
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):

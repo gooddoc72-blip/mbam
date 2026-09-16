@@ -6,6 +6,17 @@ import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import { useState, useEffect, useRef } from "react";
 
+// 댓글 텀은 5초 단위로만 다룬다 — 1초씩 올리내리는 건 실제로 의미가 없고 조작만 번거롭다.
+export const DELAY_STEP = 5;
+
+// 화면 입력값(문자열·빈값)을 서버가 받는 숫자로 바꾼다. 비었거나 이상하면 기본값.
+// 직접 타이핑해 5의 배수가 아닌 값이 들어와도 여기서 가장 가까운 5초로 맞춘다.
+function numOr(v, fallback, step = DELAY_STEP) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.round(n / step) * step;
+}
+
 export function useCafeAuto() {
   const [mainTab, setMainTab] = useState("post"); // "post"(즉시+예약 통합), "target"
 
@@ -20,8 +31,18 @@ export function useCafeAuto() {
   const [targetKeyword, setTargetKeyword] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [sourceMode, setSourceMode] = useState("collect"); // 글감 소스: collect(글감수집) | write(직접작성) | image(이미지)
+  // 글감 소스: collect(글감수집) | write(직접작성) | image(이미지)
+  // 카페 전용판에는 글감수집이 없으므로 '직접 작성'으로 시작한다.
+  const [sourceMode, setSourceMode] = useState(
+    process.env.NEXT_PUBLIC_PRODUCT === "cafe" ? "write" : "collect"
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);  // 고급 설정(발행 텀·테더링) 접기
+  // 업로드한 원고 [{filename,title,content,image_markers}] — AI 생성과 별개 경로
+  const [uploadedManuscripts, setUploadedManuscripts] = useState([]);
+  const [uploadingManuscript, setUploadingManuscript] = useState(false);
+  // 어느 발행 대상(계정+카페)에 어느 원고를 쓸지. { "계정id:행번호": 원고번호 }
+  // 처음엔 순서대로 배정하고, 사용자가 표에서 바꿀 수 있다.
+  const [msAssign, setMsAssign] = useState({});
   const [images, setImages] = useState([]);
   const [referenceData, setReferenceData] = useState(null);
 
@@ -30,9 +51,23 @@ export function useCafeAuto() {
   const [selectedAccounts, setSelectedAccounts] = useState([]);
   const [accSearch, setAccSearch] = useState(""); // 발행 계정 검색 필터(계정 多 대비)
   const [targetMultiKeyword, setTargetMultiKeyword] = useState("");
+  // AI 댓글의 '메인 키워드'. 예전에는 댓글 입력칸 내용을 그대로 키워드로 보냈는데,
+  // 댓글을 직접 써 넣으면 그 문장 전체가 키워드가 되어 AI 가 엉뚱한 방향으로 썼다.
+  const [commentKeyword, setCommentKeyword] = useState("");
+  // AI 댓글 미리보기 — 실행 전에 확인·수정하기 위한 것.
+  // [{url, title, used_keyword, content_preview, comments:[문장,...]}]
+  const [previewItems, setPreviewItems] = useState([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [targetMultiLike, setTargetMultiLike] = useState(true); // 댓글과 함께 좋아요
+  // 등록된 프록시 풀로 계정마다 IP를 바꿔가며 댓글/공감 (기본 ON — 등록된 프록시가
+  // 없으면 서버가 알아서 직접 연결로 진행하므로 켜 두어도 안전하다)
+  const [targetMultiProxy, setTargetMultiProxy] = useState(true);
+  // 댓글 작성 텀 — 게시글 간 / 계정 전환 두 구간을 각각 조정한다.
+  // 짧게 두면 같은 계정·같은 IP 에서 연속 등록으로 잡히므로 기본값을 넉넉히 준다.
   const [delayMin, setDelayMin] = useState(30);
   const [delayMax, setDelayMax] = useState(60);
+  const [accountDelayMin, setAccountDelayMin] = useState(10);
+  const [accountDelayMax, setAccountDelayMax] = useState(30);
 
   // --- Tab 3: Nurture ---
   const [accounts, setAccounts] = useState([]);
@@ -79,14 +114,14 @@ export function useCafeAuto() {
   const [cafeInsertMap, setCafeInsertMap] = useState(false); // 본문 하단에 네이버 장소(지도) 삽입
   const [cafeMapQuery, setCafeMapQuery] = useState("");      // 삽입할 장소명/주소
   const [subKeywords, setSubKeywords] = useState("");        // 서브(연관) 키워드 — 쉼표 구분, 최대 5개
-  const [placeUrl, setPlaceUrl] = useState("");             // 맛집 포스팅: 플레이스 URL
-  const [collectingMatjip, setCollectingMatjip] = useState(false);
 
   // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
   // 이미지 보관함 선택은 공용 컴포넌트 LibraryPickerModal 로 분리됨(상태/로직 내장)
   const [accountDelay, setAccountDelay] = useState(5); // 계정 간 발행 텀(분)
-  const [accountTargets, setAccountTargets] = useState({}); // 계정별 타겟 {accId: {cafe_url, board_name}}
+  // 계정별 타겟 {accId: [{cafe_url, board_name}, ...]} — 계정 하나가 여러 카페에 올릴 수 있다.
+  // (예전 형태인 {accId: {cafe_url, board_name}} 도 asTargetList 가 받아준다)
+  const [accountTargets, setAccountTargets] = useState({});
   const [savedManuscripts, setSavedManuscripts] = useState([]); // 저장된 일괄 원고
   const [batchPosting, setBatchPosting] = usePersistentState("cafe-auto:batchPosting", false);
   const batchCancelRef = useRef(false); // 일괄 발행 강제 중지 플래그
@@ -118,8 +153,12 @@ export function useCafeAuto() {
     if (taskStatus === "completed") loadRegistered();
   }, [taskStatus]);
 
+  // [카페 전용판] 글감수집 기능을 뺐으므로 /api/content 를 부르지 않는다.
+  // (풀버전에서는 여기서 카테고리·글감 목록을 불러와 제목·본문을 채운다)
   useEffect(() => {
-    const fetchCategories = async () => {
+    if (process.env.NEXT_PUBLIC_PRODUCT === "cafe") return;
+
+    (async () => {
       try {
         const res = await fetchWithAuth("/api/content/categories");
         if (res.ok) {
@@ -127,11 +166,12 @@ export function useCafeAuto() {
           setCategories(data.categories || []);
         }
       } catch (err) {}
-    };
-    fetchCategories();
+    })();
   }, []);
 
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_PRODUCT === "cafe") return;
+
     if (newSchCategory) {
       const fetchItems = async () => {
         try {
@@ -152,6 +192,8 @@ export function useCafeAuto() {
 
   // 원고용 글감 목록 로드 (글감수집 카테고리 선택 시)
   useEffect(() => {
+    if (process.env.NEXT_PUBLIC_PRODUCT === "cafe") return;
+
     setPickItemId("");
     if (!pickCategory) { setPickItems([]); return; }
     (async () => {
@@ -366,6 +408,12 @@ export function useCafeAuto() {
     try {
       const res = await fetchWithAuth("/api/agent/pick-folder", { method: "POST" });
       const data = await res.json();
+      // 설치형(로컬)은 백엔드가 이 PC에서 바로 창을 띄우고 경로를 돌려준다 — 폴링 불필요.
+      if (data.path !== undefined) {
+        if (data.path) { setImageFolder(data.path); alert(`✅ 선택한 폴더:\n${data.path}`); }
+        else alert("폴더 선택이 취소되었습니다.");
+        return;
+      }
       if (!data.job_id) { alert("폴더 선택 요청 실패 — 내 PC 에이전트가 켜져 있는지 확인하세요."); return; }
       alert("내 PC에 '폴더 선택' 창이 곧 뜹니다. 사진이 든 폴더를 고르세요.\n(에이전트가 실행 중이어야 합니다)");
       for (let i = 0; i < 60; i++) {
@@ -384,40 +432,66 @@ export function useCafeAuto() {
     } catch (e) { alert("오류: " + e.message); }
   };
 
-  // 맛집 포스팅: 플레이스 리뷰 + 블로그 후기를 수집해 원고 소재(content)로 채운다.
-  const collectMatjipSource = async () => {
-    if (!placeUrl.trim() && !targetKeyword.trim()) { alert("플레이스 URL 또는 맛집 키워드를 입력하세요."); return; }
-    setCollectingMatjip(true);
-    setStatusLogs(p => [...p, "🍜 맛집 소재 수집 시작... (에이전트가 플레이스 리뷰·블로그 후기를 수집)"]);
+  // 이미 써 둔 원고 파일을 올려서 그대로 발행한다 (AI 생성과 별개 경로).
+  // 파일 여러 개를 올리면 선택한 계정 순서대로 하나씩 배정된다 — 계정마다 다른 글이 올라가야
+  // 같은 글이 여러 카페에 도배되는 걸 피할 수 있다.
+  const handleUploadManuscripts = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    setUploadingManuscript(true);
     try {
-      const res = await fetchWithAuth("/api/cafe-nurture/matjip-collect", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ place_url: placeUrl, keyword: targetKeyword }),
+      const fd = new FormData();
+      files.forEach(f => fd.append("files", f));
+      const res = await fetchWithAuth("/api/cafe-nurture/parse-manuscript", { method: "POST", body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert("원고를 읽지 못했습니다: " + (d.detail || `HTTP ${res.status}`)); return; }
+      const items = d.items || [];
+      if (items.length === 0) { alert("읽을 수 있는 원고가 없습니다."); return; }
+      // 이어서 올리면 기존 목록 뒤에 쌓는다 (한 번에 다 고르지 않아도 되도록).
+      const merged = [...uploadedManuscripts, ...items];
+      setUploadedManuscripts(merged);
+      // 발행 대상(계정 × 카페)에 원고를 순서대로 배정한다. 이미 지정해 둔 칸은 건드리지 않는다.
+      const rows = [];
+      selectedAccounts.forEach(id => targetsOf(id).forEach((_, ti) => rows.push(`${id}:${ti}`)));
+      setMsAssign(prev => {
+        const next = { ...prev };
+        let n = 0;
+        rows.forEach(k => { if (next[k] === undefined) { next[k] = n % merged.length; } n++; });
+        return next;
       });
-      const data = await res.json();
-      if (!res.ok) { alert("수집 실패: " + (data.detail || res.status)); return; }
-      // 수집 결과(리뷰)를 글감(content)으로만 채운다. 사용자가 입력한 메인/서브 키워드는 그대로 보존한다.
-      const applySource = (sd) => { setContent(sd || ""); setSourceMode("write"); setPromptCategory("cafe_matjip"); };
-      if (data.mode === "inline") {
-        applySource(data.source_data);
-        setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
-      } else if (data.mode === "job" && data.job_id) {
-        let done = false;
-        for (let i = 0; i < 80 && !done; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          const jr = await fetchWithAuth(`/api/agent/jobs/${data.job_id}`);
-          const jd = await jr.json().catch(() => ({}));
-          if (jd.status === "done") {
-            applySource((jd.result && jd.result.source_data) || "");
-            setStatusLogs(p => [...p, "✅ 맛집 소재 수집 완료. 'AI 원고 생성'을 눌러 원고를 만드세요."]);
-            done = true;
-          } else if (jd.status === "error") { alert("수집 실패: " + (jd.error || "오류")); done = true; }
-        }
-        if (!done) alert("수집이 지연됩니다. 로컬 에이전트가 켜져 있는지 확인 후 잠시 뒤 다시 시도하세요.");
-      }
-    } catch (e) { alert("오류: " + e.message); }
-    finally { setCollectingMatjip(false); }
+      const warn = (d.errors || []).length ? `\n\n건너뛴 파일:\n` + d.errors.map(e => `- ${e.filename}: ${e.error}`).join("\n") : "";
+      const markers = items.reduce((m, it) => m + (it.image_markers || 0), 0);
+      alert(`원고 ${items.length}개를 읽었습니다. (총 ${merged.length}개)` +
+            (markers ? `\n사진 자리 [이미지] 가 ${markers}개 있습니다 — '사진 폴더'를 지정하면 순서대로 들어갑니다.` : "") +
+            (rows.length > merged.length ? `\n\n※ 발행 대상(${rows.length})이 원고(${merged.length})보다 많아 같은 원고가 반복 배정됐습니다.\n표의 '원고' 칸에서 대상마다 직접 지정하세요.` : "") +
+            warn);
+    } catch (e) {
+      alert("오류: " + e.message);
+    } finally {
+      setUploadingManuscript(false);
+    }
   };
+
+  // 올린 원고를 그 자리에서 고친다 (파일을 다시 만들지 않아도 되도록)
+  const editManuscript = (idx, field, val) =>
+    setUploadedManuscripts(prev => prev.map((m, i) => i === idx ? { ...m, [field]: val } : m));
+
+  // 원고 목록에서 하나 빼기 — 뒤 번호가 당겨지므로 배정도 같이 손본다.
+  const removeManuscript = (idx) => {
+    setUploadedManuscripts(prev => prev.filter((_, i) => i !== idx));
+    setMsAssign(prev => {
+      const next = {};
+      Object.entries(prev).forEach(([k, v]) => {
+        if (v === idx) return;              // 지운 원고를 쓰던 대상은 '미지정'으로 둔다
+        next[k] = v > idx ? v - 1 : v;
+      });
+      return next;
+    });
+  };
+
+  // 발행 대상(계정+카페)에 쓸 원고 지정
+  const assignManuscript = (key, msIdx) =>
+    setMsAssign(prev => ({ ...prev, [key]: msIdx }));
 
   // 맛집: 폴더 사진 + 리뷰 → 에이전트가 사진을 클라우드로 전송 → Claude가 사진 보고 원고 작성(사진 자리에 [이미지])
   const generateMatjipWithPhotos = async () => {
@@ -427,11 +501,13 @@ export function useCafeAuto() {
       const subKwArr = (subKeywords || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean).slice(0, 5);
       const res = await fetchWithAuth("/api/cafe-nurture/matjip-generate-job", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_folder: imageFolder, source_data: content, place_name: matjipName, keyword: (targetKeyword || "").trim(), sub_keywords: subKwArr }),
+        body: JSON.stringify({ image_folder: imageFolder, source_data: content, place_name: matjipName,
+                               keyword: (targetKeyword || "").trim(), sub_keywords: subKwArr,
+                               post_type: mainTab === "matjip" ? "matjip" : "keyword" }),
       });
       const d = await res.json();
-      if (!d.job_id) { setIsGenerating(false); return alert("생성 요청 실패 — 내 PC 에이전트가 켜져 있는지 확인하세요."); }
-      alert("내 PC 에이전트가 폴더 사진을 분석해 원고를 만듭니다. (사진 장수에 따라 최대 1~2분)");
+      if (!d.job_id) { setIsGenerating(false); return alert("생성 요청 실패 — 잠시 후 다시 시도하세요."); }
+      alert("폴더 사진을 분석해 원고를 만듭니다. (사진 장수에 따라 최대 1~2분)");
       for (let i = 0; i < 90; i++) {
         await new Promise(r => setTimeout(r, 3000));
         const jr = await fetchWithAuth(`/api/agent/jobs/${d.job_id}`);
@@ -454,8 +530,9 @@ export function useCafeAuto() {
   };
 
   const handleGenerateCafe = async () => {
-    // 맛집 + 내 사진 폴더 지정 시: 사진을 보고 쓰는 전용 경로(에이전트→클라우드 Claude 비전)
-    if (mainTab === "matjip" && (imageFolder || "").trim()) {
+    // 사진 폴더를 지정했으면 '사진을 보고 쓰는' 경로로 간다 — 맛집·일키 모두 같다.
+    // (사진을 직접 본 모델이 글까지 쓰므로 사진↔문단이 어긋나지 않는다)
+    if ((imageFolder || "").trim()) {
       if (!content.trim() && !targetKeyword.trim()) return alert("키워드 또는 글감(참고 내용)을 먼저 입력/불러오세요.");
       return await generateMatjipWithPhotos();
     }
@@ -479,8 +556,8 @@ export function useCafeAuto() {
       const genAccounts = chosen.length > 0
         ? chosen.map(a => ({ id: a.naver_id, checked: true }))
         : [{ id: "preview", checked: true }];
-      // 맛집 모드: 수집한 방문자 리뷰를 근거로 '내돈내산 후기'로 작성 (정보성 프롬프트 X)
-      // 주제 키워드는 수집 소스의 '[가게 이름]'에서 뽑아 정확한 제목이 나오게 함(잔여 정보성 키워드 미사용).
+      // 맛집 모드: 방문 리뷰를 근거로 '내돈내산 후기' 톤. 일키는 일반 카페글 톤.
+      // 맛집은 소스의 '[가게 이름]'에서 주제를 뽑아 제목이 정확히 나오게 한다.
       const isMatjip = mainTab === "matjip";
       const matjipName = (content.match(/\[가게 이름\]\s*(.+)/) || [])[1];
       const matjipKeyword = matjipName ? `${matjipName.trim()} 후기` : "맛집 방문 후기";
@@ -496,7 +573,7 @@ export function useCafeAuto() {
         source_data: effectiveSource,    // 현재 글감/참고 내용(이미지 모드는 방금 분석한 글감)을 소스로
         prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory), // 카페 전용 톤 프롬프트
         include_source_link: includeSourceLink,
-        post_purpose: isMatjip ? "review" : "info",   // 맛집=후기 톤, 정보성=info
+        post_purpose: isMatjip ? "review" : "info",   // 맛집=후기 톤, 일키=info
         target_type: "cafe",
         post_mode: "ai_generate",
       };
@@ -513,21 +590,53 @@ export function useCafeAuto() {
   };
 
   // --- Handlers Tab 1 ---
-  // 계정별 타겟(카페/게시판) 매칭
-  const setAccTarget = (accId, field, val) =>
-    setAccountTargets(prev => ({ ...prev, [accId]: { ...(prev[accId] || {}), [field]: val } }));
+  // 계정별 타겟(카페/게시판) 매칭 — 계정 하나가 여러 카페에 올릴 수 있으므로 '목록'이다.
+  // 예전에는 {accId: {cafe_url, board_name}} 한 개였다. 저장돼 있던 값이 그 모양이면 감싸서 읽는다.
+  const asTargetList = (v) => {
+    if (Array.isArray(v)) return v;
+    if (v && (v.cafe_url || v.board_name)) return [v];
+    return [];
+  };
+  // 화면·발행에서 쓰는 정규화된 목록. 비어 있으면 빈 행 하나를 보여준다.
+  const targetsOf = (accId) => {
+    const list = asTargetList(accountTargets[accId]);
+    return list.length ? list : [{ cafe_url: "", board_name: "" }];
+  };
 
-  // 가입 카페 매핑 + 공통 입력값으로 계정별 타겟 채우기
+  const setAccTarget = (accId, idx, field, val) =>
+    setAccountTargets(prev => {
+      const list = asTargetList(prev[accId]);
+      const next = list.length ? [...list] : [{ cafe_url: "", board_name: "" }];
+      next[idx] = { ...(next[idx] || {}), [field]: val };
+      return { ...prev, [accId]: next };
+    });
+
+  // 이 계정이 올릴 카페를 한 곳 더 추가
+  const addAccTarget = (accId) =>
+    setAccountTargets(prev => {
+      const list = asTargetList(prev[accId]);
+      return { ...prev, [accId]: [...(list.length ? list : [{ cafe_url: "", board_name: "" }]), { cafe_url: "", board_name: "" }] };
+    });
+
+  const removeAccTarget = (accId, idx) =>
+    setAccountTargets(prev => {
+      const list = asTargetList(prev[accId]);
+      const next = list.filter((_, i) => i !== idx);
+      return { ...prev, [accId]: next.length ? next : [{ cafe_url: "", board_name: "" }] };
+    });
+
+  // 가입 카페 매핑 + 공통 입력값으로 계정별 타겟 채우기.
+  // 이미 채워둔 행은 건드리지 않고, 비어 있는 계정만 '가입 카페 전부'로 펼친다.
   const prefillTargets = () => {
     const next = { ...accountTargets };
     selectedAccounts.forEach(id => {
       const acc = accounts.find(a => a.id === id);
-      const mapped = acc && acc.cafes && acc.cafes[0];
-      const cur = next[id] || {};
-      next[id] = {
-        cafe_url: cur.cafe_url || (mapped && mapped.cafe_url) || cafeUrl || "",
-        board_name: cur.board_name || (mapped && mapped.board_name) || boardName || "",
-      };
+      const cur = asTargetList(next[id]).filter(t => (t.cafe_url || "").trim());
+      if (cur.length > 0) { next[id] = cur; return; }
+      const mapped = (acc && acc.cafes) || [];
+      next[id] = mapped.length
+        ? mapped.map(c => ({ cafe_url: c.cafe_url || "", board_name: c.board_name || boardName || "" }))
+        : [{ cafe_url: cafeUrl || "", board_name: boardName || "" }];
     });
     setAccountTargets(next);
   };
@@ -546,16 +655,18 @@ export function useCafeAuto() {
       const acc = accounts.find(a => a.id === id);
       const nid = acc ? acc.naver_id : id;
       const gen = cafeGenerated.find(g => g.account_id === nid);
-      const tgt = accountTargets[id] || {};
       const c = (gen && gen.content) ? gen.content : content;
       if (!c || !c.trim()) continue;
-      items.push({
-        account_id: nid,
-        cafe_url: tgt.cafe_url || cafeUrl,
-        board_name: tgt.board_name || boardName,
-        title: (gen && gen.title) ? gen.title : title,
-        content: c,
-      });
+      // 계정이 여러 카페에 올리면 카페마다 한 건씩 저장한다.
+      for (const tgt of targetsOf(id)) {
+        items.push({
+          account_id: nid,
+          cafe_url: tgt.cafe_url || cafeUrl,
+          board_name: tgt.board_name || boardName,
+          title: (gen && gen.title) ? gen.title : title,
+          content: c,
+        });
+      }
     }
     if (items.length === 0) return alert("저장할 원고가 없습니다.\n계정 선택 + (AI 원고 생성 또는 본문 입력) 후 저장하세요.");
     if (items.some(it => !it.cafe_url || !it.board_name)) {
@@ -619,6 +730,8 @@ export function useCafeAuto() {
           generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
           insert_map: cafeInsertMap, map_query: cafeMapQuery,  // 본문 하단 네이버 장소(지도) 삽입
           image_folder_path: imageFolder || null,  // 지정한 이미지 폴더(발행 PC=에이전트 기준). 있으면 카드뉴스 대신 사용
+          // 업로드 원고를 대기열에 넣어 일괄 발행할 때도 [이미지] 자리를 그대로 지킨다.
+          keep_image_markers: sourceMode === "upload",
         };
         const res = await fetchWithAuth("/api/auto_post/", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -640,21 +753,43 @@ export function useCafeAuto() {
   const handleStartSingle = async () => {
     const chosen = accounts.filter(a => selectedAccounts.includes(a.id));
     if (chosen.length === 0) return alert("발행할 계정을 선택하세요. (하단 '네이버 아이디 풀'에서 등록·기기 인증 후 위에서 선택)");
-    // 계정별 매칭(카페/게시판) 검증
-    const missing = chosen.filter(a => { const t = accountTargets[a.id] || {}; return !t.cafe_url || !t.board_name; });
-    if (missing.length > 0) return alert("아래 '계정별 타겟 카페·게시판 매칭'에서 카페/게시판을 지정하세요.\n(미지정 계정: " + missing.map(a => a.naver_id).join(", ") + ")");
+    // 발행 대상 = (계정 × 그 계정이 올릴 카페) 조합을 한 줄씩 펼친 것.
+    // 계정 하나가 여러 카페에 올릴 수 있으므로 계정 수보다 많을 수 있다.
+    const isUpload = sourceMode === "upload";
+    const jobs = [];
+    const missing = [];
+    for (const acc of chosen) {
+      // targetsOf 의 원래 순서를 지켜야 표에서 지정한 원고(msAssign 의 행번호)와 어긋나지 않는다.
+      targetsOf(acc.id).forEach((t, ti) => {
+        if (!(t.cafe_url || "").trim() || !(t.board_name || "").trim()) return;
+        jobs.push({ acc, tgt: t, key: `${acc.id}:${ti}` });
+      });
+      if (!jobs.some(j => j.acc.id === acc.id)) missing.push(acc.naver_id);
+    }
+    if (missing.length > 0) return alert("아래 '계정별 타겟 카페·게시판 매칭'에서 카페/게시판을 지정하세요.\n(미지정 계정: " + missing.join(", ") + ")");
+    if (isUpload) {
+      if (uploadedManuscripts.length === 0) return alert("발행할 원고 파일을 먼저 올리세요.");
+      const noMs = jobs.filter(j => !uploadedManuscripts[msAssign[j.key]]);
+      if (noMs.length > 0) return alert("원고가 지정되지 않은 발행 대상이 있습니다.\n표의 '원고' 칸에서 지정하세요.\n(" + noMs.map(j => j.acc.naver_id).join(", ") + ")");
+    }
+
+    const multi = jobs.length > chosen.length;
+    if (multi && !window.confirm(
+        `계정 ${chosen.length}개 → 카페 ${jobs.length}곳에 발행합니다.\n\n` +
+        `같은 글이 여러 카페에 올라가면 중복 문서로 잡힐 수 있습니다.\n` +
+        `카페마다 다른 글이 필요하면 '원고 업로드'로 카페 수만큼 준비하세요.\n\n계속할까요?`)) return;
 
     setLoading(true); setStatusLogs([]); setTaskStatus("running"); setTaskId(null); setTaskKind("post");
     try {
-      // 선택한 계정마다 순차 발행 (기기 인증된 계정은 비밀번호 없이 프로필 자동 로그인)
+      // 대상마다 순차 발행 (기기 인증된 계정은 비밀번호 없이 프로필 자동 로그인)
       let lastTaskId = null, started = 0;
-      for (let i = 0; i < chosen.length; i++) {
-        const acc = chosen[i];
-        // 계정별 생성 원고가 있으면 그 계정 것을, 없으면 공통 본문 사용
+      for (let i = 0; i < jobs.length; i++) {
+        const { acc, tgt, key } = jobs[i];
+        // 업로드 모드면 이 대상에 지정한 원고를, 아니면 계정별 생성 원고(없으면 공통 본문)를 쓴다.
+        const ms = isUpload ? uploadedManuscripts[msAssign[key]] : null;
         const gen = cafeGenerated.find(g => g.account_id === acc.naver_id);
-        const postContent = (gen && gen.content) ? gen.content : content;
-        const postTitle = (gen && gen.title) ? gen.title : title;
-        const tgt = accountTargets[acc.id] || {};   // 계정별 타겟 카페/게시판
+        const postContent = ms ? ms.content : ((gen && gen.content) ? gen.content : content);
+        const postTitle = ms ? ms.title : ((gen && gen.title) ? gen.title : title);
         const payload = {
           target_type: "cafe", login_mode: "auto",
           naver_id: acc.naver_id, naver_pw: null,   // 기기 인증 프로필 자동 로그인
@@ -664,7 +799,12 @@ export function useCafeAuto() {
           title: postTitle, content: postContent,
           publish_mode: "instant", cafe_url: tgt.cafe_url, board_name: tgt.board_name,
           images: images, cafe_action_type: actionType, reference_data: referenceData,
-          source_data: postContent, prompt_category: (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory),
+          source_data: postContent,
+          // 업로드 원고는 '그대로 발행'이 목적이라 프롬프트를 실으면 안 된다.
+          // prompt_category 가 실려 있으면 발행 직전에 AI 가 원고를 다시 써버린다.
+          prompt_category: isUpload ? null
+            : (promptCategory === "content_collect" ? "content_collect_cafe" : promptCategory),
+          keep_image_markers: isUpload,            // 원고에 찍어둔 [이미지] 자리를 그대로 사용
           include_source_link: includeSourceLink,
           image_folder_path: imageFolder || null,  // 첨부 이미지 폴더(있으면 글에 첨부)
           use_tethering: useTethering,             // USB 테더링 IP 우회(계정 발행 전 IP 회전)
@@ -680,14 +820,14 @@ export function useCafeAuto() {
         const data = await res.json();
         // 클라우드 모드는 발행을 로컬 에이전트 잡으로 적재하고 {mode:'agent', job_id}만 반환 → 이것도 '시작 성공'으로 인정
         if ((data.success && data.task_id) || data.job_id) { lastTaskId = data.task_id || data.job_id; started++; }
-        // 계정 간 발행 텀: 다음 계정 전 대기 (IP 회전/안전 간격 확보)
-        if (i < chosen.length - 1 && accountDelay > 0) {
+        // 발행 텀: 다음 대상 전 대기 (IP 회전/안전 간격 확보)
+        if (i < jobs.length - 1 && accountDelay > 0) {
           await new Promise(r => setTimeout(r, accountDelay * 60 * 1000));
         }
       }
       if (lastTaskId) {
         setTaskId(lastTaskId); // 마지막 작업 모니터링
-        if (started > 1) alert(`${started}개 계정 발행을 시작했습니다. (모니터링은 마지막 계정 기준)`);
+        if (started > 1) alert(`${started}건 발행을 시작했습니다. (모니터링은 마지막 건 기준)`);
       } else {
         alert("발행 시작에 실패했습니다."); setLoading(false);
       }
@@ -701,27 +841,89 @@ export function useCafeAuto() {
   };
 
   // --- Handlers Tab 2 ---
+  // 실행 전에 AI 댓글을 만들어 보여준다. 실제로 달지는 않는다.
+  // 게시글 본문만 읽어 후보를 만들므로 계정 브라우저를 띄우지 않는다(로그인 세션 안 건드림).
+  const handlePreviewComments = async () => {
+    const urls = targetUrls.split("\n").map(u => u.trim()).filter(u => u);
+    if (urls.length === 0) return alert("먼저 '2. 타겟 게시글 URL'을 입력하세요.");
+    setPreviewLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/cafe-nurture/preview-comments", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          urls,
+          // 키워드 칸이 비어 있으면 예전처럼 댓글 입력칸 내용을 쓴다(하위 호환).
+          keyword: commentKeyword.trim() || targetMultiKeyword,
+          // 선택한 계정 수만큼 만든다. 서버가 중복을 걸러내고 부족하면 더 뽑아
+          // '계정 수만큼 서로 다른 댓글'을 채워서 돌려준다.
+          count: Math.min(Math.max(selectedAccounts.length || 3, 1), 20),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return alert("미리보기 실패: " + (d.detail || `HTTP ${res.status}`));
+      setPreviewItems(d.items || []);
+      if ((d.errors || []).length > 0) {
+        alert("일부 게시글은 본문을 읽지 못했습니다:\n" +
+          d.errors.map(e => `· ${e.url}\n   ${e.error}`).join("\n"));
+      }
+      if ((d.items || []).length === 0) alert("생성된 댓글이 없습니다.");
+    } catch (e) { alert("서버 오류 (백엔드 서버가 켜져 있는지 확인해주세요)"); }
+    finally { setPreviewLoading(false); }
+  };
+
+  const updatePreviewComment = (ui, ci, value) => {
+    setPreviewItems(prev => prev.map((it, i) => i !== ui ? it
+      : { ...it, comments: it.comments.map((c, j) => (j === ci ? value : c)) }));
+  };
+  const removePreviewComment = (ui, ci) => {
+    setPreviewItems(prev => prev.map((it, i) => i !== ui ? it
+      : { ...it, comments: it.comments.filter((_, j) => j !== ci) }));
+  };
+  const clearPreview = () => setPreviewItems([]);
+
   const handleStartTargetMulti = async () => {
-    if (!targetUrls || selectedAccounts.length === 0 || !targetMultiKeyword) {
-      return alert("URL 목록, 계정 선택, 키워드를 모두 입력해주세요.");
+    // 미리보기에서 확인·수정한 댓글 {URL: [문장,...]} — 빈 줄은 버린다.
+    const approved = {};
+    previewItems.forEach(it => {
+      const list = (it.comments || []).map(c => (c || "").trim()).filter(c => c);
+      if (list.length) approved[it.url] = list;
+    });
+    const hasApproved = Object.keys(approved).length > 0;
+
+    if (!targetUrls || selectedAccounts.length === 0 || (!targetMultiKeyword && !hasApproved)) {
+      return alert("URL 목록과 계정을 선택하고, 댓글을 입력하거나 [AI 댓글 미리 만들기]로 생성해주세요.");
     }
     setLoading(true); setStatusLogs([]); setTaskStatus("running"); setTaskId(null); setTaskKind("comment");
     try {
       const payload = {
-        urls: targetUrls.split("\\n").map(u => u.trim()).filter(u => u),
+        urls: targetUrls.split("\n").map(u => u.trim()).filter(u => u),
         account_ids: selectedAccounts,
-        keyword: targetMultiKeyword,
-        comment_content: targetMultiKeyword,
-        delay_min: delayMin,
-        delay_max: delayMax,
+        // AI 자동 생성 시 이 키워드를 기준으로 쓴다.
+        keyword: commentKeyword.trim() || targetMultiKeyword,
+        // 미리보기로 확인한 게 있으면 그 문장을 쓴다(AI 재생성 없음).
+        comment_content: hasApproved ? "" : targetMultiKeyword,
+        comments_by_url: hasApproved ? approved : null,
+        // input 값은 문자열이고 지우면 "" 가 된다 — 그대로 보내면 서버가 422 로 튕긴다.
+        delay_min: numOr(delayMin, 30),
+        delay_max: numOr(delayMax, 60),
+        account_delay_min: numOr(accountDelayMin, 10),
+        account_delay_max: numOr(accountDelayMax, 30),
         use_tethering: useTethering,
-        do_like: targetMultiLike
+        do_like: targetMultiLike,
+        use_proxy: targetMultiProxy
       };
       const res = await fetchWithAuth("/api/cafe-nurture/trigger-targeted", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.success) setTaskId(data.task_id);
+      if (data.success) {
+        setTaskId(data.task_id);
+        // 프록시를 켰는데 배정된 게 0개면 전부 같은 IP로 나간다 → 먼저 알려준다.
+        if (targetMultiProxy && !data.proxy_count) {
+          setStatusLogs((prev) => [...prev,
+            "⚠️ 등록된 프록시가 없어 직접 연결(현재 PC IP)로 진행합니다. [프록시 IP] 메뉴에서 등록하세요."]);
+        }
+      }
       else { alert(data.detail || "실패했습니다."); setLoading(false); }
     } catch (e) { alert("서버 오류"); setLoading(false); }
   };
@@ -768,15 +970,25 @@ export function useCafeAuto() {
     } catch (e) { alert("서버 오류 (백엔드 서버가 켜져 있는지 확인해주세요)"); setLoading(false); }
   };
 
+  // 통합 저장소(/api/accounts, upsert)로 보낸다 — 엑셀 일괄등록도 같은 경로를 쓴다.
+  // 구버전 /api/cafe-nurture/accounts 는 이미 있는 아이디를 400 으로 거부해서,
+  // 비밀번호를 고치려면 계정을 지웠다 다시 넣는 수밖에 없었다.
   const handleAddAccount = async () => {
-    if (!newAccId || !newAccPw) return;
+    const nid = (newAccId || "").trim();
+    const pw = (newAccPw || "").trim();
+    if (!nid || !pw) return alert("네이버 아이디와 비밀번호를 모두 입력하세요.");
     try {
-      const res = await fetchWithAuth("/api/cafe-nurture/accounts", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naver_id: newAccId, naver_pw: newAccPw })
+      const res = await fetchWithAuth("/api/accounts", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ naver_id: nid, naver_pw: pw })
       });
-      if (res.ok) { alert("추가 완료"); setNewAccId(""); setNewAccPw(""); fetchAccounts(); }
-      else { const d = await res.json(); alert(d.detail); }
-    } catch (e) { alert("오류"); }
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(d.created === false ? `'${nid}' 계정의 비밀번호를 갱신했습니다.` : "추가 완료");
+        setNewAccId(""); setNewAccPw(""); fetchAccounts();
+      } else {
+        alert("추가 실패: " + (d.detail || `HTTP ${res.status}`));
+      }
+    } catch (e) { alert("서버 오류 (백엔드 서버가 켜져 있는지 확인해주세요)"); }
   };
 
   const handleDeleteAccount = async (acc) => {
@@ -941,10 +1153,16 @@ export function useCafeAuto() {
     setTargetMultiKeyword,
     targetMultiLike,
     setTargetMultiLike,
+    targetMultiProxy,
+    setTargetMultiProxy,
     delayMin,
     setDelayMin,
     delayMax,
     setDelayMax,
+    accountDelayMin,
+    setAccountDelayMin,
+    accountDelayMax,
+    setAccountDelayMax,
     accounts,
     setAccounts,
     schedules,
@@ -1023,11 +1241,10 @@ export function useCafeAuto() {
     setCafeMapQuery,
     subKeywords,
     setSubKeywords,
-    placeUrl,
-    setPlaceUrl,
-    collectingMatjip,
-    collectMatjipSource,
     handlePickFolder,
+    uploadedManuscripts, setUploadedManuscripts,
+    uploadingManuscript, handleUploadManuscripts,
+    msAssign, assignManuscript, editManuscript, removeManuscript,
     showLibPicker,
     setShowLibPicker,
     accountDelay,
@@ -1059,6 +1276,7 @@ export function useCafeAuto() {
     handleDescribeImages,
     handleGenerateCafe,
     setAccTarget,
+    targetsOf, addAccTarget, removeAccTarget,
     prefillTargets,
     fetchManuscripts,
     handleSaveManuscripts,
@@ -1068,6 +1286,14 @@ export function useCafeAuto() {
     handleStartSingle,
     handleLoadManuscript,
     handleStartTargetMulti,
+    commentKeyword,
+    setCommentKeyword,
+    previewItems,
+    previewLoading,
+    handlePreviewComments,
+    updatePreviewComment,
+    removePreviewComment,
+    clearPreview,
     handleCancelTask,
     toggleAccountSelection,
     handleRegisterAccount,
