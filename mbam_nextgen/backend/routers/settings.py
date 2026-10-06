@@ -379,7 +379,18 @@ async def wash_upload_endpoint(
     use_border: bool = Form(False),
     use_noise: bool = Form(True),
     use_watermark: bool = Form(False),
-    use_rotation: bool = Form(False)
+    use_rotation: bool = Form(False),
+    keep_original_size: bool = Form(False),   # 원본 해상도 그대로 처리(느림)
+    # ── 세탁 방식 개별 선택 ────────────────────────────────────────────────
+    # 예전에는 크롭·밝기·EXIF 가 선택지 없이 무조건 걸렸다. 화면에서는 어떤 처리가
+    # 들어갔는지 알 수 없어, 결과가 원본과 달라 보이는 이유를 설명할 수 없었다.
+    # 기본값은 예전 동작과 같게 둔다 — 체크를 건드리지 않으면 결과가 달라지지 않는다.
+    use_crop: bool = Form(True),              # 가장자리 5~8% 크롭
+    use_bright_contrast: bool = Form(True),   # 밝기·대비 미세변형
+    use_exif: bool = Form(True),              # 촬영정보(EXIF) 교체
+    use_flip: bool = Form(False),             # 좌우반전
+    use_hue: bool = Form(False),              # 색조 미세이동
+    use_resample: bool = Form(False),         # 리사이즈 재샘플링
 ):
     try:
         from mbam_nextgen.services.armor import ImageArmor
@@ -387,13 +398,43 @@ async def wash_upload_endpoint(
         pass # Handle inside
 
     results = []
-    
+
+    # ⚠ 속도의 핵심 — 세탁 '전에' 한 번만 줄인다.
+    #   휴대폰 사진은 보통 4000x3000(1200만 화소)이라 회전·블러·밝기보정이 전부 그 픽셀 수만큼 돈다.
+    #   실측: 원본 1장 2.34초(10장 23초) → 1600px 로 줄이면 1장 0.2초 수준(10장 2초).
+    #   게다가 보관함에 저장할 때 어차피 1280px 로 다시 줄이므로, 큰 걸 만들어 작게 줄이는 낭비였다.
+    #   원본 화질이 꼭 필요한 경우를 위해 keep_original_size 옵션을 남겨둔다.
+    MAX_SIDE = 1600
+
+    def _fake_exif_once():
+        """가짜 EXIF 생성기. 장마다 ImageArmor 를 새로 만들면 폴더 생성까지 반복된다.
+        촬영일시는 armor 쪽에서 매번 새로 뽑으므로 장마다 값이 달라진다(고정값 아님)."""
+        try:
+            from mbam_nextgen.services.armor import ImageArmor
+            return ImageArmor(output_dir="temp")._get_fake_exif()
+        except Exception:
+            return b""
+
+    # 크롭 구현은 armor 한 곳에만 둔다(두 벌이 되면 한쪽만 고치는 사고가 난다).
+    try:
+        from mbam_nextgen.services.armor import _crop_edges
+    except Exception:
+        def _crop_edges(im):  # armor 를 못 불러온 경우에도 세탁 자체는 계속되게
+            w, h = im.size
+            base = min(w, h)
+            l, t, r, b = (int(base * random.uniform(0.05, 0.08)) for _ in range(4))
+            if w - l - r < 64 or h - t - b < 64:
+                return im
+            return im.crop((l, t, w - r, h - b))
+
     # Read all uploaded images into memory
     original_images = []
     for file in files:
         contents = await file.read()
         try:
             img = Image.open(io.BytesIO(contents)).convert("RGB")
+            if not keep_original_size and max(img.size) > MAX_SIDE:
+                img.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
             original_images.append({
                 "filename": file.filename,
                 "img": img
@@ -409,24 +450,59 @@ async def wash_upload_endpoint(
         orig_dict = original_images[i % len(original_images)]
         img = orig_dict["img"].copy()
         
-        # Apply edits based on options
+        # 처리 순서 — 구도를 바꾸는 것(회전·크롭·반전·재샘플링)을 먼저 하고,
+        # 픽셀 값을 건드리는 것(노이즈·밝기·색조)을 나중에 얹는다.
+        # 순서가 반대면 회전으로 생긴 검은 여백에도 노이즈가 얹혀 그 자국이 남는다.
         if use_rotation:
             angle = random.uniform(0.5, 2.0)
             if random.random() > 0.5: angle = -angle
             img = img.rotate(angle, expand=False, resample=Image.BICUBIC)
-            # Crop slightly to remove black edges from rotation
+
+        # 가장자리 크롭 5~8% — 세탁에서 가장 중요한 처리다.
+        # 세탁의 목적은 지각해시(pHash)를 바꾸는 것인데, 노이즈·밝기보정·미세회전만으로는
+        # pHash 거리가 0에 머물러 원본과 '같은 이미지'로 판정됐다(측정값: 노이즈만 0.2/64).
+        # 크롭은 pHash 를 실제로 흔드는 유일한 저비용 처리다(5%→12, 8%→20 / 64).
+        # 회전을 켰다면 이 크롭이 회전 여백까지 함께 잘라낸다.
+        # ⚠ 끄면 다른 처리를 다 켜도 원본과 같은 이미지로 걸릴 수 있다(화면에도 경고를 띄운다).
+        if use_crop:
+            img = _crop_edges(img)
+
+        if use_flip:
+            # 좌우반전 — pHash 를 가장 크게 바꾸지만, 간판·글자가 찍힌 사진은
+            # 뒤집힌 티가 바로 난다. 그래서 기본값은 꺼둔다.
+            img = ImageOps.mirror(img)
+
+        if use_resample:
+            # 95~99% 로 줄였다가 원래 크기로 되돌린다.
+            # 픽셀 격자가 새로 계산되면서 원본의 압축 흔적·미세 패턴이 사라진다.
+            # 크기는 그대로라 보는 사람은 차이를 못 느낀다.
             w, h = img.size
-            cp = int(max(w, h) * 0.02)
-            img = img.crop((cp, cp, w - cp, h - cp))
-            
+            ratio = random.uniform(0.95, 0.99)
+            small = img.resize((max(1, int(w * ratio)), max(1, int(h * ratio))), Image.LANCZOS)
+            img = small.resize((w, h), Image.BICUBIC)
+
         if use_noise:
-            if random.random() > 0.3:
-                noise = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.1, 0.3)))
-                img = Image.blend(img, noise, alpha=0.15)
-            # slight brightness/contrast
+            # 체크했으면 '항상' 적용한다.
+            # 예전에는 70% 확률로만 블러를 걸어, 10장 중 3장쯤은 노이즈가 빠졌다.
+            # (화면 설명은 '항상 적용됨' 이라 실제 동작과 어긋났다)
+            # 대신 강도를 장마다 다르게 줘서 모든 결과가 똑같이 처리된 티는 나지 않게 한다.
+            noise = img.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.1, 0.4)))
+            img = Image.blend(img, noise, alpha=random.uniform(0.10, 0.20))
+
+        if use_bright_contrast:
+            # ±2% — 사람 눈으로는 구분할 수 없는 범위다.
+            # 예전에는 노이즈 옵션에 묶여 있어 따로 끌 수 없었다.
             img = ImageEnhance.Brightness(img).enhance(1 + random.uniform(-0.02, 0.02))
             img = ImageEnhance.Contrast(img).enhance(1 + random.uniform(-0.02, 0.02))
-            
+
+        if use_hue:
+            # 색조를 255 단계 중 2~5 만큼 돌린다. 눈으로는 같은 색으로 보이지만
+            # 색 히스토그램이 달라져 색 분포로 같은 사진을 찾는 검사를 피한다.
+            _h, _s, _v = img.convert("HSV").split()
+            shift = random.choice([-1, 1]) * random.randint(2, 5)
+            _h = _h.point(lambda p: (p + shift) % 256)
+            img = Image.merge("HSV", (_h, _s, _v)).convert("RGB")
+
         if use_border:
             border_color = (random.randint(200, 255), random.randint(200, 255), random.randint(200, 255))
             img = ImageOps.expand(img, border=5, fill=border_color)
@@ -435,17 +511,21 @@ async def wash_upload_endpoint(
         if use_watermark:
             pass # Implement if needed
             
-        # Add EXIF (mocked via ImageArmor or manually)
-        try:
-            from mbam_nextgen.services.armor import ImageArmor
-            armor = ImageArmor(output_dir="temp")
-            exif_bytes = armor._get_fake_exif()
-        except:
-            exif_bytes = b""
-            
+        # 촬영정보(EXIF) 교체 — 촬영일시·카메라 모델을 가짜로 채운다.
+        # ※ ImageArmor 를 장마다 새로 만들지 않고 위에서 한 번 만든 것을 쓴다.
+        # 끄면 EXIF 없이 저장된다(원본 EXIF 가 따라붙지는 않는다 — PIL 이 다시 쓰지 않으므로).
+        exif_bytes = _fake_exif_once() if use_exif else b""
+
         # Save to buffer
+        # 품질 92~98 → 82~88. 카페 업로드용이라 육안 차이는 거의 없고 용량·시간이 크게 준다.
+        # (보관함 저장 시에는 어차피 품질 80 으로 다시 압축된다)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=random.randint(92, 98), exif=exif_bytes if exif_bytes else None)
+        # ⚠ exif=None 을 넘기면 안 된다 — PIL 이 그대로 len() 을 불러 TypeError 로 터진다.
+        #   EXIF 를 끄거나 ImageArmor 를 못 불러온 경우가 여기 해당한다. 아예 넘기지 않는다.
+        save_kwargs = {"format": "JPEG", "quality": random.randint(82, 88)}
+        if exif_bytes:
+            save_kwargs["exif"] = exif_bytes
+        img.save(buf, **save_kwargs)
         img_bytes = buf.getvalue()
         base64_str = base64.b64encode(img_bytes).decode('utf-8')
         

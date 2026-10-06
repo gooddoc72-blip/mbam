@@ -767,51 +767,74 @@ class SchedulerService:
 
     def start(self):
         """스케줄러 시작 (DB 설정 무시, 매일 새벽 5시(KST) 강제 일괄 실행)"""
+        # 설치형 전용판은 그 제품에 있는 잡만 건다. 화면조차 없는 기능의 일괄분석을
+        # 걸어두면 고객 PC 가 새벽마다 쓸데없이 브라우저를 띄워 네이버를 긁게 된다.
+        #   cafe : 카페 육성만
+        #   blog : 블로그 자동발행·예약·글감수집·블로그스팟 (플레이스·쇼핑 일괄분석은 제외)
+        _product = (os.getenv("MBAM_PRODUCT", "mbam") or "mbam").strip().lower()
+        cafe_only = _product == "cafe"
+        blog_only = _product == "blog"
+
         # hour, minute = self._get_scheduled_time()
         hour, minute = 5, 0 # 새벽 5시 고정
         # misfire_grace_time/coalesce: 정시에 PC가 잠깐 꺼져 놓쳐도 1시간 내 기동하면 발화
         common = dict(replace_existing=True, misfire_grace_time=3600, coalesce=True, timezone="Asia/Seoul")
-        self.scheduler.add_job(self.run_daily_analysis, 'cron', hour=hour, minute=minute, id='daily_place_analysis', **common)
-        self.scheduler.add_job(self.run_daily_shopping_analysis, 'cron', hour=hour, minute=minute, id='daily_shopping_analysis', **common)
-        self.scheduler.add_job(self.run_daily_blogspot_analysis, 'cron', hour=hour, minute=minute, id='daily_blogspot_analysis', **common)
+        # 블로그 전용판에도 블로그스팟 화면이 있으므로 그 일괄분석은 남긴다.
+        if not cafe_only:
+            self.scheduler.add_job(self.run_daily_blogspot_analysis, 'cron', hour=hour, minute=minute, id='daily_blogspot_analysis', **common)
 
-        # 기동 시 보충: 오늘 5시가 지났는데 아직 안 돌았으면 잠시 후 1회 실행
-        # (설치형은 새벽에 PC가 꺼져 있는 날이 많음 — 켜는 순간 그날 수집을 보충)
-        try:
-            now = datetime.now()
-            sched_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if now >= sched_today:
-                if not self._ran_today("place"):
-                    self.scheduler.add_job(self.run_daily_analysis, 'date',
-                                           run_date=now + timedelta(seconds=60),
-                                           id='daily_place_catchup', replace_existing=True)
-                    logger.info("오늘 플레이스 일괄분석 미실행 감지 → 60초 뒤 보충 실행 예약")
-                if not self._ran_today("shopping"):
-                    self.scheduler.add_job(self.run_daily_shopping_analysis, 'date',
-                                           run_date=now + timedelta(seconds=90),
-                                           id='daily_shopping_catchup', replace_existing=True)
-                    logger.info("오늘 쇼핑 일괄분석 미실행 감지 → 90초 뒤 보충 실행 예약")
-        except Exception as e:
-            logger.error(f"보충 실행 체크 실패: {e}")
+        if not (cafe_only or blog_only):
+            self.scheduler.add_job(self.run_daily_analysis, 'cron', hour=hour, minute=minute, id='daily_place_analysis', **common)
+            self.scheduler.add_job(self.run_daily_shopping_analysis, 'cron', hour=hour, minute=minute, id='daily_shopping_analysis', **common)
 
+            # 기동 시 보충: 오늘 5시가 지났는데 아직 안 돌았으면 잠시 후 1회 실행
+            # (설치형은 새벽에 PC가 꺼져 있는 날이 많음 — 켜는 순간 그날 수집을 보충)
+            try:
+                now = datetime.now()
+                sched_today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if now >= sched_today:
+                    if not self._ran_today("place"):
+                        self.scheduler.add_job(self.run_daily_analysis, 'date',
+                                               run_date=now + timedelta(seconds=60),
+                                               id='daily_place_catchup', replace_existing=True)
+                        logger.info("오늘 플레이스 일괄분석 미실행 감지 → 60초 뒤 보충 실행 예약")
+                    if not self._ran_today("shopping"):
+                        self.scheduler.add_job(self.run_daily_shopping_analysis, 'date',
+                                               run_date=now + timedelta(seconds=90),
+                                               id='daily_shopping_catchup', replace_existing=True)
+                        logger.info("오늘 쇼핑 일괄분석 미실행 감지 → 90초 뒤 보충 실행 예약")
+            except Exception as e:
+                logger.error(f"보충 실행 체크 실패: {e}")
 
         # Load Cafe Nurturing Schedules
         self.load_cafe_schedules()
 
-        # Load Blog Daily Post Schedules
-        self.load_blog_schedules()
+        if not cafe_only:
+            # Load Blog Daily Post Schedules
+            self.load_blog_schedules()
 
-        # Load Blog Reservations (1회 예약)
-        self.load_blog_reservations()
+            # Load Blog Reservations (1회 예약)
+            self.load_blog_reservations()
 
-        # Load Content Sync Schedule
-        self.load_content_schedule()
-        
+        if not cafe_only:
+            # Load Content Sync Schedule (글감수집) — 카페 전용판은 이 기능을 빼서 필요 없다.
+            # 켜두면 고객 PC 가 쓰지도 않는 정부·공공 데이터를 주기적으로 긁는다.
+            self.load_content_schedule()
+
         self.scheduler.start()
-        logger.info(f"Scheduler started successfully. Next run is scheduled for {hour:02d}:{minute:02d} daily.")
-        
+        if cafe_only:
+            logger.info("Scheduler started (카페 전용판 — 카페 육성 잡만 등록).")
+        elif blog_only:
+            logger.info("Scheduler started (블로그 전용판 — 블로그 자동발행·예약·글감수집·블로그스팟 잡만 등록).")
+        else:
+            logger.info(f"Scheduler started successfully. Next run is scheduled for {hour:02d}:{minute:02d} daily.")
+
     def update_schedule(self, hour: int, minute: int):
         """스케줄러 작동 시간 업데이트"""
+        # 카페·블로그 전용판에는 daily_place_analysis 잡 자체가 없다(등록하지 않음) → 조용히 무시.
+        if not self.scheduler.get_job('daily_place_analysis'):
+            logger.info("daily_place_analysis 잡이 없어 시간 변경을 건너뜁니다(설치형 전용판).")
+            return
         self.scheduler.reschedule_job('daily_place_analysis', trigger='cron', hour=hour, minute=minute)
         logger.info(f"Scheduler job updated. Next run is scheduled for {hour:02d}:{minute:02d} daily.")
 

@@ -263,7 +263,12 @@ async def _run_device_auth(naver_id: str, naver_pw: Optional[str], uid: Optional
                 log("저장된 비밀번호가 없습니다. 열린 창에서 직접 로그인을 완료해 주세요. (최대 5분 대기)")
 
             authenticator = NaverAuthenticator()
-            ok = await authenticator.login_with_bypass(page, naver_id, naver_pw or "", manual_wait_secs=300)
+            ok = await authenticator.login_with_bypass(page, naver_id, naver_pw or "", manual_wait_secs=300,
+                                                       fresh_login=True)
+            # '인증완료' 기록 전 실제 로그인 상태 최종 확인 (캡차 화면 오판·남은 쿠키 오판 방지)
+            if ok and not await authenticator.verify_logged_in(page):
+                log("❌ 로그인이 최종 확인되지 않았습니다(캡차·2단계 인증 미완료).")
+                ok = False
 
             if ok:
                 mark_registered(naver_id)

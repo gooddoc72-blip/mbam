@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 
-from ..database import get_db, NaverAccount, JoinedCafe, CafeSchedule, CafeManuscript, Advertiser, Agency, Distributor
+from ..database import get_db, NaverAccount, JoinedCafe, CafeSchedule, CafeManuscript, CafeCommentHistory, Advertiser, Agency, Distributor
 from ..auth import get_current_user
 from mbam_nextgen.orchestrator import WorkflowOrchestrator
 from mbam_nextgen.backend.routers.auto_post import task_status_store, active_tasks as auto_post_active_tasks
@@ -83,6 +83,24 @@ class CommentPreviewRequest(BaseModel):
 # --- Utils ---
 def get_user_id(current_user: dict):
     return current_user.get("sub") # Email or Login ID
+
+
+def load_accounts_data(db, user_id: str, account_ids: list) -> list:
+    """선택한 계정(NaverAccount.id) → [{id: 네이버ID, pw: 평문}] — 본인 계정만."""
+    out = []
+    for acc_id in account_ids or []:
+        acc = db.query(NaverAccount).filter(NaverAccount.id == acc_id, NaverAccount.user_id == user_id).first()
+        if acc:
+            # 비밀번호 복호화(암호화 저장 시). 에이전트로 payload 전달 시 평문이어야 로그인됨.
+            pw = acc.naver_pw or ""
+            try:
+                from mbam_nextgen.backend.cipher_utils import decrypt_val
+                if acc.naver_pw:
+                    pw = decrypt_val(acc.naver_pw)
+            except Exception:
+                pw = acc.naver_pw or ""
+            out.append({"id": acc.naver_id, "pw": pw})
+    return out
 
 
 def build_proxy_map(db, user_id: str, accounts_data: list, use_proxy) -> dict:
@@ -386,7 +404,7 @@ async def delete_manuscript(manuscript_id: str, db: Session = Depends(get_db), c
 # Now uses task_status_store from auto_post.py
 
 async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_data: list,
-                                proxy_map: dict = None):
+                                proxy_map: dict = None, user_id: str = ""):
     task_status_store[task_id] = {"status": "running", "logs": ["[다중 타겟팅] 작업을 시작합니다..."]}
     
     def log(msg: str):
@@ -415,7 +433,8 @@ async def run_multi_target_task(task_id: str, req: TargetPostRequest, accounts_d
             comments_by_url=req.comments_by_url or {},
             logger_func=log
         )
-        
+        _persist_local(user_id, "cafe_targeted_comment", {"keyword": req.keyword}, result)
+
         task_status_store[task_id]["status"] = "completed"
         log("✅ 모든 타겟 다중 댓글 작업이 완료되었습니다!")
         
@@ -838,19 +857,7 @@ async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db)
     import asyncio
     user_id = get_user_id(current_user)
 
-    accounts_data = []
-    for acc_id in req.account_ids:
-        acc = db.query(NaverAccount).filter(NaverAccount.id == acc_id, NaverAccount.user_id == user_id).first()
-        if acc:
-            # 비밀번호 복호화(암호화 저장 시). 에이전트로 payload 전달 시 평문이어야 로그인됨.
-            pw = acc.naver_pw or ""
-            try:
-                from mbam_nextgen.backend.cipher_utils import decrypt_val
-                if acc.naver_pw:
-                    pw = decrypt_val(acc.naver_pw)
-            except Exception:
-                pw = acc.naver_pw or ""
-            accounts_data.append({"id": acc.naver_id, "pw": pw})
+    accounts_data = load_accounts_data(db, user_id, req.account_ids)
 
     if not accounts_data:
         raise HTTPException(status_code=400, detail="선택된 계정이 없거나 권한이 없습니다.")
@@ -887,7 +894,7 @@ async def trigger_targeted(req: TargetPostRequest, db: Session = Depends(get_db)
         }
         jobsvc.enqueue_job(db, user_id, "cafe_targeted_comment", payload, priority=5)
     else:
-        task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data, proxy_map))
+        task = asyncio.create_task(run_multi_target_task(task_id, req, accounts_data, proxy_map, user_id))
         auto_post_active_tasks[task_id] = task
 
     return {"success": True, "task_id": task_id, "message": "다중 계정 타겟 작업이 시작되었습니다.",
@@ -907,3 +914,159 @@ async def get_task_status(task_id: str):
     if task_id not in task_status_store:
         raise HTTPException(status_code=404, detail="Task not found")
     return task_status_store[task_id]
+
+
+# ── 댓글 작성 이력 / 댓글 삭제 ───────────────────────────────────────────
+# 흐름: 원글 URL 입력 → (이력에서 그 글에 댓글 단 계정 자동 체크) → 계정 체크 조정 → 삭제 실행.
+# 삭제는 이력에 의존하지 않는다 — 체크한 계정으로 로그인해 그 글에서 '내 댓글'을 찾아 지우므로
+# 이력 기능이 생기기 전에 단 댓글도 지울 수 있다.
+import re as _re_url
+
+
+def _post_key(url: str) -> str:
+    """같은 글을 가리키는 여러 URL 형태를 하나의 키로 맞춘다.
+    cafe.naver.com/카페명/123, cafe.naver.com/ca-fe/cafes/456/articles/123, ...?articleid=123 등."""
+    u = (url or "").strip()
+    m = _re_url.search(r"cafes/(\d+)/articles/(\d+)", u)
+    if m:
+        return f"c{m.group(1)}:{m.group(2)}"
+    m = _re_url.search(r"cafe\.naver\.com/([\w-]+)/(\d+)", u)
+    if m:
+        return f"{m.group(1).lower()}:{m.group(2)}"
+    m = _re_url.search(r"[?&]articleid=(\d+)", u, _re_url.I)
+    if m:
+        return f"a:{m.group(1)}"
+    return u.split("#")[0].rstrip("/").lower()
+
+
+def _unwrap_result(result):
+    """에이전트는 {"success":True,"result":{...}} 로, 로컬은 {...} 로 돌려준다."""
+    if isinstance(result, dict) and isinstance(result.get("result"), dict):
+        return result["result"]
+    return result if isinstance(result, dict) else {}
+
+
+def _persist_comment_written(db, user_id, payload, result):
+    for w in (_unwrap_result(result).get("written") or []):
+        if not w.get("account_id") or not w.get("post_url"):
+            continue
+        db.add(CafeCommentHistory(
+            user_id=user_id, account_id=w["account_id"], post_url=w["post_url"],
+            comment_text=w.get("comment_text") or "", keyword=w.get("keyword") or (payload or {}).get("keyword"),
+            status="posted",
+        ))
+
+
+def _persist_comment_deleted(db, user_id, payload, result):
+    from datetime import datetime as _dt
+    rows = None
+    for r in (_unwrap_result(result).get("results") or []):
+        if not r.get("deleted"):
+            continue
+        if rows is None:
+            rows = db.query(CafeCommentHistory).filter(CafeCommentHistory.user_id == user_id,
+                                                       CafeCommentHistory.status == "posted").all()
+        key = _post_key(r.get("post_url"))
+        for h in rows:
+            if h.account_id == r.get("account_id") and _post_key(h.post_url) == key:
+                h.status = "deleted"
+                h.deleted_at = _dt.utcnow()
+
+
+def _persist_local(user_id: str, job_type: str, payload: dict, result):
+    """설치형(로컬 실행) — 에이전트 결과와 같은 persister 로 저장한다."""
+    fn = {"cafe_targeted_comment": _persist_comment_written,
+          "cafe_comment_delete": _persist_comment_deleted}.get(job_type)
+    if not fn or not user_id:
+        return
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        fn(db, user_id, payload, result)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[cafe_comment] 이력 저장 실패: {e}")
+    finally:
+        db.close()
+
+
+try:
+    from mbam_nextgen.backend import jobs as _jobsvc
+    _jobsvc.register_persister("cafe_targeted_comment", _persist_comment_written)
+    _jobsvc.register_persister("cafe_comment_delete", _persist_comment_deleted)
+except Exception as _e:
+    print(f"[cafe_nurture] persister 등록 실패: {_e}")
+
+
+@router.get("/comment-history", summary="댓글 작성 이력 (원글 URL 로 필터 가능)")
+async def comment_history(url: Optional[str] = None, limit: int = 200,
+                          db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    user_id = get_user_id(current_user)
+    q = db.query(CafeCommentHistory).filter(CafeCommentHistory.user_id == user_id)
+    rows = q.order_by(CafeCommentHistory.created_at.desc()).limit(2000 if url else max(1, min(limit, 500))).all()
+    if url:
+        keys = {_post_key(u) for u in url.split("\n") if u.strip()}
+        rows = [r for r in rows if _post_key(r.post_url) in keys]
+    return {"items": [{
+        "id": r.id, "account_id": r.account_id, "post_url": r.post_url,
+        "comment_text": r.comment_text, "keyword": r.keyword, "status": r.status,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
+    } for r in rows]}
+
+
+class CommentDeleteRequest(BaseModel):
+    urls: List[str]                  # 댓글을 달았던 원글 URL
+    account_ids: List[str]           # 체크한 계정(NaverAccount.id)
+    use_proxy: Optional[bool] = None # 댓글 작업과 같은 IP 로 지우도록 같은 규칙으로 배정
+
+
+async def run_comment_delete_task(task_id: str, user_id: str, accounts_data: list, urls: list,
+                                  proxy_map: dict = None):
+    task_status_store[task_id] = {"status": "running", "logs": ["[댓글 삭제] 작업을 시작합니다..."]}
+
+    def log(msg: str):
+        print(f"[{task_id}] {msg}")
+        task_status_store[task_id]["logs"].append(msg)
+
+    try:
+        result = await WorkflowOrchestrator().execute_cafe_comment_delete(
+            accounts_data=accounts_data, target_urls=urls, proxies=proxy_map or {}, logger_func=log)
+        _persist_local(user_id, "cafe_comment_delete", {}, result)
+        task_status_store[task_id]["status"] = "completed"
+        log("✅ 댓글 삭제 작업이 완료되었습니다!")
+    except Exception as e:
+        log(f"❌ 오류 발생: {str(e)}")
+        task_status_store[task_id]["status"] = "failed"
+
+
+@router.post("/delete-comments", summary="원글 URL + 체크한 계정의 댓글 삭제")
+async def delete_comments(req: CommentDeleteRequest, db: Session = Depends(get_db),
+                          current_user: dict = Depends(get_current_user)):
+    import asyncio
+    user_id = get_user_id(current_user)
+    urls = [u.strip() for u in (req.urls or []) if u and u.strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="댓글을 달았던 원글 URL을 입력하세요.")
+    accounts_data = load_accounts_data(db, user_id, req.account_ids)
+    if not accounts_data:
+        raise HTTPException(status_code=400, detail="삭제할 계정을 체크하세요.")
+    proxy_map = build_proxy_map(db, user_id, accounts_data, req.use_proxy)
+    task_id = str(uuid.uuid4())
+
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        task_status_store[task_id] = {"status": "running", "logs": [
+            "[댓글 삭제] 작업을 로컬 에이전트(집 PC)에 전달했습니다.",
+            "에이전트가 실행을 시작하면 진행 로그가 여기에 표시됩니다. (에이전트가 켜져 있어야 합니다)",
+        ]}
+        jobsvc.enqueue_job(db, user_id, "cafe_comment_delete", {
+            "task_id": task_id, "accounts_data": accounts_data, "urls": urls, "proxies": proxy_map,
+        }, priority=5)
+    else:
+        task = asyncio.create_task(run_comment_delete_task(task_id, user_id, accounts_data, urls, proxy_map))
+        auto_post_active_tasks[task_id] = task
+
+    return {"success": True, "task_id": task_id,
+            "message": f"계정 {len(accounts_data)}개 × 글 {len(urls)}개 댓글 삭제를 시작했습니다."}

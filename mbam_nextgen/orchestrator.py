@@ -1280,7 +1280,16 @@ class WorkflowOrchestrator:
                 page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
 
                 pw = account_pw or os.getenv("NAVER_PW", "")
-                success = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=240)
+                # fresh_login: 프로필에 남은 예전 인증 쿠키 때문에 로그인 전부터 '성공' 으로 판정돼
+                # 창이 바로 닫히는 일을 막는다.
+                success = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=240,
+                                                                     fresh_login=True)
+                # '인증완료' 로 기록하기 전에 실제 로그인 상태인지 한 번 더 확인한다.
+                # (예전엔 캡차 화면을 성공으로 오판해 로그인도 안 된 계정이 인증완료로 표시됐다)
+                if success and not await self.authenticator.verify_logged_in(page):
+                    _log(f"❌ [등록] '{account_id}' 로그인이 최종 확인되지 않았습니다. 다시 시도해 주세요.")
+                    return {"success": False, "account_id": account_id,
+                            "error": "로그인이 최종 확인되지 않았습니다(캡차·2단계 인증 미완료). 다시 시도해 주세요."}
                 if success:
                     self.session_manager.mark_registered(account_id)
                     await self.session_manager.save_session(context, account_id)
@@ -1910,6 +1919,75 @@ class WorkflowOrchestrator:
     # 카페 다중 계정 타겟 댓글 워크플로우
     # ═══════════════════════════════════════════════
 
+    async def _ensure_naver_login(self, context, page, account_id, pw, proxy_config, _safe) -> bool:
+        """카페 댓글 작성·삭제 공용 — 이 브라우저가 실제로 로그인된 상태인지 확인하고,
+        아니면 저장 세션 복원 → (프록시 없을 때만) 재로그인까지 시도한다. 실패하면 False."""
+        # 로그인 확인 — 반드시 '실제로 살아 있는 세션'으로 판단한다.
+        # ① is_registered()(디스크 표시 파일)만 보면 세션이 만료돼도 True.
+        # ② 인증 쿠키의 '존재'만 봐도 마찬가지다 — 만료된 쿠키가 프로필과
+        #    sessions/*.json 에 그대로 남아 있기 때문이다.
+        # 둘 중 어느 쪽으로든 통과하면 로그아웃 상태로 카페에 들어가고,
+        # 네이버가 댓글 작성창을 아예 렌더하지 않아 '댓글창 못 찾음'이 된다.
+        # 그래서 has_naver_session() 이 매번 네이버에 실제로 물어본다.
+        logged_in = await has_naver_session(context)
+
+        # 영구 프로필에 로그인 쿠키가 없으면, 기기인증 때 저장해 둔 쿠키를 먼저 주입한다.
+        # (네이버 인증 쿠키는 '로그인 상태 유지'를 안 하면 세션 쿠키라 창을 닫는 순간
+        #  프로필에서 사라진다. 저장본을 다시 넣으면 재로그인·2단계 인증을 피할 수 있다.)
+        if not logged_in:
+            try:
+                if await self.session_manager.load_session(context, account_id):
+                    logged_in = await has_naver_session(context)
+                    if logged_in:
+                        _safe("  🔓 저장된 로그인 세션을 복원했습니다 (재로그인 생략)")
+                    else:
+                        # 예전에는 여기서 '복원 성공'으로 찍고 그냥 진행했다.
+                        # 죽은 쿠키를 넣은 것뿐이라 결국 댓글창을 못 찾고 끝났다.
+                        _safe("  ⌛ 저장된 세션이 만료됐습니다 → 다시 로그인합니다")
+            except Exception as e:
+                _safe(f"  ⚠️ 저장된 세션 복원 실패(계속 진행): {e}")
+
+        # ⚠ 프록시를 켠 채로 '로그인'을 하면 안 된다.
+        #   네이버 입장에서는 '평소와 다른 IP(대개 데이터센터)에서 갑자기 로그인'이라
+        #   계정 탈취 시도로 보고 보호조치를 건다. 실제로 그렇게 걸렸다.
+        #   댓글·공감만 프록시로 하는 건 괜찮다 — 이미 로그인된 세션을 쓰기 때문이다.
+        #   그래서 세션이 없는 상태 + 프록시 조합이면 로그인하지 않고 건너뛴다.
+        if not logged_in and proxy_config:
+            _safe(f"  ⛔ '{account_id}' 로그인 세션이 없는데 프록시가 켜져 있어 건너뜁니다.")
+            _safe("     프록시를 통해 로그인하면 네이버가 이상 접속으로 보고 계정을 잠급니다.")
+            _safe("     → [계정관리]에서 프록시 없이 기기인증을 먼저 1회 해주세요.")
+            return False
+
+        if not logged_in:
+            if self.session_manager.is_registered(account_id):
+                _safe("  🔑 기기인증은 돼 있으나 로그인 세션이 만료됨 → 다시 로그인합니다")
+            else:
+                _safe("  🔑 로그인 세션 없음 → 로그인 시도 (캡챠/2단계는 창에서 직접 완료)")
+            try:
+                ok = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=180)
+            except Exception as e:
+                ok = False
+                _safe(f"  ⚠️ 로그인 중 오류: {e}")
+            logged_in = bool(ok) and await has_naver_session(context)
+            if logged_in:
+                self.session_manager.mark_registered(account_id)
+                # 다음 작업에서 재로그인하지 않도록 방금 얻은 쿠키를 저장해 둔다.
+                try:
+                    await self.session_manager.save_session(context, account_id)
+                except Exception:
+                    pass
+                _safe("  ✅ 로그인 완료")
+
+        # 로그인 없이 진행하면 댓글은 100% 실패하고 좋아요도 실제로는 반영되지 않는다.
+        # 그런데도 '좋아요 완료'가 찍혀 성공한 것처럼 보였으므로, 여기서 끊는다.
+        if not logged_in:
+            _safe(f"  ⛔ '{account_id}' 로그인 실패 — 이 계정은 건너뜁니다.")
+            _safe("     (비밀번호가 저장돼 있는지 확인하고, [계정관리 > 기기인증]을 1회 진행하세요)")
+            _safe(f"     ※ 여기서 쓰는 아이디는 '{account_id}' 입니다. 실제 네이버 아이디와 다르면"
+                  " [계정관리]에서 아이디를 정확히 고쳐주세요.")
+            return False
+        return True
+
     async def execute_targeted_multi_cafe_workflow(
         self,
         accounts_data: list,
@@ -1997,6 +2075,10 @@ class WorkflowOrchestrator:
         # 글을 가리지 않고 이번 작업에서 쓴 모든 댓글. 이게 없으면 A글 댓글과 B글 댓글이
         # 서로를 못 봐서 '소재만 바뀐 같은 문장 틀'이 글마다 되풀이된다.
         used_all = []
+
+        # 실제로 등록된 댓글 기록 — 나중에 '작성 이력'에서 골라 지울 수 있게 돌려준다.
+        # 계정·게시글·문장이 있어야 삭제 때 '이 계정이 쓴 이 댓글'을 정확히 찾을 수 있다.
+        written = []
 
         # 직접 입력 댓글(여러 줄 = 여러 후보). 있으면 AI 대신 이 중에서 무작위 선택.
         manual_comments = [l.strip() for l in (comment_content or "").splitlines() if l.strip()]
@@ -2214,69 +2296,7 @@ class WorkflowOrchestrator:
                 page.on("dialog", lambda d: asyncio.create_task(d.accept()))
 
                 try:
-                    # 로그인 확인 — 반드시 '실제로 살아 있는 세션'으로 판단한다.
-                    # ① is_registered()(디스크 표시 파일)만 보면 세션이 만료돼도 True.
-                    # ② 인증 쿠키의 '존재'만 봐도 마찬가지다 — 만료된 쿠키가 프로필과
-                    #    sessions/*.json 에 그대로 남아 있기 때문이다.
-                    # 둘 중 어느 쪽으로든 통과하면 로그아웃 상태로 카페에 들어가고,
-                    # 네이버가 댓글 작성창을 아예 렌더하지 않아 '댓글창 못 찾음'이 된다.
-                    # 그래서 has_naver_session() 이 매번 네이버에 실제로 물어본다.
-                    logged_in = await has_naver_session(context)
-
-                    # 영구 프로필에 로그인 쿠키가 없으면, 기기인증 때 저장해 둔 쿠키를 먼저 주입한다.
-                    # (네이버 인증 쿠키는 '로그인 상태 유지'를 안 하면 세션 쿠키라 창을 닫는 순간
-                    #  프로필에서 사라진다. 저장본을 다시 넣으면 재로그인·2단계 인증을 피할 수 있다.)
-                    if not logged_in:
-                        try:
-                            if await self.session_manager.load_session(context, account_id):
-                                logged_in = await has_naver_session(context)
-                                if logged_in:
-                                    _safe("  🔓 저장된 로그인 세션을 복원했습니다 (재로그인 생략)")
-                                else:
-                                    # 예전에는 여기서 '복원 성공'으로 찍고 그냥 진행했다.
-                                    # 죽은 쿠키를 넣은 것뿐이라 결국 댓글창을 못 찾고 끝났다.
-                                    _safe("  ⌛ 저장된 세션이 만료됐습니다 → 다시 로그인합니다")
-                        except Exception as e:
-                            _safe(f"  ⚠️ 저장된 세션 복원 실패(계속 진행): {e}")
-
-                    # ⚠ 프록시를 켠 채로 '로그인'을 하면 안 된다.
-                    #   네이버 입장에서는 '평소와 다른 IP(대개 데이터센터)에서 갑자기 로그인'이라
-                    #   계정 탈취 시도로 보고 보호조치를 건다. 실제로 그렇게 걸렸다.
-                    #   댓글·공감만 프록시로 하는 건 괜찮다 — 이미 로그인된 세션을 쓰기 때문이다.
-                    #   그래서 세션이 없는 상태 + 프록시 조합이면 로그인하지 않고 건너뛴다.
-                    if not logged_in and proxy_config:
-                        _safe(f"  ⛔ '{account_id}' 로그인 세션이 없는데 프록시가 켜져 있어 건너뜁니다.")
-                        _safe("     프록시를 통해 로그인하면 네이버가 이상 접속으로 보고 계정을 잠급니다.")
-                        _safe("     → [계정관리]에서 프록시 없이 기기인증을 먼저 1회 해주세요.")
-                        continue
-
-                    if not logged_in:
-                        if self.session_manager.is_registered(account_id):
-                            _safe("  🔑 기기인증은 돼 있으나 로그인 세션이 만료됨 → 다시 로그인합니다")
-                        else:
-                            _safe("  🔑 로그인 세션 없음 → 로그인 시도 (캡챠/2단계는 창에서 직접 완료)")
-                        try:
-                            ok = await self.authenticator.login_with_bypass(page, account_id, pw, manual_wait_secs=180)
-                        except Exception as e:
-                            ok = False
-                            _safe(f"  ⚠️ 로그인 중 오류: {e}")
-                        logged_in = bool(ok) and await has_naver_session(context)
-                        if logged_in:
-                            self.session_manager.mark_registered(account_id)
-                            # 다음 작업에서 재로그인하지 않도록 방금 얻은 쿠키를 저장해 둔다.
-                            try:
-                                await self.session_manager.save_session(context, account_id)
-                            except Exception:
-                                pass
-                            _safe("  ✅ 로그인 완료")
-
-                    # 로그인 없이 진행하면 댓글은 100% 실패하고 좋아요도 실제로는 반영되지 않는다.
-                    # 그런데도 '좋아요 완료'가 찍혀 성공한 것처럼 보였으므로, 여기서 끊는다.
-                    if not logged_in:
-                        _safe(f"  ⛔ '{account_id}' 로그인 실패 — 이 계정은 건너뜁니다.")
-                        _safe("     (비밀번호가 저장돼 있는지 확인하고, [계정관리 > 기기인증]을 1회 진행하세요)")
-                        _safe(f"     ※ 여기서 쓰는 아이디는 '{account_id}' 입니다. 실제 네이버 아이디와 다르면"
-                              " [계정관리]에서 아이디를 정확히 고쳐주세요.")
+                    if not await self._ensure_naver_login(context, page, account_id, pw, proxy_config, _safe):
                         continue   # 브라우저는 아래 finally 에서 닫힌다
 
                     try:
@@ -2346,6 +2366,13 @@ class WorkflowOrchestrator:
                             ok = await _write_comment(cafe_frame, comment_text)
                             if ok:
                                 _safe("  ✅ 댓글 등록 완료")
+                                written.append({
+                                    "account_id": account_id,
+                                    "post_url": target_url,
+                                    "comment_text": comment_text,
+                                    "keyword": keyword,
+                                    "written_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+                                })
                                 try:
                                     self.db.log_cafe(account_id=account_id, cafe_id=target_url, keyword=keyword, status="타겟 댓글 성공")
                                 except Exception:
@@ -2380,8 +2407,241 @@ class WorkflowOrchestrator:
                     _safe(f"⏳ 계정 전환 {ad}초 대기...")
                     await _interruptible_sleep(ad)
 
-            _safe("🎉 다중 타겟 댓글 작업 종료")
-            return True
+            _safe(f"🎉 다중 타겟 댓글 작업 종료 (등록 {len(written)}건)")
+            return {"success": True, "written": written}
+
+    # ═══════════════════════════════════════════════
+    # 카페 댓글 삭제 — 원글 URL + 체크한 계정
+    # ═══════════════════════════════════════════════
+
+    async def execute_cafe_comment_delete(
+        self,
+        accounts_data: list,
+        target_urls: list,
+        proxies: dict = None,
+        only_texts: dict = None,
+        logger_func=None,
+        stop_event=None,
+    ):
+        """체크한 계정마다 로그인해서 원글에 들어가 '그 계정이 쓴 댓글'을 지운다.
+
+        내 댓글 판별: 댓글의 [더보기] 메뉴에 '수정'과 '삭제'가 함께 있는 것.
+          남의 댓글은 '신고'만 나오고, 카페 매니저라도 남의 댓글에는 '수정'이 없다.
+          '삭제'만 보고 지우면 매니저 계정이 남의 댓글까지 지우므로 반드시 둘 다 본다.
+
+        only_texts: {"계정|URL": [댓글문장, ...]} — 있으면 그 문장과 일치하는 댓글만 지운다.
+                    없으면 그 계정이 원글에 단 댓글을 전부 지운다(기록 이전에 단 댓글 포함).
+
+        반환: {"success": True, "results": [{account_id, post_url, deleted, error}]}
+        """
+        if not logger_func:
+            logger_func = logger.info
+
+        def _safe(msg):
+            try:
+                logger_func(msg)
+            except Exception:
+                try:
+                    logger_func(str(msg).encode("ascii", "replace").decode("ascii"))
+                except Exception:
+                    pass
+
+        def _norm(t):
+            return re.sub(r"\s+", "", t or "")
+
+        proxies = proxies or {}
+        only_texts = only_texts or {}
+        results = []
+        MAX_PER_POST = 50   # 한 계정이 한 글에서 지울 최대 개수(오작동 시 폭주 방지)
+
+        item_sels = "ul.comment_list > li.CommentItem, li.CommentItem, li[class*=CommentItem]"
+        tool_sels = ("a.comment_tool_button, button.comment_tool_button, .comment_tool a, "
+                     ".comment_tool button, [class*=comment_tool] button, [class*=comment_tool] a")
+
+        async def _visible_menu_btn(scope, label):
+            loc = scope.locator(f"a:has-text('{label}'), button:has-text('{label}')")
+            try:
+                n = await loc.count()
+            except Exception:
+                return None
+            for k in range(n):
+                b = loc.nth(k)
+                try:
+                    if await b.is_visible() and (await b.inner_text()).strip() == label:
+                        return b
+                except Exception:
+                    continue
+            return None
+
+        async def _close_menu(frame):
+            try:
+                await frame.locator("body").press("Escape")
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+
+        async def _delete_own_on_page(frame, wanted):
+            """현재 보이는 댓글 페이지에서 내 댓글을 지운다. 지운 개수."""
+            deleted = 0
+            idx = 0
+            while deleted < MAX_PER_POST:
+                if stop_event is not None and stop_event.is_set():
+                    break
+                items = frame.locator(item_sels)
+                total = await items.count()
+                if idx >= total:
+                    break
+                item = items.nth(idx)
+                # 지울 문장이 정해져 있으면 본문이 일치하는 댓글만 본다
+                if wanted:
+                    try:
+                        txt = _norm(await item.inner_text())
+                    except Exception:
+                        txt = ""
+                    if not any(w in txt for w in wanted):
+                        idx += 1
+                        continue
+                tool = item.locator(tool_sels).first
+                try:
+                    if await tool.count() == 0:
+                        idx += 1
+                        continue
+                    await tool.scroll_into_view_if_needed()
+                    await tool.click()
+                    await asyncio.sleep(0.6)
+                except Exception:
+                    idx += 1
+                    continue
+                # 메뉴는 댓글 안에 붙거나 프레임 레이어로 뜬다 — 둘 다 본다
+                edit_btn = await _visible_menu_btn(item, "수정") or await _visible_menu_btn(frame, "수정")
+                del_btn = await _visible_menu_btn(item, "삭제") or await _visible_menu_btn(frame, "삭제")
+                if not (edit_btn and del_btn):
+                    await _close_menu(frame)
+                    idx += 1
+                    continue
+                try:
+                    await del_btn.click()          # 브라우저 confirm 창은 page.on('dialog') 가 수락
+                    await asyncio.sleep(0.8)
+                    ok_btn = await _visible_menu_btn(frame, "확인")   # 레이어형 확인창
+                    if ok_btn:
+                        await ok_btn.click()
+                    await asyncio.sleep(1.5)
+                except Exception as e:
+                    _safe(f"    ⚠️ 삭제 클릭 실패: {e}")
+                    await _close_menu(frame)
+                    idx += 1
+                    continue
+                deleted += 1
+                _safe(f"    🗑 내 댓글 삭제 ({deleted})")
+                # 목록이 다시 그려지므로 idx 는 그대로 두고 같은 자리를 다시 본다
+                await asyncio.sleep(0.5)
+            return deleted
+
+        async with async_playwright() as p:
+            for acc_idx, acc in enumerate(accounts_data):
+                if stop_event is not None and stop_event.is_set():
+                    _safe("⏹ 중지 요청으로 종료합니다.")
+                    break
+                account_id = acc["id"]
+                pw = acc.get("pw", "")
+                _safe(f"👉 [{acc_idx+1}/{len(accounts_data)}] 계정: {account_id}")
+                if not _acquire_account(account_id):
+                    _safe(f"  ⏭ '{account_id}' 은(는) 다른 작업이 사용 중이라 건너뜁니다.")
+                    for u in target_urls:
+                        results.append({"account_id": account_id, "post_url": u, "deleted": 0, "error": "다른 작업이 사용 중"})
+                    continue
+
+                acc_proxy = acc.get("proxy") or proxies.get(account_id)
+                proxy_config = self.proxy_manager.get_browser_proxy_config(acc_proxy)
+                profile_dir = self.session_manager.get_profile_dir(account_id)
+                self.session_manager.clear_stale_locks(account_id)
+                try:
+                    launch_opts = dict(
+                        headless=False, args=STEALTH_ARGS, ignore_default_args=STEALTH_IGNORE_ARGS,
+                        viewport={'width': 1280, 'height': 900},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        locale="ko-KR", timezone_id="Asia/Seoul",
+                    )
+                    if proxy_config:
+                        launch_opts["proxy"] = proxy_config
+                    context = await p.chromium.launch_persistent_context(profile_dir, **launch_opts)
+                except Exception as e:
+                    _safe(f"  ❌ 브라우저 실행 실패: {e}")
+                    _release_account(account_id)
+                    for u in target_urls:
+                        results.append({"account_id": account_id, "post_url": u, "deleted": 0, "error": "브라우저 실행 실패"})
+                    continue
+
+                page = context.pages[0] if context.pages else await context.new_page()
+                await apply_stealth(page)
+                page.on("dialog", lambda d: asyncio.create_task(d.accept()))
+                try:
+                    if not await self._ensure_naver_login(context, page, account_id, pw, proxy_config, _safe):
+                        for u in target_urls:
+                            results.append({"account_id": account_id, "post_url": u, "deleted": 0, "error": "로그인 실패"})
+                        continue
+                    for u_idx, target_url in enumerate(target_urls):
+                        if stop_event is not None and stop_event.is_set():
+                            break
+                        _safe(f"  🔗 ({u_idx+1}/{len(target_urls)}) {target_url}")
+                        wanted = [_norm(t) for t in (only_texts.get(f"{account_id}|{target_url}") or []) if _norm(t)]
+                        try:
+                            await page.goto(target_url, timeout=20000)
+                            await asyncio.sleep(random.randint(3, 5))
+                            frame = page.frame(name="cafe_main")
+                            if not frame:
+                                await asyncio.sleep(2)
+                                frame = page.frame(name="cafe_main")
+                            if not frame:
+                                frame = page
+                            for _ in range(3):   # 댓글 영역은 스크롤이 닿아야 붙는다
+                                try:
+                                    await frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(1.0)
+
+                            total_deleted = await _delete_own_on_page(frame, wanted)
+                            # 댓글이 여러 페이지면 나머지 페이지도 돈다
+                            page_no = 2
+                            while total_deleted < MAX_PER_POST:
+                                nxt = frame.locator(f"[class*=Paginat] button:text-is('{page_no}'), "
+                                                    f"[class*=Paginat] a:text-is('{page_no}')").first
+                                try:
+                                    if await nxt.count() == 0 or not await nxt.is_visible():
+                                        break
+                                    await nxt.click()
+                                    await asyncio.sleep(1.5)
+                                except Exception:
+                                    break
+                                total_deleted += await _delete_own_on_page(frame, wanted)
+                                page_no += 1
+
+                            if total_deleted:
+                                _safe(f"  ✅ {total_deleted}개 삭제 완료")
+                                results.append({"account_id": account_id, "post_url": target_url, "deleted": total_deleted, "error": ""})
+                            else:
+                                _safe("  ℹ️ 이 계정이 쓴 댓글을 찾지 못했습니다 (이미 삭제됐거나 댓글이 없음)")
+                                results.append({"account_id": account_id, "post_url": target_url, "deleted": 0, "error": "내 댓글 없음"})
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            _safe(f"  ⚠️ 처리 중 예외: {e}")
+                            results.append({"account_id": account_id, "post_url": target_url, "deleted": 0, "error": str(e)[:200]})
+                        if u_idx < len(target_urls) - 1:
+                            await asyncio.sleep(random.randint(3, 6))
+                finally:
+                    _release_account(account_id)
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+                if acc_idx < len(accounts_data) - 1:
+                    await asyncio.sleep(random.randint(3, 8))
+
+        total = sum(r["deleted"] for r in results)
+        _safe(f"🎉 댓글 삭제 작업 종료 (총 {total}개 삭제)")
+        return {"success": True, "results": results}
 
 from contextvars import ContextVar
 task_logger = ContextVar("task_logger", default=print)

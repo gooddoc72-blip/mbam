@@ -28,8 +28,9 @@ import {
     Globe
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
+import { IS_CAFE_EDITION, IS_BLOG_EDITION, IS_STANDALONE, PRODUCT_NAME, BRAND_COLOR, PRODUCT_TAGLINE } from "../utils/product";
 
-const MENU_ITEMS = [
+const MENU_ITEMS_FULL = [
     { name: "홈", path: "/dashboard", icon: LayoutDashboard },
     {
         name: "블로그",
@@ -99,10 +100,86 @@ const MENU_ITEMS = [
     { name: "관리자 (마스터)", path: "/admin", icon: ShieldCheck, adminOnly: true },
 ];
 
+// 카페 전용판 메뉴 — 카페 4개 화면 + 카페 포스팅이 실제로 쓰는 보조 화면만.
+// 백엔드도 MBAM_PRODUCT=cafe 로 같은 범위만 마운트하므로, 여기 없는 화면은
+// 주소를 직접 쳐도 API 가 404 를 낸다(메뉴만 숨기는 눈속임이 아니다).
+const MENU_ITEMS_CAFE = [
+    {
+        name: "네이버 카페",
+        icon: Coffee,
+        submenus: [
+            { name: "형태소 분석", path: "/cafe-analysis", icon: Search },
+            { name: "카페 포스팅", path: "/cafe-auto", icon: PenTool },
+            { name: "이미지 세탁소", path: "/cafe-image-wash", icon: Image },
+            { name: "카페 순위추적", path: "/cafe-rank?type=cafe", icon: TrendingUp }
+        ]
+    },
+    // 글감수집(/content-collect)은 정부·공공 데이터 수집 기능이라 카페판에서는 뺐다.
+    // 원고관리(/manuscript)도 뺐다 — 원고 업로드가 '카페 포스팅 > 원고 업로드'로 합쳐졌다.
+    // (원고관리 화면은 백엔드 포트가 8000 으로 박혀 있어 카페판(8010)에서는 애초에 동작하지 않았다)
+    // 사용 가이드(/guide)는 웹 관제 에이전트 사용법 문서라 단독 로컬 제품인
+    // 카페판에는 해당 사항이 없다 → 메뉴·설치 페이로드 양쪽에서 제외한다.
+    { name: "계정관리", path: "/multi-task", icon: Layers },
+    { name: "프록시 IP", path: "/proxy", icon: Globe },
+    { name: "설정", path: "/settings", icon: Settings },
+    { name: "로그", path: "/logs", icon: ScrollText },
+    { name: "관리자 (마스터)", path: "/admin", icon: ShieldCheck, adminOnly: true },
+];
+
+// 블로그 전용판 메뉴 — 블로그 메뉴 전체 + 블로그 발행이 실제로 쓰는 보조 화면만.
+// 백엔드도 MBAM_PRODUCT=blog 로 같은 범위만 마운트하므로, 여기 없는 화면은
+// 주소를 직접 쳐도 API 가 404 를 낸다(메뉴만 숨기는 눈속임이 아니다).
+const MENU_ITEMS_BLOG = [
+    {
+        name: "블로그",
+        icon: PenTool,
+        submenus: [
+            { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
+            { name: "형태소 분석", path: "/blog-analysis", icon: Search },
+            { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
+            { name: "플레이스 블로그", path: "/place-blog", icon: MapPin },
+            { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
+            { name: "이미지 세탁소", path: "/image-wash", icon: Image },
+            { name: "구글 블로그스팟", path: "/blogspot", icon: FileText },
+            { name: "티스토리", path: "/blog-schedule?platform=tistory", icon: FileText }
+        ]
+    },
+    {
+        name: "마케팅 컨텐츠",
+        icon: Folder,
+        submenus: [
+            { name: "글감수집", path: "/content-collect", icon: FileText },
+            { name: "원고관리", path: "/manuscript", icon: ScrollText }
+        ]
+    },
+    // 순위추적은 블로그탭만 남긴다(쇼핑·쿠팡·카페는 이 제품에 화면이 없다).
+    { name: "블로그 순위추적", path: "/cafe-rank?type=blog", icon: TrendingUp },
+    { name: "계정관리", path: "/multi-task", icon: Layers },
+    { name: "프록시 IP", path: "/proxy", icon: Globe },
+    { name: "설정", path: "/settings", icon: Settings },
+    { name: "로그", path: "/logs", icon: ScrollText },
+    { name: "관리자 (마스터)", path: "/admin", icon: ShieldCheck, adminOnly: true },
+];
+
+// 여기서만 process.env 를 직접 비교한다 — Next 가 이 값을 리터럴로 인라인하므로
+// 조건이 빌드 시점에 접히고, 선택되지 않은 메뉴 정의는 번들에서 통째로 빠진다.
+// (import 한 IS_CAFE_EDITION 을 쓰면 모듈 경계 때문에 양쪽 다 번들에 남는다)
+const MENU_ITEMS = process.env.NEXT_PUBLIC_PRODUCT === "cafe" ? MENU_ITEMS_CAFE
+    : process.env.NEXT_PUBLIC_PRODUCT === "blog" ? MENU_ITEMS_BLOG
+    : MENU_ITEMS_FULL;
+
+// 접힘/펼침 초기 상태도 제품에 맞춰야 한다(없는 메뉴 키가 남아 있어도 무해하지만
+// 설치형은 그룹이 1~2개뿐이라 따로 둔다).
+const DEFAULT_OPEN_MENUS = process.env.NEXT_PUBLIC_PRODUCT === "cafe"
+    ? { "네이버 카페": true, "마케팅 컨텐츠": true }
+    : process.env.NEXT_PUBLIC_PRODUCT === "blog"
+    ? { "블로그": true, "마케팅 컨텐츠": true }
+    : { "블로그": true, "네이버 카페": true, "플레이스 마케팅": true, "순위 추적": true, "키워드 분석": true, "마케팅 컨텐츠": true };
+
 export default function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
-    const [openMenus, setOpenMenus] = useState({"블로그": true, "네이버 카페": true, "플레이스 마케팅": true, "순위 추적": true, "키워드 분석": true, "마케팅 컨텐츠": true});
+    const [openMenus, setOpenMenus] = useState(DEFAULT_OPEN_MENUS);
     const [mounted, setMounted] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [userRole, setUserRole] = useState(null);
@@ -184,13 +261,24 @@ export default function Sidebar() {
         }}>
             <div style={{ padding: "2rem 1.5rem 1.5rem 1.5rem", borderBottom: "1px solid rgba(226, 232, 240, 0.6)", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
                 <div>
-                    <h1 style={{ fontSize: "2.1rem", fontWeight: "800", color: "#1e293b", margin: 0, letterSpacing: "-0.5px" }}>
-                        <span style={{ color: "#3b82f6" }}>마케팅연구소</span>
+                    {/* 사이드바 260px - 좌우 여백 48px = 212px 안에 들어가야 한다.
+                        이름이 길면 두 줄로 접히므로 nowrap 으로 막아둔다. */}
+                    <h1 style={{
+                        fontSize: IS_STANDALONE ? "1.75rem" : "2.1rem",
+                        fontWeight: "800", color: "#1e293b", margin: 0,
+                        letterSpacing: "-0.5px", whiteSpace: "nowrap",
+                    }}>
+                        <span style={{ color: BRAND_COLOR }}>
+                            {PRODUCT_NAME}
+                        </span>
                     </h1>
-                    <p style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.3rem" }}>Marketing lab's</p>
+                    <p style={{ fontSize: "0.85rem", color: "#64748b", marginTop: "0.3rem", whiteSpace: "nowrap" }}>
+                        {PRODUCT_TAGLINE}
+                    </p>
                 </div>
                 
-                {!mounted ? (
+                {/* 설치형(카페·블로그 전용판)은 회원가입·로그인이 없다. 계정/플랜/로그아웃 영역을 통째로 감춘다. */}
+                {IS_STANDALONE ? null : !mounted ? (
                     <div style={{ height: "45px" }}></div>
                 ) : isLoggedIn ? (
                     <div style={{ padding: "0.75rem", borderRadius: "8px", background: "#f8fafc", border: "1px solid #e2e8f0" }}>
@@ -337,7 +425,9 @@ export default function Sidebar() {
                                     // 진행 중인 자동화 브라우저 창을 앞으로 가져오기
                                     fetchWithAuth("/api/auto_post/focus-running", { method: "POST" }).catch(() => {});
                                     const title = task.title || "";
-                                    if (title.includes('카페') || title.includes('다중')) {
+                                    // 카페 전용판에는 /blog-posting 이, 블로그 전용판에는 /cafe-auto 가 없다.
+                                    // 없는 화면으로 보내면 404 가 뜨므로 그 제품에 있는 쪽으로 고정한다.
+                                    if (!IS_BLOG_EDITION && (IS_CAFE_EDITION || title.includes('카페') || title.includes('다중'))) {
                                         localStorage.setItem("mbam_cafe_task_id", task.task_id);
                                         router.push("/cafe-auto");
                                     } else {
@@ -369,7 +459,7 @@ export default function Sidebar() {
             
             <div style={{ padding: "1.5rem", borderTop: "1px solid rgba(226, 232, 240, 0.6)", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <div style={{ fontSize: "0.8rem", color: "#94a3b8", textAlign: "center", marginTop: "0.5rem" }}>
-                    &copy; 2026 마케팅연구소 Marketing lab's
+                    &copy; 2026 {IS_STANDALONE ? `${PRODUCT_NAME} (마케팅연구소)` : "마케팅연구소 Marketing lab's"}
                 </div>
             </div>
         </aside>

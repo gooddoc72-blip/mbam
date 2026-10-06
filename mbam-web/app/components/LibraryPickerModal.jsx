@@ -9,19 +9,24 @@ export default function LibraryPickerModal({ open, onClose, onUse }) {
   const [images, setImages] = useState([]);
   const [selected, setSelected] = useState(() => new Set());
   const [staging, setStaging] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     if (!open) return;
     (async () => {
       try {
-        const res = await fetchWithAuth("/api/settings/wash-library");
+        setLoadError("");
+        const res = await fetchWithAuth("/api/image-wash/library");
         if (res.ok) {
           const d = await res.json();
           const items = d.items || [];
           setImages(items);
           setSelected(new Set(items.map(i => i.filename)));  // 기본 전체 선택
+        } else {
+          // 조용히 삼키면 보관함에 사진이 있어도 '비어 있습니다' 로만 보여 원인을 알 수 없다.
+          setLoadError(`보관함을 불러오지 못했습니다 (HTTP ${res.status}).`);
         }
-      } catch (e) {}
+      } catch (e) { setLoadError("보관함을 불러오지 못했습니다: " + e.message); }
     })();
   }, [open]);
 
@@ -34,7 +39,7 @@ export default function LibraryPickerModal({ open, onClose, onUse }) {
     if (picked.length === 0) { alert("사용할 이미지를 1장 이상 선택하세요."); return; }
     setStaging(true);
     try {
-      const res = await fetchWithAuth("/api/settings/wash-library/stage", {
+      const res = await fetchWithAuth("/api/image-wash/library/stage", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filenames: picked }),
       });
@@ -59,7 +64,7 @@ export default function LibraryPickerModal({ open, onClose, onUse }) {
         </div>
         <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "0.8rem" }}>
           {images.length === 0 ? (
-            <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>보관함이 비어 있습니다. 이미지 세탁소에서 세탁 후 “💾 보관함에 저장”을 먼저 해주세요.</div>
+            <div style={{ padding: "2rem", textAlign: "center", color: loadError ? "#dc2626" : "#94a3b8", fontSize: "0.9rem" }}>{loadError || "보관함이 비어 있습니다. 이미지 세탁소에서 세탁 후 “💾 보관함에 저장”을 먼저 해주세요."}</div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: "0.6rem" }}>
               {images.map((img) => {

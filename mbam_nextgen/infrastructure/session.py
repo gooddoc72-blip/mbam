@@ -120,17 +120,40 @@ class SessionManager:
             print(f"[Session] '{account_id}' 세션 저장 실패: {e}")
 
     async def load_session(self, context: BrowserContext, account_id: str) -> bool:
-        """저장된 쿠키를 브라우저에 주입합니다."""
+        """저장된 쿠키를 브라우저에 주입합니다.
+
+        만료 시각이 이미 지난 쿠키는 걸러내고 넣는다. 그대로 주입하면 죽은
+        NID_AUT/NID_SES 가 프로필에 다시 살아나서, '인증 쿠키가 있으니 로그인된 것'
+        으로 오판하고 로그아웃 상태로 작업을 진행하게 된다(카페 댓글창을 못 찾는 원인).
+        """
+        import time
         path = self._get_session_path(account_id)
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    cookies = json.load(f)
-                await context.add_cookies(cookies)
-                print(f"[Session] '{account_id}' 세션을 성공적으로 로드했습니다.")
-                return True
-            except Exception as e:
-                print(f"[Session] '{account_id}' 세션 로드 실패: {e}")
-                return False
-        print(f"[Session] '{account_id}' 저장된 세션이 없습니다.")
-        return False
+        if not os.path.exists(path):
+            print(f"[Session] '{account_id}' 저장된 세션이 없습니다.")
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cookies = json.load(f)
+        except Exception as e:
+            print(f"[Session] '{account_id}' 세션 로드 실패: {e}")
+            return False
+
+        now = time.time()
+        # expires 가 -1(세션 쿠키)이면 만료 판단이 불가하므로 그대로 둔다.
+        fresh = [c for c in cookies
+                 if not (isinstance(c.get("expires"), (int, float))
+                         and 0 < c["expires"] <= now)]
+        dropped = len(cookies) - len(fresh)
+        if not fresh:
+            print(f"[Session] '{account_id}' 저장된 쿠키가 모두 만료됐습니다 — 재로그인이 필요합니다.")
+            return False
+        try:
+            await context.add_cookies(fresh)
+        except Exception as e:
+            print(f"[Session] '{account_id}' 세션 로드 실패: {e}")
+            return False
+        age_days = (now - os.path.getmtime(path)) / 86400
+        print(f"[Session] '{account_id}' 세션을 로드했습니다. "
+              f"(유효 {len(fresh)}개{f', 만료 {dropped}개 제외' if dropped else ''}, "
+              f"저장된 지 {age_days:.0f}일 경과)")
+        return True

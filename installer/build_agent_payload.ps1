@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  MBAM "웹 관제 에이전트" 전용 설치 페이로드 빌드 (Windows PowerShell)
 #  - 동봉 Python(tkinter 포함) + mbam_nextgen 코드 + agent.py + Chromium 만 모읍니다.
 #  - 프론트엔드/Node/로컬 백엔드/라이선스는 제외 (에이전트는 클라우드 로그인으로 동작).
@@ -85,6 +85,22 @@ Write-Host "  파이썬 패키지 설치(requirements.txt)..."
 & $PyExe -m pip install --upgrade pip
 & $PyExe -m pip install -r (Join-Path $Src "requirements.txt")
 & $PyExe -m pip install playwright
+
+# ── 2-b. 동봉 런타임 네이티브 의존성 보정 ───────────────────
+# 동봉 Python 은 C 런타임(vcruntime140*)만 들어 있고 C++ 런타임(msvcp140.dll)이 없다.
+# greenlet(=playwright.async_api 가 import)·numpy·pandas·pyarrow 가 이걸 요구하는데,
+# 빌드 PC 에는 System32 에 있어서 문제가 드러나지 않고 VC++ 재배포 패키지가 없는
+# 깨끗한 Windows(고객 PC)에서만 프로그램이 통째로 죽는다. 실제로 그렇게 나갔다.
+#   ImportError: DLL load failed while importing _greenlet: 지정된 모듈을 찾을 수 없습니다
+Write-Host "[2-b/4] 동봉 런타임 네이티브 의존성 점검..." -ForegroundColor Yellow
+. (Join-Path $Here "native_runtime.ps1")
+Repair-BundledNativeRuntime (Join-Path $Runtime "python")
+# 보정 결과를 실제 import 로 확인한다.
+$nativeOut = & $PyExe -c "import playwright.async_api,greenlet;print('NATIVE_OK')" 2>&1
+if ($nativeOut -notmatch "NATIVE_OK") {
+    throw "네이티브 확장모듈 로드 실패 — 이대로 배포하면 고객 PC 에서 에이전트가 뜨지 않습니다.`n$nativeOut"
+}
+Write-Host "  네이티브 확장모듈 정상" -ForegroundColor Green
 
 # ── 3. Chromium(Playwright) 동봉 ───────────────────────────
 Write-Host "[3/4] Chromium(Playwright) 설치..." -ForegroundColor Yellow

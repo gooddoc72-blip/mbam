@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, FileText } from 'lucide-react';
+import { fetchWithAuth } from '../utils/api';
 
 export default function ManuscriptLoaderModal({ isOpen, onClose, onSelect }) {
     const [manuscripts, setManuscripts] = useState([]);
@@ -15,7 +16,7 @@ export default function ManuscriptLoaderModal({ isOpen, onClose, onSelect }) {
     const fetchManuscripts = async () => {
         setLoading(true);
         try {
-            const res = await fetch('http://127.0.0.1:8000/api/manuscripts');
+            const res = await fetchWithAuth('/api/manuscripts');
             if (res.ok) {
                 const data = await res.json();
                 setManuscripts(data);

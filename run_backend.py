@@ -37,7 +37,26 @@ def run_migrations():
             pass
 
 
+def ensure_native_runtime():
+    """동봉 Python 에 C++ 런타임(msvcp140.dll)이 빠져 있으면 채워 넣는다.
+
+    보통은 런처가 먼저 처리하지만, 백엔드만 따로 띄우는 경우를 위한 안전망이다.
+    이게 없으면 main.py 의 import 사슬이 greenlet 에서 끊겨 서버가 아예 뜨지 않는다.
+    설치본이 아닌 환경(클라우드/개발)에서는 licensing 이 없거나 할 일이 없어 조용히 지나간다.
+    """
+    try:
+        from pathlib import Path
+
+        from licensing.native_fix import ensure_msvc_runtime
+        msg = ensure_msvc_runtime(Path(__file__).resolve().parent)
+        if msg:
+            print(msg)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    ensure_native_runtime()
     run_migrations()
     port = int(os.environ.get("PORT", "8000"))   # Railway 등 클라우드는 PORT 주입
     uvicorn.run("mbam_nextgen.backend.main:app", host="0.0.0.0", port=port)

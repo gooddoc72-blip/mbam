@@ -173,6 +173,21 @@ class CafeManuscript(Base):
     status = Column(String, default="saved")  # saved | posted
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class CafeCommentHistory(Base):
+    """카페 댓글 작성 이력: 어느 계정이 어느 글에 무슨 댓글을 달았는지.
+    댓글 삭제 화면에서 '원글 URL → 댓글 단 계정' 을 자동 체크하는 데 쓴다."""
+    __tablename__ = "cafe_comment_history"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    account_id = Column(String, index=True)   # 네이버 아이디
+    post_url = Column(String, index=True)
+    comment_text = Column(Text)
+    keyword = Column(String, nullable=True)
+    status = Column(String, default="posted")  # posted | deleted
+    created_at = Column(DateTime, default=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True)
+
 class ContentSchedule(Base):
     __tablename__ = "content_schedules"
 

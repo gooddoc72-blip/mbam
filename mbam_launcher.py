@@ -232,11 +232,40 @@ def run_agent_mode():
     show_agent_window(proc)
 
 
+APP_NAME = "MBAM 마케팅 프로그램"
+PRODUCT = "mbam"          # 업데이트 서버 경로: /update/mbam/latest
+
+
+def _check_update():
+    """새 버전이 있으면 물어보고 바뀐 부분만 교체한다. (구현은 licensing/update_prompt.py 공용)
+
+    설치본 전체를 다시 받게 하지 않는다 — 바뀌는 건 파이썬 소스와 프론트 빌드뿐이다.
+    실패해도 무시하고 그냥 실행한다.
+    """
+    try:
+        from licensing.update_prompt import run_update_check
+        run_update_check(APP_DIR, product=PRODUCT, app_name=APP_NAME)
+    except Exception as e:
+        print(f"[Update] 확인 생략(무시): {e}")
+
+
 def main():
     # [방법 B] MBAM_MODE=agent → 웹 관제형(에이전트만)
     if os.environ.get("MBAM_MODE", "full").strip().lower() == "agent":
         run_agent_mode()
         return
+
+    # 0) 업데이트 확인 — 서버를 띄우기 전에 해야 파일이 잠기지 않는다.
+    _check_update()
+
+    # 0-2) 동봉 런타임 보정 — 예전 설치본에는 C++ 런타임(msvcp140.dll)이 빠져 있어
+    #      백엔드가 greenlet 로드 실패('DLL load failed while importing _greenlet')로
+    #      아예 뜨지 않는다. 업데이트에 함께 실려 온 DLL 을 동봉 Python 옆에 옮겨 놓는다.
+    #      정상 설치본에서는 아무 일도 하지 않는다. 반드시 백엔드 기동 '전' 이어야 한다.
+    from licensing.native_fix import ensure_msvc_runtime
+    _fix_msg = ensure_msvc_runtime(APP_DIR)
+    if _fix_msg:
+        print(_fix_msg)
 
     # 1) 인증
     from mbam_auth_gate import run_auth_gate

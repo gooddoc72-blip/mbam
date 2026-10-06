@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { HOME_PATH } from "../../utils/product";
 
 function CallbackContent() {
   const router = useRouter();
@@ -10,7 +11,7 @@ function CallbackContent() {
     const token = searchParams.get("token");
     if (token) {
       localStorage.setItem("mbam_token", token);
-      router.push("/dashboard");
+      router.push(HOME_PATH);
     } else {
       router.push("/login");
     }

@@ -427,9 +427,37 @@ async def _handle_cafe_targeted_comment(payload: dict, log=None) -> dict:
         ai_provider=payload.get("ai_provider", "claude"),
         delay_min=int(payload.get("delay_min", 30) or 30),
         delay_max=int(payload.get("delay_max", 60) or 60),
+        account_delay_min=int(payload.get("account_delay_min", 10) or 10),
+        account_delay_max=int(payload.get("account_delay_max", 30) or 30),
         use_tethering=bool(payload.get("use_tethering", False)),
         comment_content=payload.get("comment_content", "") or "",
         do_like=bool(payload.get("do_like", True)),
+        # 프록시 배정은 서버(프록시 목록 보유)가 계정별로 정해서 내려준다.
+        proxies=payload.get("proxies") or {},
+        # 미리보기에서 사용자가 확인·수정한 댓글(있으면 AI 재생성 없이 이걸 쓴다)
+        comments_by_url=payload.get("comments_by_url") or {},
+        logger_func=_log,
+    )
+    return {"success": True, "result": result}
+
+
+async def _handle_cafe_comment_delete(payload: dict, log=None) -> dict:
+    # 카페 댓글 삭제: 체크한 계정으로 원글에 들어가 그 계정이 쓴 댓글을 지운다.
+    # 결과는 클라우드의 persister 가 댓글 작성 이력에 '삭제됨'으로 반영한다.
+    from mbam_nextgen.orchestrator import WorkflowOrchestrator
+
+    def _log(msg):
+        print(f"[cafe-del] {msg}")
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    result = await WorkflowOrchestrator().execute_cafe_comment_delete(
+        accounts_data=payload.get("accounts_data", []),
+        target_urls=payload.get("urls", []),
+        proxies=payload.get("proxies") or {},
         logger_func=_log,
     )
     return {"success": True, "result": result}
@@ -579,6 +607,7 @@ HANDLERS = {
     "blog_daily_post": _handle_blog_daily_post,
     "place_news_publish": _handle_place_news_publish,
     "cafe_targeted_comment": _handle_cafe_targeted_comment,
+    "cafe_comment_delete": _handle_cafe_comment_delete,
     "cafe_nurture_run": _handle_cafe_nurture_run,
     "tistory_register": _handle_tistory_register,
     "tistory_post": _handle_tistory_post,

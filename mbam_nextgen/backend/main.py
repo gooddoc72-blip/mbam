@@ -26,7 +26,109 @@ if sys.platform == 'win32':
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path)
 
-from mbam_nextgen.backend.routers import seo, settings, rank, content, place, auto_post, communication, multi_task, history, auth_router, schedule, shopping_router, admin_router, cafe_nurture, blogspot_router, coupang, manuscript_router, account_router, blog_schedule, agent_router, tistory_router, cafe_rank_router, proxy_router
+# ── 제품 프로파일 ──────────────────────────────────────────────────────────
+# MBAM_PRODUCT=cafe 면 '네이버 카페 전용판', =blog 면 '블로그 자동화 전용판'이 된다.
+# 그 제품에 필요 없는 라우터를 아예 마운트하지 않아, 프론트를 우회해 직접 호출해도 404 가 난다.
+# (코드베이스는 하나로 유지 — 제품마다 포크하면 유지보수가 배로 늘어난다)
+#
+# ⚠ 이 판정은 반드시 라우터 import 보다 먼저 와야 한다.
+#   예전에는 라우터를 전부 import 한 뒤 마운트만 골라서 했는데, 카페판이 쓰지도 않는
+#   모듈(content 9.3초 · rank 2.5초 · shopping 2.4초 …)을 import 하느라
+#   기동에 14초 이상을 그냥 버렸다. (실측)
+PRODUCT = (os.getenv("MBAM_PRODUCT", "mbam") or "mbam").strip().lower()
+IS_CAFE_EDITION = PRODUCT == "cafe"
+IS_BLOG_EDITION = PRODUCT == "blog"
+
+# 카페판이 쓰는 라우터 화이트리스트 — 카페 4개 화면(형태소분석/포스팅·육성/
+# 이미지세탁소/순위추적) + 로그인·설정·계정관리·원고가 의존하는 것만.
+_CAFE_ROUTERS = {
+    "auth",          # 로그인
+    "seo",           # 카페 형태소·권위 분석 (analyze-cafe-urls / analyze-cafe-post)
+    "settings",      # 설정, 이미지 세탁소 라이브러리
+    "auto_post",     # 카페 발행 + 이미지 캡션
+    "cafe_nurture",  # 카페 육성·댓글·공감
+    "cafe_rank",     # 카페/블로그 순위추적
+    "proxy",         # 프록시 IP 등록
+    "account",       # 네이버 계정 관리
+    # "manuscript" (원고 관리)는 카페판에서 뺐다 — 원고 업로드가 '카페 포스팅 > 원고 업로드'
+    # (/api/cafe-nurture/parse-manuscript) 로 합쳐졌고, 이 라우터를 쓰는 화면이 남아 있지 않다.
+    "multi_task",    # 계정관리 화면
+    "history",       # 작업 기록
+    "schedule",      # 예약
+    "agent",         # 로컬 에이전트 연동(폴더 선택 등)
+    "admin",         # 관리자
+    "sync",          # 계정 동기화(여러 PC 에서 같은 계정 쓰기)
+    "image_wash",    # 이미지 세탁소(settings 가 관리자 전용이라 따로 뺀 경로)
+}
+
+
+# 블로그 전용판이 쓰는 라우터 화이트리스트 — 블로그 메뉴(진단/형태소분석/발행/
+# 플레이스 블로그/소통·이웃/이미지세탁소/블로그스팟/티스토리) + 글감·원고·계정·순위추적.
+# 제외한 것: rank(쇼핑·플레이스 순위), place(플레이스 진단), shopping, coupang.
+#   - 플레이스 블로그(/place-blog)는 blog-posting 화면을 재사용하고 실제 호출은
+#     auto_post·cafe-nurture 로 나가므로 place 라우터가 필요 없다.
+_BLOG_ROUTERS = {
+    "auth",           # 설치형 로컬 세션
+    "seo",            # 블로그 진단 · 형태소 분석
+    "settings",       # 설정, 이미지 세탁소 라이브러리
+    "auto_post",      # 블로그 발행 + 이미지 캡션
+    "cafe_nurture",   # 계정 목록·원고 파싱·맛집(플레이스) 수집 — 블로그 화면도 이걸 쓴다
+    "cafe_rank",      # 블로그 순위추적(type=blog)
+    "communication",  # 소통 & 이웃
+    "blogspot",       # 구글 블로그스팟
+    "blog_schedule",  # 매일 자동발행 · 1회 예약
+    "tistory",        # 티스토리
+    "content",        # 글감수집 (매일 자동발행이 글감 카테고리를 고른다)
+    "manuscript",     # 원고관리
+    "proxy",          # 프록시 IP
+    "account",        # 네이버 계정 관리
+    "multi_task",     # 계정관리 화면
+    "history",        # 작업 기록
+    "schedule",       # 예약
+    "agent",          # 로컬 에이전트 연동(폴더 선택 등)
+    "admin",          # 관리자
+    "sync",           # 계정 동기화
+    "image_wash",     # 이미지 세탁소
+}
+
+# 제품 → 허용 라우터. 없는 제품(mbam 풀버전)은 전부 마운트한다.
+_PRODUCT_ROUTERS = {"cafe": _CAFE_ROUTERS, "blog": _BLOG_ROUTERS}
+_ALLOWED_ROUTERS = _PRODUCT_ROUTERS.get(PRODUCT)
+
+
+def _enabled(name: str) -> bool:
+    """이 제품에서 해당 라우터를 마운트할지."""
+    return True if _ALLOWED_ROUTERS is None else (name in _ALLOWED_ROUTERS)
+
+
+# 어느 제품에서도 쓰는 라우터
+from mbam_nextgen.backend.routers import (
+    seo, settings, auto_post, multi_task, history, auth_router, schedule,
+    admin_router, cafe_nurture, manuscript_router, account_router,
+    agent_router, cafe_rank_router, proxy_router, sync_router, image_wash_router,
+)
+# 제품마다 마운트 여부가 갈리는 라우터 — 마운트도 안 할 걸 import 할 이유가 없다.
+# (아래 include_router 들은 전부 같은 _enabled() 가드 안에서만 이 이름들을 쓴다)
+# 하나씩 따로 거는 이유: 카페판은 content·rank·shopping 을, 블로그판은 rank·place·
+# shopping·coupang 을 빼는데, 빼는 목록이 서로 달라 한 덩어리로 묶을 수 없다.
+if _enabled("rank"):
+    from mbam_nextgen.backend.routers import rank
+if _enabled("content"):
+    from mbam_nextgen.backend.routers import content
+if _enabled("place"):
+    from mbam_nextgen.backend.routers import place
+if _enabled("communication"):
+    from mbam_nextgen.backend.routers import communication
+if _enabled("shopping"):
+    from mbam_nextgen.backend.routers import shopping_router
+if _enabled("blogspot"):
+    from mbam_nextgen.backend.routers import blogspot_router
+if _enabled("coupang"):
+    from mbam_nextgen.backend.routers import coupang
+if _enabled("blog_schedule"):
+    from mbam_nextgen.backend.routers import blog_schedule
+if _enabled("tistory"):
+    from mbam_nextgen.backend.routers import tistory_router
 from mbam_nextgen.backend.database import engine, Base
 from mbam_nextgen.backend.auth import get_current_user, verify_admin
 from mbam_nextgen.backend.ai_context import setup_ai_context
@@ -133,6 +235,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+_PRODUCT_LABEL = {"cafe": " (네이버 카페 전용판)", "blog": " (블로그 자동화 전용판)"}
+print(f"[startup] 제품 프로파일: {PRODUCT}" + _PRODUCT_LABEL.get(PRODUCT, ""))
+
 # 헬스체크 — 배포/재기동 확인용 (started_at 이 바뀌면 새 컨테이너)
 from datetime import datetime as _dt
 _STARTED_AT = _dt.utcnow().isoformat() + "Z"
@@ -140,7 +245,7 @@ _STARTED_AT = _dt.utcnow().isoformat() + "Z"
 
 @app.get("/api/health", tags=["Health"])
 async def health():
-    return {"status": "ok", "started_at": _STARTED_AT}
+    return {"status": "ok", "started_at": _STARTED_AT, "product": PRODUCT}
 
 
 # CORS Middleware (SaaS 보안 강화: 특정 프론트엔드 도메인만 허용)
@@ -156,31 +261,66 @@ app.add_middleware(
 )
 
 # 라우터 연결 (인증 미적용 라우터)
-app.include_router(auth_router.router, prefix="/api/auth", tags=["Authentication"])
+if _enabled("auth"):
+    app.include_router(auth_router.router, prefix="/api/auth", tags=["Authentication"])
 
 # 라우터 연결 (인증 필수 라우터)
-app.include_router(seo.router, prefix="/api/seo", tags=["SEO Analysis"], dependencies=[Depends(setup_ai_context)])
-app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(verify_admin)])
-app.include_router(rank.router, prefix="/api/seo/rank", tags=["Ranking Tracker"], dependencies=[Depends(get_current_user)])
-app.include_router(content.router, prefix="/api/content", tags=["Content Collect"], dependencies=[Depends(setup_ai_context)])
-app.include_router(place.router, prefix="/api/place", tags=["Place SEO"], dependencies=[Depends(setup_ai_context)])
-app.include_router(auto_post.router, prefix="/api/auto_post", tags=["Blog & Cafe Auto Post"], dependencies=[Depends(setup_ai_context)])
-app.include_router(communication.router, prefix="/api/communication", tags=["Neighbor & Communication"], dependencies=[Depends(setup_ai_context)])
-app.include_router(multi_task.router, prefix="/api/multi_task", tags=["multi_task"], dependencies=[Depends(setup_ai_context)])
-app.include_router(history.router, prefix="/api/history", tags=["SaaS History"], dependencies=[Depends(get_current_user)])
-app.include_router(schedule.router, dependencies=[Depends(get_current_user)])
-app.include_router(shopping_router.router, dependencies=[Depends(get_current_user)])
-app.include_router(admin_router.router)
-app.include_router(blogspot_router.router, dependencies=[Depends(setup_ai_context)])
-app.include_router(tistory_router.router, dependencies=[Depends(setup_ai_context)])
-app.include_router(cafe_rank_router.router, dependencies=[Depends(get_current_user)])
-app.include_router(proxy_router.router, dependencies=[Depends(get_current_user)])
-app.include_router(cafe_nurture.router, dependencies=[Depends(get_current_user)])
-app.include_router(blog_schedule.router, dependencies=[Depends(get_current_user)])
-app.include_router(coupang.router, prefix="/api/coupang", tags=["Coupang"], dependencies=[Depends(get_current_user)])
-app.include_router(manuscript_router.router, dependencies=[Depends(setup_ai_context)])
-app.include_router(account_router.router, dependencies=[Depends(get_current_user)])
-app.include_router(agent_router.router, tags=["Local Agent"])
+if _enabled("seo"):
+    app.include_router(seo.router, prefix="/api/seo", tags=["SEO Analysis"], dependencies=[Depends(setup_ai_context)])
+if _enabled("settings"):
+    app.include_router(settings.router, prefix="/api/settings", tags=["Settings"], dependencies=[Depends(verify_admin)])
+if _enabled("rank"):
+    app.include_router(rank.router, prefix="/api/seo/rank", tags=["Ranking Tracker"], dependencies=[Depends(get_current_user)])
+if _enabled("content"):
+    app.include_router(content.router, prefix="/api/content", tags=["Content Collect"], dependencies=[Depends(setup_ai_context)])
+if _enabled("place"):
+    app.include_router(place.router, prefix="/api/place", tags=["Place SEO"], dependencies=[Depends(setup_ai_context)])
+if _enabled("auto_post"):
+    app.include_router(auto_post.router, prefix="/api/auto_post", tags=["Blog & Cafe Auto Post"], dependencies=[Depends(setup_ai_context)])
+if _enabled("communication"):
+    app.include_router(communication.router, prefix="/api/communication", tags=["Neighbor & Communication"], dependencies=[Depends(setup_ai_context)])
+if _enabled("multi_task"):
+    app.include_router(multi_task.router, prefix="/api/multi_task", tags=["multi_task"], dependencies=[Depends(setup_ai_context)])
+if _enabled("history"):
+    app.include_router(history.router, prefix="/api/history", tags=["SaaS History"], dependencies=[Depends(get_current_user)])
+if _enabled("schedule"):
+    app.include_router(schedule.router, dependencies=[Depends(get_current_user)])
+if _enabled("shopping"):
+    app.include_router(shopping_router.router, dependencies=[Depends(get_current_user)])
+if _enabled("admin"):
+    app.include_router(admin_router.router)
+if _enabled("blogspot"):
+    app.include_router(blogspot_router.router, dependencies=[Depends(setup_ai_context)])
+if _enabled("tistory"):
+    app.include_router(tistory_router.router, dependencies=[Depends(setup_ai_context)])
+if _enabled("cafe_rank"):
+    app.include_router(cafe_rank_router.router, dependencies=[Depends(get_current_user)])
+if _enabled("proxy"):
+    app.include_router(proxy_router.router, dependencies=[Depends(get_current_user)])
+if _enabled("cafe_nurture"):
+    # ⚠ setup_ai_context 여야 한다(get_current_user 만 걸면 안 된다).
+    #   이 라우터는 AI 댓글을 만든다(미리보기 + 댓글 작업). setup_ai_context 가
+    #   [설정 > AI API 키] 에 저장한 키를 AI 모듈로 넘겨주는데, 이게 빠져 있으면
+    #   키를 제대로 넣어도 무시되고 .env 환경변수만 찾는다.
+    #   개발 PC 는 .env 가 있어 동작했지만, 고객 PC 는 .env 가 없어
+    #   'API 키를 확인하세요' 만 반복됐다. (setup_ai_context 는 내부에서 인증도 한다)
+    app.include_router(cafe_nurture.router, dependencies=[Depends(setup_ai_context)])
+if _enabled("blog_schedule"):
+    app.include_router(blog_schedule.router, dependencies=[Depends(get_current_user)])
+if _enabled("coupang"):
+    app.include_router(coupang.router, prefix="/api/coupang", tags=["Coupang"], dependencies=[Depends(get_current_user)])
+if _enabled("manuscript"):
+    app.include_router(manuscript_router.router, dependencies=[Depends(setup_ai_context)])
+if _enabled("account"):
+    app.include_router(account_router.router, dependencies=[Depends(get_current_user)])
+if _enabled("agent"):
+    app.include_router(agent_router.router, tags=["Local Agent"])
+if _enabled("sync"):
+    app.include_router(sync_router.router, dependencies=[Depends(get_current_user)])
+if _enabled("image_wash"):
+    # settings 라우터는 관리자 전용이라 일반 고객이 이미지 세탁소를 쓸 수 없었다.
+    # 같은 처리 함수를 '로그인만 요구하는' 경로로도 열어준다.
+    app.include_router(image_wash_router.router, dependencies=[Depends(get_current_user)])
 # 수집된 사진 서빙
 from fastapi.staticfiles import StaticFiles
 images_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_clips", "images")

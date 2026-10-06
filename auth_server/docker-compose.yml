@@ -10,4 +10,8 @@ services:
       - PORT=8005
     volumes:
       - ./license.db:/app/license.db
+      # 설치본 업데이트 패키지(cafe-1.0.1.zip, cafe-latest.json)를 두는 곳.
+      # 마운트하지 않으면 서버에 파일을 올려도 컨테이너 안에서는 보이지 않아
+      # /update/cafe/latest 가 '배포된 업데이트가 없습니다' 로만 응답한다.
+      - ./updates:/app/updates
     restart: always

@@ -61,10 +61,39 @@ async def job_status(job_id: str, current_user: dict = Depends(get_current_user)
     return info
 
 
-@router.post("/pick-folder", summary="웹: 내 PC 에이전트에 폴더 선택창을 띄우도록 요청")
+def _pick_folder_dialog() -> str:
+    """이 PC 에 네이티브 폴더 선택창을 띄우고 고른 경로를 돌려준다(취소면 빈 문자열)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askdirectory(title="발행 글에 넣을 사진 폴더를 선택하세요")
+        try:
+            root.update()
+            root.destroy()
+        except Exception:
+            pass
+        return path or ""
+    except Exception:
+        return ""
+
+
+@router.post("/pick-folder", summary="웹: 폴더 선택창을 띄워 사진 폴더 경로 받기")
 async def pick_folder(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    """웹에서 '폴더 찾기'를 누르면 이 잡을 적재 → 내 PC 에이전트가 네이티브 폴더 선택창을 띄우고
-    고른 경로를 job 결과로 돌려준다. 프론트는 /jobs/{job_id} 를 폴링해 result.path 를 받는다."""
+    """브라우저는 로컬 폴더 경로를 직접 얻을 수 없으므로 서버 쪽에서 선택창을 띄운다.
+
+    설치형(로컬) — 백엔드가 고객 PC 에서 직접 도니까 여기서 바로 창을 띄우고 {path} 를 돌려준다.
+                   에이전트가 없는 카페 전용판도 이 경로로 동작한다.
+    클라우드      — 서버에는 화면이 없으므로 잡을 적재하고, 내 PC 에이전트가 창을 띄운다.
+                   프론트는 /jobs/{job_id} 를 폴링해 result.path 를 받는다.
+    """
+    if not jobsvc.is_cloud_mode():
+        import asyncio
+        path = await asyncio.to_thread(_pick_folder_dialog)
+        return {"path": path}
+
     user_id = current_user.get("sub")
     job_id = jobsvc.enqueue_job(db, user_id, "pick_folder", {}, priority=1)  # 즉시성 최우선
     return {"job_id": job_id}

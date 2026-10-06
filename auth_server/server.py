@@ -20,9 +20,9 @@ import string
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer
+from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Integer, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -80,6 +80,26 @@ class Device(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ProductDevice(Base):
+    """제품별 기기 승인 — devices 테이블과 같은 방식이되 제품 단위로 분리한다.
+
+    devices 는 hwid 가 PK 라 한 PC 가 제품 하나에만 등록될 수 있다. 크롤러가 이미
+    그 테이블을 쓰고 있으므로 건드리지 않고(운영 중), 신규 제품(카페 전용판 등)은
+    (hwid, product) 조합으로 여기에 따로 등록한다. 그래서 같은 PC 에서 크롤러가
+    승인돼 있어도 카페판은 별도 승인을 받아야 한다.
+    """
+    __tablename__ = "product_devices"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hwid = Column(String, index=True, nullable=False)
+    product = Column(String, index=True, nullable=False)   # "cafe" 등
+    name = Column(String, nullable=True)                   # 신청자 이름/소속
+    status = Column(String, default="pending")             # pending, approved, blocked
+    created_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    last_seen = Column(DateTime, nullable=True)
+    __table_args__ = (UniqueConstraint("hwid", "product", name="uq_product_device"),)
+
+
 
 class User(Base):
     __tablename__ = "users"
@@ -92,6 +112,21 @@ class User(Base):
     paid_expires_at = Column(DateTime, nullable=True)    # 유료 만료(None=무기한)
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
+
+
+class AccountBackup(Base):
+    """설치본의 네이버 계정 목록 백업 — 여러 PC 에서 같은 계정을 쓰기 위한 것.
+
+    ⚠ blob 은 '고객 PC 에서 암호화된 덩어리' 다. 서버는 열어볼 수 없고, 열 필요도 없다.
+      네이버 비밀번호가 들어 있으므로 평문으로 받으면 서버가 뚫렸을 때 고객의
+      네이버 계정이 통째로 새어 나간다. 그래서 복호화 키는 서버에 절대 오지 않는다.
+      (키는 고객이 입력한 비밀번호에서 고객 PC 가 직접 만든다)
+    """
+    __tablename__ = "account_backups"
+    email = Column(String, primary_key=True, index=True)   # users.email
+    blob = Column(String, nullable=False)                  # 암호문(salt:ciphertext)
+    item_count = Column(Integer, default=0)                # 화면 표시용 — 몇 개인지만
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 Base.metadata.create_all(bind=engine)
@@ -147,10 +182,13 @@ class VerifyRequest(BaseModel):
 
 class DeviceVerify(BaseModel):
     hwid: str
+    # 제품 구분. 비어 있으면(크롤러 등 기존 클라이언트) 기존 devices 테이블을 그대로 쓴다.
+    product: str = ""
 
 class ApprovalRequest(BaseModel):
     hwid: str
     name: str
+    product: str = ""
 
 @app.post("/activate")
 def activate(req: ActivateRequest, db: Session = Depends(get_db)):
@@ -210,13 +248,29 @@ def verify_license(req: VerifyRequest, db: Session = Depends(get_db)):
     return {"authorized": True, "message": "정상 인증",
             "expires_at": lic.expires_at.isoformat() if lic.expires_at else None}
 
+def _find_device(db: Session, hwid: str, product: str):
+    """제품이 지정되면 product_devices, 아니면 기존 devices 에서 기기를 찾는다."""
+    p = (product or "").strip().lower()
+    if p:
+        return db.query(ProductDevice).filter(
+            ProductDevice.hwid == hwid, ProductDevice.product == p).first()
+    return db.query(Device).filter(Device.hwid == hwid).first()
+
+
 @app.post("/verify")
 def verify_device(req: DeviceVerify, db: Session = Depends(get_db)):
-    """단순 HWID 기반 검증 (클라이언트 앱 전용)"""
-    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    """단순 HWID 기반 검증 (클라이언트 앱 전용).
+
+    product 를 보내면 그 제품으로 승인됐는지 본다(카페 전용판 등). 안 보내면
+    기존 devices 테이블 기준 — 크롤러/기존 클라이언트는 그대로 동작한다.
+    """
+    dev = _find_device(db, req.hwid, req.product)
     if not dev:
         return {"authorized": False, "message": "등록되지 않은 기기입니다.", "status": "unregistered"}
     if dev.status == "approved":
+        if isinstance(dev, ProductDevice):
+            dev.last_seen = datetime.utcnow()
+            db.commit()
         return {"authorized": True, "message": "인증 성공", "status": "approved"}
     elif dev.status == "pending":
         return {"authorized": False, "message": "승인 대기 중입니다.", "status": "pending"}
@@ -226,9 +280,13 @@ def verify_device(req: DeviceVerify, db: Session = Depends(get_db)):
 @app.post("/request_approval")
 def request_approval(req: ApprovalRequest, db: Session = Depends(get_db)):
     """클라이언트 앱에서 관리자에게 승인 요청"""
-    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    product = (req.product or "").strip().lower()
+    dev = _find_device(db, req.hwid, product)
     if not dev:
-        dev = Device(hwid=req.hwid, name=req.name, status="pending")
+        if product:
+            dev = ProductDevice(hwid=req.hwid, product=product, name=req.name, status="pending")
+        else:
+            dev = Device(hwid=req.hwid, name=req.name, status="pending")
         db.add(dev)
     else:
         dev.name = req.name
@@ -318,31 +376,97 @@ def admin_list(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
 class DeviceApproveRequest(BaseModel):
     hwid: str
     status: str # approved, blocked, pending
+    # 어느 제품의 기기인지. 비어 있으면 기존 devices 테이블(크롤러 등).
+    product: str = ""
 
 @app.post("/admin/device/status")
 def admin_device_status(req: DeviceApproveRequest, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
-    dev = db.query(Device).filter(Device.hwid == req.hwid).first()
+    dev = _find_device(db, req.hwid, req.product)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
     dev.status = req.status
+    if isinstance(dev, ProductDevice) and req.status == "approved":
+        dev.approved_at = datetime.utcnow()
     db.commit()
     return {"success": True, "message": f"기기 상태가 {req.status}로 변경되었습니다."}
 
 @app.get("/admin/devices")
 def admin_devices_list(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """기존 devices + 제품별 product_devices 를 한 목록으로 돌려준다.
+
+    product 가 빈 문자열이면 기존(크롤러 등) 기기. 승인도구는 이 값을 그대로
+    /admin/device/status 에 실어 보내면 올바른 쪽이 수정된다.
+    """
     out = []
     for d in db.query(Device).order_by(Device.created_at.desc()).all():
         out.append({
             "hwid": d.hwid,
+            "product": "",
             "name": d.name,
             "status": d.status,
             "created_at": d.created_at.isoformat() if d.created_at else None
+        })
+    for d in db.query(ProductDevice).order_by(ProductDevice.created_at.desc()).all():
+        out.append({
+            "hwid": d.hwid,
+            "product": d.product,
+            "name": d.name,
+            "status": d.status,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+            "last_seen": d.last_seen.isoformat() if d.last_seen else None,
         })
     return out
 
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 설치본 자동 업데이트 — 바뀐 부분(약 15MB)만 배포한다
+#
+#   설치본 전체는 2.4GB 지만 실제로 바뀌는 건 파이썬 소스와 프론트 빌드뿐이다.
+#   런처가 실행할 때 /update/{product}/latest 를 물어보고, 새 버전이면
+#   /update/{product}/download/{파일} 을 받아 그 부분만 교체한다.
+#
+#   운영: updates/ 폴더에 아래 두 가지를 올려두면 끝이다.
+#     - cafe-latest.json   (installer\업데이트_패키지_만들기.ps1 이 만들어 줌)
+#     - cafe-1.0.1.zip     (같은 스크립트가 만든 패키지)
+# ══════════════════════════════════════════════════════════════════════════
+UPDATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "updates")
+
+
+@app.get("/update/{product}/latest")
+def update_latest(product: str):
+    """최신 버전 정보. 아직 올린 게 없으면 404 대신 '업데이트 없음'으로 응답한다.
+    (런처가 오류로 받아들여 로그를 더럽히지 않도록)"""
+    safe = os.path.basename(product)
+    path = os.path.join(UPDATE_DIR, f"{safe}-latest.json")
+    if not os.path.exists(path):
+        return {"product": safe, "version": None, "message": "배포된 업데이트가 없습니다."}
+    try:
+        # utf-8-sig — 이 파일은 윈도우 PowerShell 빌드 스크립트가 만들어 BOM 이 붙는다.
+        # utf-8 로 읽으면 JSONDecodeError 가 나 500 이 되고, 고객은 업데이트를 못 받는다.
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"업데이트 정보를 읽을 수 없습니다: {e}")
+
+
+@app.get("/update/{product}/download/{filename}")
+def update_download(product: str, filename: str):
+    """업데이트 패키지 내려주기.
+
+    ⚠ filename 은 사용자가 보낸 값이므로 반드시 파일명만 남긴다.
+      그대로 이어붙이면 ../../etc/passwd 같은 경로로 서버 파일을 가져갈 수 있다.
+    """
+    safe_name = os.path.basename(filename)
+    if not safe_name.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="잘못된 요청입니다.")
+    path = os.path.join(UPDATE_DIR, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="업데이트 파일이 없습니다.")
+    return FileResponse(path, media_type="application/zip", filename=safe_name)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -482,6 +606,48 @@ def login(req: LoginUser, db: Session = Depends(get_db)):
 def me(user: User = Depends(current_user)):
     """프로그램/웹이 실행 시 호출 — 현재 사용 가능 여부와 남은 기간."""
     return {"email": user.email, "status": account_status(user)}
+
+
+# ── 계정 동기화 (여러 PC 에서 같은 네이버 계정 목록 쓰기) ──────────────────
+class SyncUpload(BaseModel):
+    blob: str            # 고객 PC 에서 암호화한 덩어리. 서버는 내용을 모른다.
+    item_count: int = 0
+
+
+@app.post("/sync/upload")
+def sync_upload(req: SyncUpload, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """암호화된 계정 목록을 보관한다. 계정당 최신 1벌만 유지한다."""
+    if not req.blob or len(req.blob) > 2_000_000:
+        raise HTTPException(status_code=400, detail="잘못된 요청입니다.")
+    rec = db.query(AccountBackup).filter(AccountBackup.email == user.email).first()
+    if not rec:
+        rec = AccountBackup(email=user.email)
+        db.add(rec)
+    rec.blob = req.blob
+    rec.item_count = max(0, int(req.item_count or 0))
+    rec.updated_at = datetime.utcnow()
+    db.commit()
+    return {"success": True, "item_count": rec.item_count,
+            "updated_at": rec.updated_at.isoformat()}
+
+
+@app.get("/sync/download")
+def sync_download(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rec = db.query(AccountBackup).filter(AccountBackup.email == user.email).first()
+    if not rec:
+        return {"exists": False, "message": "서버에 저장된 계정이 없습니다."}
+    return {"exists": True, "blob": rec.blob, "item_count": rec.item_count,
+            "updated_at": rec.updated_at.isoformat() if rec.updated_at else None}
+
+
+@app.get("/sync/status")
+def sync_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """화면에 '마지막 동기화 시각 / 계정 수'만 보여주기 위한 것(암호문은 안 준다)."""
+    rec = db.query(AccountBackup).filter(AccountBackup.email == user.email).first()
+    if not rec:
+        return {"exists": False}
+    return {"exists": True, "item_count": rec.item_count,
+            "updated_at": rec.updated_at.isoformat() if rec.updated_at else None}
 
 
 # ── 계정 관리자 엔드포인트 ────────────────────────────────────────────────

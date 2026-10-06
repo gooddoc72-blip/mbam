@@ -340,12 +340,18 @@ class BlogService:
         # (진단용 _dump_toolbar 제거 — 폰트크기 드롭다운 열고 Escape 누르는 동작이 SE3에서
         #  '작성 취소/나가기'를 유발해 창이 닫히던 원인. 셀렉터(fs16/fs19)는 이미 확보됨)
 
-        chunks = re.split(r'\[이미지\]', content)
+        # 마커 인식은 카페(cafe_service)와 동일한 '관대한' 규칙을 쓴다.
+        # 예전에는 정확히 '[이미지]' 만 잘라 AI/사진매핑 원고의 [이미지:1] 형태를 전혀 인식하지 못했다.
+        # → 본문 중간 삽입이 0장이 되어 사진이 전부 글 맨 아래로 몰리고,
+        #   '[이미지:1]' 글자가 본문에 그대로 찍혔다. 카페는 되는데 블로그만 안 되던 원인.
+        chunks = re.split(r'\[이미지\s*:?\s*\d*\]', content)
         images = images or []
         img_idx = 0
         pending_text = ""
         
         for i, chunk in enumerate(chunks):
+            # 형식을 벗어나 캡처되지 않은 표기([이미지 두번째] 등)는 본문에 새지 않게 제거(카페와 동일)
+            chunk = re.sub(r'\[이미지[^\]]*\]', '', chunk or '')
             if chunk.strip():
                 pending_text += chunk.strip() + "\n\n"
             

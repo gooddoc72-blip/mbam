@@ -55,6 +55,58 @@ def check_hwid_limit(db: Session, user_id: str, hwid: str):
             except IntegrityError:
                 db.rollback()
 
+# 설치형(단독 PC 설치 · 기기 승인으로 관리) 제품 코드. 여기 없는 값이면 /local-session 은 404.
+_STANDALONE_PRODUCTS = {"cafe", "blog"}
+
+
+@router.post("/local-session", summary="설치형 전용: 회원가입·로그인 없이 바로 쓰는 세션 발급")
+async def local_session(db: Session = Depends(get_db)):
+    """카페·블로그 전용판처럼 '한 대의 PC 에 설치해서 혼자 쓰는' 제품용.
+
+    이 제품은 이미 실행 전에 '기기 승인'(관리자가 이 PC 를 허가)을 통과해야 열린다.
+    그 위에 회원가입·로그인을 또 요구할 이유가 없어서, 프로그램이 뜨면 프론트가
+    이 엔드포인트를 한 번 호출해 토큰을 받아온다. 사용자는 로그인 화면을 아예 못 본다.
+
+    - 이 PC 전용 계정 하나를 만들어 계속 쓴다(데이터가 그 계정에 쌓인다).
+    - 비밀번호를 만들지도, 검사하지도 않는다.
+      (설치본에 동봉된 bcrypt 조합에서 passlib 이 죽는 문제도 자연히 피한다)
+    - MBAM_PRODUCT 가 cafe/blog 처럼 '설치형'일 때만 열린다. 클라우드에서는 404 로 막는다.
+    """
+    _product = (os.environ.get("MBAM_PRODUCT", "") or "").strip().lower()
+    if _product not in _STANDALONE_PRODUCTS:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # 제품마다 계정을 분리한다(카페판은 예전부터 local@cafe.local 을 써 왔으므로 그대로 유지).
+    # 설치 폴더·DB 가 제품별로 따로라 실제로 섞일 일은 없지만, 한 DB 를 공유하게 되더라도
+    # 서로의 작업 기록을 넘겨받지 않도록 이름을 나눠 둔다.
+    email = f"local@{_product}.local"
+    user = db.query(Advertiser).filter(Advertiser.email == email).first()
+    if not user:
+        user = Advertiser(
+            id=str(uuid.uuid4()),
+            email=email,
+            password=None,                 # 비밀번호 없음 — 로그인 경로 자체를 쓰지 않는다
+            social_provider="local-install",
+            business_name="내 PC",
+            status="active",
+            plan_type="paid",              # 설치형은 기기 승인으로 관리하므로 체험 제한을 두지 않는다
+            trial_ends_at=None,
+            usage_count=0,
+            max_usage=1000000,
+        )
+        db.add(user)
+        db.commit()
+
+    access_token = create_access_token(
+        data={"sub": user.email, "role": "advertiser", "provider": "local-install"},
+        expires_delta=timedelta(days=3650),   # 설치형이라 만료로 막을 이유가 없다
+    )
+    resp = JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
+    resp.set_cookie(key="mbam_token", value=access_token, httponly=True,
+                    samesite="lax", max_age=3650 * 24 * 3600)
+    return resp
+
+
 @router.post("/login", summary="통합 로그인 (SSO)")
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     admin_id = os.environ.get("SUPER_ADMIN_ID")

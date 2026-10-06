@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { HOME_PATH } from "../utils/product";
 
 function LoginContent() {
   const router = useRouter();
@@ -16,7 +17,7 @@ function LoginContent() {
     const token = searchParams.get("token");
     if (token) {
       localStorage.setItem("mbam_token", token);
-      router.push("/dashboard");
+      router.push(HOME_PATH);
     }
   }, [searchParams, router]);
 
@@ -47,7 +48,7 @@ function LoginContent() {
       if (res.ok) {
         const data = await res.json();
         localStorage.setItem("mbam_token", data.access_token);
-        router.push("/dashboard");
+        router.push(HOME_PATH);
       } else {
         const errorData = await res.json();
         setError(errorData.detail || "로그인에 실패했습니다.");

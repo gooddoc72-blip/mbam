@@ -145,11 +145,18 @@ class SeoAnalyzer:
             print(f"[SEO] {idx+1}위 추출 실패: {e}")
         return None
 
-    async def extract_keywords_with_ai(self, texts: list, main_keyword: str = "", related_hints: list = None) -> list:
+    async def extract_keywords_with_ai(self, texts: list, main_keyword: str = "",
+                                       related_hints: list = None, timeout: float = 12.0) -> list:
         """검색어(메인 키워드) 컨텍스트를 입힌 의미 연관 서브 키워드 추출.
 
         반환 형식: [{"keyword": str, "relevance": int(0~100)}, ...]
         count 는 호출부(analyze_keyword)에서 본문 등장 횟수로 별도 계산한다.
+
+        timeout: AI 응답 대기 한계(초). 검색 결과 10개를 한꺼번에 훑는 analyze_keyword 는
+                 전체 소요를 잡아야 해서 12초로 짧게 둔다. 반대로 글 하나만 보는
+                 형태소 분석은 넉넉히 줘야 한다 — 12초로는 매번 시간초과가 나서
+                 폴백으로 떨어졌다(로그의 'AI 키워드 추출 실패: .' 이 그것이다.
+                 asyncio.TimeoutError 는 메시지가 비어 있어 점 하나만 찍혔다).
         """
         print("[SEO] AI 기반 의미 연관 서브 키워드 추출 중...")
 
@@ -190,7 +197,7 @@ class SeoAnalyzer:
 
         try:
             import asyncio
-            response_text = await asyncio.wait_for(self.soul.generate_content(prompt), timeout=12.0)
+            response_text = await asyncio.wait_for(self.soul.generate_content(prompt), timeout=timeout)
             json_str = re.sub(r'```json\s*|```', '', response_text).strip()
             data = json.loads(json_str)
             raw = data.get("sub_keywords") or data.get("top_keywords") or []  # 구버전 호환
@@ -1256,12 +1263,25 @@ class SeoAnalyzer:
                                         pass
                                     
                             if not article_id:
-                                cafe_match = re.search(r'/cafes/(\d+)/articles/(\d+)', url)
+                                # 카페 목록에서 복사한 주소는 파라미터가 URL 인코딩돼 들어온다.
+                                #   .../localmisik?iframe_url_utf8=%2FArticleRead.nhn%253Fclubid%3D31754920%2526articleid%3D18
+                                # 이 형태는 'clubid=' 가 'clubid%3D' 라서 원문에서만 찾으면 못 잡는다.
+                                # (게다가 두 번 인코딩돼 있어 한 번만 풀어도 부족하다)
+                                _decoded = url
+                                for _ in range(3):
+                                    _next = urllib.parse.unquote(_decoded)
+                                    if _next == _decoded:
+                                        break
+                                    _decoded = _next
+                                haystack = (url + " " + _decoded).lower()
+
+                                cafe_match = re.search(r'/cafes/(\d+)/articles/(\d+)', _decoded) or \
+                                             re.search(r'/cafes/(\d+)/articles/(\d+)', url)
                                 if cafe_match:
                                     club_id, article_id = cafe_match.group(1), cafe_match.group(2)
                                 else:
-                                    aid_match = re.search(r'articleid=(\d+)', url.lower()) or re.search(r'/(\d+)(?:\?|$)', url)
-                                    cid_match = re.search(r'clubid=(\d+)', url.lower())
+                                    aid_match = re.search(r'articleid=(\d+)', haystack) or re.search(r'/(\d+)(?:\?|$)', url)
+                                    cid_match = re.search(r'clubid=(\d+)', haystack)
                                     if aid_match: article_id = aid_match.group(1)
                                     if cid_match: club_id = cid_match.group(1)
                             

@@ -46,7 +46,7 @@ function CafeRankInner() {
     try {
       const res = await fetchWithAuth(`/api/cafe-rank/items/${id}/check`, { method: "POST" });
       const d = await res.json().catch(() => ({}));
-      alert(res.ok ? (d.message || "순위 수집을 시작했습니다. 에이전트 실행 후 '새로고침'으로 확인하세요.") : ("실패: " + (d.detail || res.status)));
+      alert(res.ok ? (d.message || "순위 수집을 시작했습니다. 30초쯤 뒤 '새로고침'을 눌러주세요.") : ("실패: " + (d.detail || res.status)));
     } catch (e) { alert("오류: " + e.message); }
   };
 
@@ -78,8 +78,9 @@ function CafeRankInner() {
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
       <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 {typeLabel} 글 순위</h1>
       <p style={{ color: "#64748b", margin: "0 0 1.2rem", fontSize: "0.9rem" }}>
-        {typeLabel} 글 URL과 키워드를 등록하면, 로컬 에이전트(집 PC)가 매일(새벽) 네이버 검색을 확인해
-        <b> 통합검색 순위</b>와 <b>{tabLabel} 순위</b>를 기록합니다. '지금 수집'으로 즉시 확인도 가능합니다(에이전트 실행 필요).
+        {typeLabel} 글 URL과 키워드를 등록하면 매일(새벽) 네이버 검색을 확인해
+        <b> 통합검색 순위</b>와 <b>{tabLabel} 순위</b>를 기록합니다. '지금 수집'을 누르면 30초쯤 뒤에 바로 확인할 수 있습니다.
+        카페 글 주소는 주소창에서 복사한 그대로 넣으면 됩니다.
       </p>
 
       {/* 등록 폼 */}

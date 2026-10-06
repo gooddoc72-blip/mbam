@@ -84,7 +84,7 @@ async def generate_article(keyword: str, provider: str) -> str:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": claude_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-haiku-20240307", "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]}
+                json={"model": os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"), "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]}
             )
             data = resp.json()
             try: html_content = data['content'][0]['text']

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, UploadCloud, FileText, CheckCircle, Search, Edit3, ScrollText } from 'lucide-react';
 import { addHistory } from '../utils/workHistory';
+import { fetchWithAuth } from '../utils/api';
 import WorkHistory from '../components/WorkHistory';
 
 export default function ManuscriptPage() {
@@ -18,7 +19,7 @@ export default function ManuscriptPage() {
     const fetchManuscripts = async () => {
         setLoading(true);
         try {
-            const res = await fetch('http://127.0.0.1:8000/api/manuscripts');
+            const res = await fetchWithAuth('/api/manuscripts');
             if (res.ok) {
                 const data = await res.json();
                 setManuscripts(data);
@@ -35,7 +36,7 @@ export default function ManuscriptPage() {
             return;
         }
         try {
-            const res = await fetch('http://127.0.0.1:8000/api/manuscripts', {
+            const res = await fetchWithAuth('/api/manuscripts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form)
@@ -54,7 +55,7 @@ export default function ManuscriptPage() {
     const handleDelete = async (id) => {
         if (!confirm("정말 이 원고를 삭제하시겠습니까?")) return;
         try {
-            const res = await fetch(`http://127.0.0.1:8000/api/manuscripts/${id}`, { method: 'DELETE' });
+            const res = await fetchWithAuth(`/api/manuscripts/${id}`, { method: 'DELETE' });
             if (res.ok) fetchManuscripts();
         } catch (e) {
             console.error(e);
@@ -70,7 +71,7 @@ export default function ManuscriptPage() {
         
         setUploading(true);
         try {
-            const res = await fetch('http://127.0.0.1:8000/api/manuscripts/upload', {
+            const res = await fetchWithAuth('/api/manuscripts/upload', {
                 method: 'POST',
                 body: formData
             });

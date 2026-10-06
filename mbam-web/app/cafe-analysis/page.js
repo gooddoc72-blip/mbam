@@ -255,7 +255,17 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                     </div>
                     <div style={{ background: `${getScoreColor(data.score)}15`, color: getScoreColor(data.score), padding: "0.15rem 0.6rem", borderRadius: "20px", fontWeight: "bold", fontSize: "1rem", whiteSpace: "nowrap" }}>{data.score}점</div>
                 </div>
-                <div style={{ color: "#475569", lineHeight: "1.55", fontSize: "0.9rem", backgroundColor: "#f8fafc", padding: "0.8rem", borderRadius: "8px", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap", maxHeight: "160px", overflowY: "auto" }}>{data.analysis}</div>
+                {/* 항목별 요약 — 문단으로 풀어쓰지 않고 한 줄씩 끊어서 보여준다.
+                    예전에 저장한 결과는 analysis(문단) 만 있으므로 그때는 그대로 출력한다. */}
+                <div style={{ color: "#475569", lineHeight: "1.6", fontSize: "0.9rem", backgroundColor: "#f8fafc", padding: "0.8rem", borderRadius: "8px", border: "1px solid #e2e8f0", maxHeight: "180px", overflowY: "auto" }}>
+                    {Array.isArray(data.points) && data.points.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                            {data.points.map((p, i) => <li key={i} style={{ marginBottom: "0.3rem" }}>{p}</li>)}
+                        </ul>
+                    ) : (
+                        <span style={{ whiteSpace: "pre-wrap" }}>{data.analysis}</span>
+                    )}
+                </div>
             </div>
         );
     };
@@ -271,7 +281,11 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
             lines.push(`\n#${i + 1} [${type}] ${item.title || ''}`);
             ['rcon', 'scqa', 'dia', 'chain', 'author_power'].forEach((k) => {
                 const v = d[k];
-                if (v) lines.push(` - ${v.title}(${v.score}점): ${String(v.analysis || '').replace(/\s+/g, ' ').slice(0, 110)}`);
+                if (!v) return;
+                const body = Array.isArray(v.points) && v.points.length
+                    ? v.points.join(' / ')
+                    : String(v.analysis || '').replace(/\s+/g, ' ');
+                lines.push(` - ${v.title}(${v.score}점): ${body.slice(0, 110)}`);
             });
         });
         let summary = lines.join("\n");
@@ -576,6 +590,29 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                                             <a href={item.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#2563eb', wordBreak: 'break-all' }}>{item.url}</a>
                                             {item.used_keyword && <span style={{ marginLeft: '0.5rem', fontSize: '0.78rem', color: '#94a3b8' }}>키워드: {item.used_keyword} · {item.content_chars}자</span>}
                                         </div>
+                                        {/* 형태소 목록 — 본문에서 실제로 센 값이라 AI 를 거치지 않는다 */}
+                                        {Array.isArray(item.morphemes) && item.morphemes.length > 0 && (
+                                            <div className="glass-card" style={{ padding: '1.2rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.7rem' }}>
+                                                    <FileText color="#0ea5e9" size={18} />
+                                                    <h3 style={{ margin: 0, fontSize: '0.98rem', color: '#1e293b' }}>형태소 (키워드 연관어 · 본문 빈도)</h3>
+                                                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                                                        {item.used_keyword ? `'${item.used_keyword}' 기준 ` : ''}상위 {item.morphemes.length}개
+                                                    </span>
+                                                </div>
+                                                <ul style={{ margin: 0, paddingLeft: '1.1rem', columns: '3 180px', columnGap: '1.2rem', fontSize: '0.88rem', color: '#334155', lineHeight: 1.9 }}>
+                                                    {item.morphemes.map((m, mi) => (
+                                                        <li key={mi} style={{ breakInside: 'avoid' }}>
+                                                            {m.word}
+                                                            <span style={{ color: '#0ea5e9', fontWeight: 'bold' }}> {m.count}회</span>
+                                                            {m.relevance != null && (
+                                                                <span style={{ color: '#16a34a', fontSize: '0.78rem' }}> 연관 {m.relevance}</span>
+                                                            )}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
                                         {renderCard('author_power', d.author_power, <ShieldAlert color="#f59e0b" />)}
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', alignItems: 'start' }}>
                                             {renderCard('rcon', d.rcon, <Search color="#3b82f6" />)}

@@ -12,7 +12,7 @@ export default function ProxyPage() {
 
   const load = async () => {
     try {
-      const res = await fetchWithAuth("/api/proxy/");
+      const res = await fetchWithAuth("/api/proxy");
       const d = res.ok ? await res.json() : {};
       setItems(d.items || []);
       if (d.settings) setSettings(d.settings);
@@ -31,7 +31,7 @@ export default function ProxyPage() {
     if (!lines.trim()) { alert("프록시를 한 줄에 하나씩 입력하세요."); return; }
     setLoading(true);
     try {
-      const res = await fetchWithAuth("/api/proxy/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, label }) });
+      const res = await fetchWithAuth("/api/proxy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, label }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         setLines(""); setLabel("");
@@ -43,6 +43,38 @@ export default function ProxyPage() {
     } catch (e) { alert("오류: " + e.message); } finally { setLoading(false); }
   };
 
+  const removeAll = async () => {
+    if (items.length === 0) { alert("등록된 프록시가 없습니다."); return; }
+    if (!confirm(`등록된 프록시 ${items.length}개를 모두 삭제합니다.\n되돌릴 수 없습니다. 계속할까요?`)) return;
+    try {
+      const res = await fetchWithAuth("/api/proxy/all", { method: "DELETE" });
+      const d = await res.json().catch(() => ({}));
+      alert(res.ok ? (d.message || "삭제되었습니다.") : "삭제 실패: " + (d.detail || res.status));
+      load();
+    } catch (e) { alert("오류: " + e.message); }
+  };
+
+  // USB 테더링 — 폰 연결 여부와 실제 IP 교체를 화면에서 확인할 수 있게 한다.
+  const [tether, setTether] = useState(null);
+  const [tetherBusy, setTetherBusy] = useState("");
+  const checkTethering = async () => {
+    setTetherBusy("check"); setTether(null);
+    try {
+      const res = await fetchWithAuth("/api/proxy/tethering/status");
+      setTether(await res.json());
+    } catch (e) { setTether({ connected: false, message: "확인 실패: " + e.message }); }
+    setTetherBusy("");
+  };
+  const rotateTethering = async () => {
+    setTetherBusy("rotate");
+    try {
+      const res = await fetchWithAuth("/api/proxy/tethering/rotate", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      alert(res.ok ? d.message : "실패: " + (d.detail || res.status));
+    } catch (e) { alert("오류: " + e.message); }
+    setTetherBusy("");
+  };
+
   const toggle = async (id) => { try { await fetchWithAuth(`/api/proxy/${id}/toggle`, { method: "POST" }); load(); } catch (e) {} };
   const remove = async (id) => { if (!confirm("이 프록시를 삭제할까요?")) return; try { await fetchWithAuth(`/api/proxy/${id}`, { method: "DELETE" }); load(); } catch (e) {} };
   const test = async (id) => {
@@ -50,7 +82,20 @@ export default function ProxyPage() {
     try {
       const res = await fetchWithAuth(`/api/proxy/${id}/test`, { method: "POST" });
       const d = await res.json().catch(() => ({}));
-      setTesting(t => ({ ...t, [id]: d.success ? `✅ ${d.ip}` : `❌ ${d.error || "실패"}` }));
+      // 국가까지 보여준다 — 해외 IP 면 네이버가 이상 접속으로 보기 쉬우므로 눈에 띄게 표시.
+      // 한국 IP 라도 '데이터센터'면 네이버가 사람 아닌 접속으로 본다 — 종류까지 표시한다.
+      let label;
+      if (!d.success) label = `❌ ${d.error || "실패"}`;
+      else {
+        const risky = (d.country_code && d.country_code !== "KR") || d.hosting || d.proxy_flag;
+        const kind = d.hosting ? "데이터센터" : d.mobile ? "모바일" : d.country_code === "KR" ? "가정용" : "";
+        label = `${risky ? "⚠️" : "✅"} ${d.ip}` +
+                (d.country ? ` · ${d.country}` : "") +
+                (kind ? ` · ${kind}` : "") +
+                (d.isp ? ` · ${d.isp}` : "");
+      }
+      setTesting(t => ({ ...t, [id]: label }));
+      if (d.warning) alert(d.warning);
     } catch (e) { setTesting(t => ({ ...t, [id]: "❌ " + e.message })); }
   };
 
@@ -95,6 +140,41 @@ export default function ProxyPage() {
         )}
       </div>
 
+      {/* USB 테더링 — 연결 상태와 실제 IP 교체를 여기서 확인한다 */}
+      <div style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.2rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+          <div style={{ fontWeight: "bold", color: "#0f172a" }}>📶 USB 테더링 (안드로이드 폰으로 IP 바꾸기)</div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button onClick={checkTethering} disabled={!!tetherBusy}
+              style={{ padding: "0.45rem 0.9rem", background: tetherBusy === "check" ? "#94a3b8" : "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: tetherBusy ? "wait" : "pointer", fontSize: "0.85rem", fontWeight: "bold" }}>
+              {tetherBusy === "check" ? "확인 중..." : "폰 연결 확인"}
+            </button>
+            <button onClick={rotateTethering} disabled={!!tetherBusy || !(tether && tether.connected)}
+              style={{ padding: "0.45rem 0.9rem", background: "white", color: (tether && tether.connected) ? "#0f172a" : "#cbd5e1", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: (tether && tether.connected && !tetherBusy) ? "pointer" : "not-allowed", fontSize: "0.85rem" }}>
+              {tetherBusy === "rotate" ? "교체 중..." : "IP 교체 시험"}
+            </button>
+          </div>
+        </div>
+        <p style={{ margin: "0 0 0.6rem", fontSize: "0.85rem", color: "#64748b", lineHeight: 1.7 }}>
+          안드로이드 폰을 USB 로 연결하고 <b>비행기모드를 껐다 켜서</b> 통신사 IP 를 새로 받는 방식입니다.
+          프록시 없이도 계정마다 다른 IP 를 쓸 수 있고, <b>통신사 실회선이라 데이터센터 IP 보다 안전합니다.</b>
+        </p>
+        {tether && (
+          <div style={{
+            padding: "0.8rem 1rem", borderRadius: "8px", fontSize: "0.88rem", lineHeight: 1.7,
+            background: tether.connected ? "#f0fdf4" : "#fef2f2",
+            color: tether.connected ? "#166534" : "#991b1b",
+            border: `1px solid ${tether.connected ? "#bbf7d0" : "#fecaca"}`,
+          }}>
+            {tether.connected ? "✅ " : "⚠️ "}{tether.message}
+          </div>
+        )}
+        <div style={{ marginTop: "0.6rem", fontSize: "0.8rem", color: "#94a3b8", lineHeight: 1.7 }}>
+          준비물 — ① 안드로이드 폰 ② USB 케이블 ③ 폰의 [개발자 옵션 &gt; USB 디버깅] 켜기 ④ PC 에 adb 설치<br />
+          사용하려면 위 <b>IP 우회 방식</b>에서 [USB 테더링]을 고르거나, 카페 작업 화면의 테더링 항목을 켜세요.
+        </div>
+      </div>
+
       {/* 등록 폼 */}
       <div style={{ background: "white", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "1.2rem", marginBottom: "1.4rem" }}>
         <div style={{ fontWeight: "bold", color: "#0f172a", marginBottom: "0.6rem" }}>프록시 등록 (한 줄에 하나씩)</div>
@@ -110,7 +190,13 @@ export default function ProxyPage() {
       {/* 목록 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.6rem" }}>
         <h2 style={{ fontSize: "1.1rem", color: "#0f172a", margin: 0 }}>등록된 프록시 ({items.length})</h2>
-        <button onClick={load} style={{ padding: "0.45rem 0.9rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem" }}>🔄 새로고침</button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button onClick={load} style={{ padding: "0.45rem 0.9rem", background: "white", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontSize: "0.85rem" }}>🔄 새로고침</button>
+          <button onClick={removeAll} disabled={items.length === 0}
+            style={{ padding: "0.45rem 0.9rem", background: "white", color: items.length ? "#ef4444" : "#cbd5e1", border: `1px solid ${items.length ? "#fecaca" : "#e2e8f0"}`, borderRadius: "6px", cursor: items.length ? "pointer" : "not-allowed", fontSize: "0.85rem" }}>
+            🗑 전체 삭제
+          </button>
+        </div>
       </div>
       <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: "10px", overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "640px" }}>

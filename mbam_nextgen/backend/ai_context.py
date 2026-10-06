@@ -13,7 +13,13 @@ from .auth import get_current_user
 from mbam_nextgen.services.ai_keys import set_ai_keys
 
 
-def setup_ai_context(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+async def setup_ai_context(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    # ⚠ 반드시 async 여야 한다.
+    #   동기 함수(def)로 두면 FastAPI 가 이 의존성을 '별도 스레드'에서 실행하는데,
+    #   ContextVar 는 스레드마다 복사본이라 여기서 set 해도 엔드포인트에는 전달되지 않는다.
+    #   그러면 고객이 [설정 > AI API 키] 에 키를 넣어도 무시되고 .env 만 찾게 되어,
+    #   .env 가 없는 고객 PC 에서는 'API 키를 확인하세요' 만 반복된다.
+    #   (개발 PC 는 .env 가 있어 문제가 드러나지 않았다)
     from .models import UserAIKey
     uid = current_user.get("sub")
     keys = {}

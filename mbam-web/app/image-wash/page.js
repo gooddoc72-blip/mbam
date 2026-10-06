@@ -23,6 +23,18 @@ export default function ImageWashPage() {
   const [useNoise, setUseNoise] = useState(true);
   const [useWatermark, setUseWatermark] = useState(false);
   const [useRotation, setUseRotation] = useState(false);
+  // 원본 해상도 그대로 세탁하면 매우 느리다(휴대폰 사진 10장 = 약 23초).
+  // 기본은 긴 변 1600px 로 줄여 처리(10장 2초 내외). 원본이 꼭 필요할 때만 켠다.
+  const [keepOriginalSize, setKeepOriginalSize] = useState(false);
+
+  // 세탁 방식 — 어떤 처리를 걸지 직접 고른다.
+  // 기본값은 예전 동작과 같다(크롭·노이즈·밝기·EXIF 켜짐). 건드리지 않으면 결과가 그대로다.
+  const [useCrop, setUseCrop] = useState(true);
+  const [useBrightContrast, setUseBrightContrast] = useState(true);
+  const [useExif, setUseExif] = useState(true);
+  const [useFlip, setUseFlip] = useState(false);
+  const [useHue, setUseHue] = useState(false);
+  const [useResample, setUseResample] = useState(false);
 
   // 이미지 보관함 (세탁 후 저장 → 발행 재사용)
   const [library, setLibrary] = useState([]);
@@ -31,7 +43,7 @@ export default function ImageWashPage() {
 
   const loadLibrary = async () => {
     try {
-      const res = await fetchWithAuth("/api/settings/wash-library");
+      const res = await fetchWithAuth("/api/image-wash/library");
       if (res.ok) { const d = await res.json(); setLibrary(d.items || []); setLibMeta({ max_files: d.max_files || 30, ttl_days: d.ttl_days || 14 }); }
     } catch (e) {}
   };
@@ -41,7 +53,7 @@ export default function ImageWashPage() {
     if (!results.length) { alert("먼저 이미지를 세탁해주세요."); return; }
     setSavingLib(true);
     try {
-      const res = await fetchWithAuth("/api/settings/wash-library/save", {
+      const res = await fetchWithAuth("/api/image-wash/library/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images: results.map(r => r.base64_data) })
@@ -56,7 +68,7 @@ export default function ImageWashPage() {
   const deleteFromLibrary = async (filename) => {
     if (!confirm("이 이미지를 보관함에서 삭제할까요?")) return;
     try {
-      const res = await fetchWithAuth(`/api/settings/wash-library/${encodeURIComponent(filename)}`, { method: "DELETE" });
+      const res = await fetchWithAuth(`/api/image-wash/library/${encodeURIComponent(filename)}`, { method: "DELETE" });
       if (res.ok) loadLibrary();
     } catch (e) {}
   };
@@ -108,9 +120,16 @@ export default function ImageWashPage() {
     formData.append("use_noise", useNoise);
     formData.append("use_watermark", useWatermark);
     formData.append("use_rotation", useRotation);
+    formData.append("keep_original_size", keepOriginalSize);
+    formData.append("use_crop", useCrop);
+    formData.append("use_bright_contrast", useBrightContrast);
+    formData.append("use_exif", useExif);
+    formData.append("use_flip", useFlip);
+    formData.append("use_hue", useHue);
+    formData.append("use_resample", useResample);
 
     try {
-      const res = await fetchWithAuth("/api/settings/wash-upload", {
+      const res = await fetchWithAuth("/api/image-wash/upload", {
         method: "POST",
         body: formData, // fetchWithAuth shouldn't stringify FormData
       });
@@ -222,7 +241,7 @@ export default function ImageWashPage() {
               <span style={{ backgroundColor: "#dbeafe", color: "#2563eb", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.8rem", whiteSpace: "nowrap" }}>블로그 캠페인용</span>
             </div>
             <p style={{ fontSize: "0.9rem", color: "#475569", marginBottom: "1.5rem", lineHeight: 1.5 }}>
-              원본 이미지를 순환하며 N장을 생성합니다. 각 이미지마다 노이즈·회전·밝기를 미세 변형하고 EXIF 날짜를 오늘 기준 ±10일 내 랜덤 설정합니다.
+              원본 이미지를 순환하며 N장을 생성합니다. 아래 <b>세탁 방식 선택</b>에서 고른 처리가 장마다 조금씩 다른 강도로 적용되어, 결과물끼리도 서로 달라집니다.
             </p>
 
             <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
@@ -254,18 +273,78 @@ export default function ImageWashPage() {
             </button>
           </div>
 
-          {/* Toggle Options */}
+          {/* 세탁 방식 선택 — 적용할 처리를 하나씩 고른다.
+              '강함/보통/약함' 은 이미지 판별값(pHash)을 얼마나 흔드는지다.
+              크롭이 유일하게 확실히 흔드는 처리라, 끄면 경고를 띄운다. */}
+          <div style={{ backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1.2rem" }}>
+            <div style={{ marginBottom: "0.4rem", fontSize: "1.05rem", fontWeight: "bold", color: "#1e293b" }}>세탁 방식 선택</div>
+            <div style={{ marginBottom: "1rem", fontSize: "0.85rem", color: "#64748b", lineHeight: 1.5 }}>
+              적용할 처리를 직접 고릅니다. 괄호 안은 <b>같은 사진인지 가려내는 판별값(pHash)</b>이 실제로 얼마나 바뀌는지 측정한 값입니다(64 중).
+              <br />구도를 바꾸는 <b>크롭·좌우반전·미세회전</b>만 판별값을 움직입니다. 나머지는 파일 내용과 색 분포만 바꿔 <b>같은 파일 검사</b>를 피하는 용도입니다.
+            </div>
+
+            {/* 크롭과 좌우반전 둘 다 꺼져 있을 때만 경고한다 — 반전만 켜도 판별값은 충분히 바뀐다. */}
+            {!useCrop && !useFlip && (
+              <div style={{ marginBottom: "1rem", padding: "0.8rem 1rem", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", fontSize: "0.85rem", color: "#b91c1c", lineHeight: 1.5 }}>
+                ⚠️ 크롭이 꺼져 있습니다. 노이즈·밝기·색조·리샘플링은 판별값을 <b>전혀 바꾸지 못합니다(측정값 0).</b> 크롭이나 좌우반전 중 하나는 켜야 원본과 다른 사진으로 인식됩니다.
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            {[
+              { label: "가장자리 크롭 5~8%", state: useCrop, setter: setUseCrop, impact: "강함 16~20",
+                desc: "네 변을 조금씩 잘라 구도를 바꿉니다. 사진이 어색해지지 않으면서 판별값을 확실히 바꾸는 처리라 켜두시길 권합니다." },
+              { label: "좌우반전", state: useFlip, setter: setUseFlip, impact: "가장 강함 32",
+                desc: "좌우를 뒤집습니다. 판별값이 가장 크게 바뀌지만, 간판·글자·사람이 찍힌 사진은 뒤집힌 티가 바로 납니다." },
+              { label: "미세회전", state: useRotation, setter: setUseRotation, impact: "보통 2~6",
+                desc: "±0.5~2° 돌립니다. 크롭과 함께 쓰면 회전으로 생긴 여백이 함께 잘려나갑니다." },
+              { label: "노이즈", state: useNoise, setter: setUseNoise, impact: "파일만 0",
+                desc: "미세한 블러를 섞습니다. 판별값은 바뀌지 않지만 파일 내용이 달라져 같은 파일(해시) 검사를 피합니다." },
+              { label: "밝기·대비 미세변형", state: useBrightContrast, setter: setUseBrightContrast, impact: "파일만 0",
+                desc: "±2% 안에서 조정합니다. 눈으로도 판별값으로도 차이가 없고, 파일 내용만 달라집니다." },
+              { label: "색조 미세이동", state: useHue, setter: setUseHue, impact: "파일만 0~2",
+                desc: "색상을 아주 조금 돌립니다. 같은 색으로 보이지만 색 분포가 달라져, 색으로 비교하는 검사에 대응합니다." },
+              { label: "리사이즈 재샘플링", state: useResample, setter: setUseResample, impact: "파일만 0",
+                desc: "살짝 줄였다 되돌려 픽셀 격자를 새로 계산합니다. 크기는 그대로고, 원본의 압축 흔적이 지워집니다." },
+              { label: "촬영정보(EXIF) 교체", state: useExif, setter: setUseExif, impact: "정보",
+                desc: "촬영일시를 오늘 기준 ±10일, 카메라 모델을 랜덤으로 바꿉니다. 픽셀은 건드리지 않습니다." },
+            ].map((opt, i) => (
+              <label key={i} style={{ display: "flex", alignItems: "flex-start", padding: "0.8rem", backgroundColor: opt.state ? "#f5f3ff" : "#f8fafc", border: `1px solid ${opt.state ? "#c4b5fd" : "#e2e8f0"}`, borderRadius: "6px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={opt.state}
+                  onChange={e => opt.setter(e.target.checked)}
+                  style={{ width: "18px", height: "18px", marginRight: "0.8rem", marginTop: "0.1rem", cursor: "pointer", flexShrink: 0 }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.95rem", fontWeight: "bold", color: "#334155" }}>{opt.label}</span>
+                    {/* 색은 판별값을 실제로 바꾸는 정도에 맞춘다 — 강함(분홍) / 보통(주황) / 그 외(회색) */}
+                    <span style={{ fontSize: "0.7rem", fontWeight: "bold", padding: "0.1rem 0.45rem", borderRadius: "999px",
+                                   color: /^(강함|가장)/.test(opt.impact) ? "#9d174d" : /^보통/.test(opt.impact) ? "#9a3412" : "#475569",
+                                   backgroundColor: /^(강함|가장)/.test(opt.impact) ? "#fce7f3" : /^보통/.test(opt.impact) ? "#ffedd5" : "#e2e8f0" }}>
+                      {opt.impact}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: "0.25rem", fontSize: "0.82rem", color: "#64748b", lineHeight: 1.5 }}>{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+            </div>
+          </div>
+
+          {/* 그 밖의 옵션 — 세탁 강도와는 무관한 장식·성능 설정 */}
           {[
-            { label: "테두리", state: useBorder, setter: setUseBorder },
-            { label: "노이즈", state: useNoise, setter: setUseNoise, desc: "(자동 생성 시 항상 적용됨)" },
-            { label: "워터마크", state: useWatermark, setter: setUseWatermark },
-            { label: "회전", state: useRotation, setter: setUseRotation, desc: "(자동 생성 시 기준값 ±2° 랜덤 추가)" },
+            { label: "테두리", state: useBorder, setter: setUseBorder, desc: "(바깥에 5px 밝은색 테두리를 두릅니다)" },
+            { label: "워터마크", state: useWatermark, setter: setUseWatermark, desc: "(준비 중 — 켜도 아직 적용되지 않습니다)" },
+            { label: "원본 크기 유지", state: keepOriginalSize, setter: setKeepOriginalSize,
+              desc: "(끄면 긴 변 1600px 로 줄여 처리 — 10장 기준 23초 → 2초. 카페 업로드에는 1600px 로 충분합니다)" },
           ].map((opt, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", padding: "1.2rem", backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", flexWrap: "wrap" }}>
-              <input 
-                type="checkbox" 
-                checked={opt.state} 
-                onChange={e => opt.setter(e.target.checked)} 
+              <input
+                type="checkbox"
+                checked={opt.state}
+                onChange={e => opt.setter(e.target.checked)}
                 style={{ width: "18px", height: "18px", marginRight: "1rem", cursor: "pointer" }}
               />
               <span style={{ fontSize: "1rem", fontWeight: "bold", color: "#334155", whiteSpace: "nowrap" }}>{opt.label}</span>
@@ -325,13 +404,41 @@ export default function ImageWashPage() {
 
           <div style={{ backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1.5rem" }}>
             <h3 style={{ fontSize: "1rem", fontWeight: "bold", marginBottom: "1rem", color: "#1e293b" }}>적용 설정 요약</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem", color: "#64748b" }}>
-              <div>테두리: {useBorder ? <span style={{color:"#4f46e5", fontWeight:"bold"}}>활성</span> : "비활성"}</div>
-              <div>노이즈: {useNoise ? <span style={{color:"#4f46e5", fontWeight:"bold"}}>활성</span> : "비활성"}</div>
-              <div>워터마크: {useWatermark ? <span style={{color:"#4f46e5", fontWeight:"bold"}}>활성</span> : "비활성"}</div>
-              <div>회전: {useRotation ? <span style={{color:"#4f46e5", fontWeight:"bold"}}>활성</span> : "비활성"}</div>
-              <div style={{ marginTop: "0.5rem", color: "#3b82f6" }}>자동생성: EXIF 날짜 ±10일 랜덤 삽입</div>
-            </div>
+            {/* 켠 것만 보여준다 — 항목이 늘어나 '비활성'까지 나열하면 무엇을 켰는지 한눈에 안 들어온다. */}
+            {(() => {
+              const on = [
+                useCrop && "가장자리 크롭",
+                useNoise && "노이즈",
+                useBrightContrast && "밝기·대비",
+                useExif && "EXIF 교체",
+                useRotation && "미세회전",
+                useFlip && "좌우반전",
+                useHue && "색조 이동",
+                useResample && "재샘플링",
+                useBorder && "테두리",
+              ].filter(Boolean);
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem", color: "#64748b" }}>
+                  <div>선택한 방식 <span style={{ color: "#334155", fontWeight: "bold" }}>{on.length}개</span></div>
+                  {on.length === 0 ? (
+                    <div style={{ color: "#b91c1c" }}>아무것도 선택하지 않아 원본이 그대로 복사됩니다.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                      {on.map((name, i) => (
+                        <span key={i} style={{ fontSize: "0.8rem", padding: "0.2rem 0.5rem", borderRadius: "4px", backgroundColor: "#eef2ff", color: "#4f46e5", fontWeight: "bold" }}>{name}</span>
+                      ))}
+                    </div>
+                  )}
+                  {!useCrop && !useFlip && (
+                    <div style={{ color: "#b91c1c" }}>크롭·좌우반전이 모두 꺼져 있어 원본과 같은 이미지로 걸립니다.</div>
+                  )}
+                  <div style={{ marginTop: "0.25rem", color: "#94a3b8" }}>
+                    처리 크기: {keepOriginalSize ? "원본 그대로(느림)" : "긴 변 1600px"}
+                  </div>
+                  {useExif && <div style={{ color: "#3b82f6" }}>EXIF 날짜 ±10일 랜덤 삽입</div>}
+                </div>
+              );
+            })()}
           </div>
 
         </div>

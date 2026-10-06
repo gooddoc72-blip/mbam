@@ -9,7 +9,7 @@
 from typing import Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -72,16 +72,52 @@ def delete_item(item_id: str, db: Session = Depends(get_db), current_user: dict 
     return {"success": True}
 
 
-@router.post("/items/{item_id}/check", summary="지금 순위 수집(에이전트 실행)")
-def check_now(item_id: str, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def _collect_rank_now(user_id: str, payload: dict):
+    """설치형에서 순위를 이 PC가 직접 수집한다(백그라운드).
+
+    ⚠ 예전에는 모드와 상관없이 잡 큐에만 넣었는데, 설치본은 로컬 에이전트(agent.py)를
+      동봉하지도 실행하지도 않는다. 그래서 잡을 소비할 주체가 없어 순위가 영원히
+      '미검사'로 남았다. 다른 라우터들처럼 로컬에서는 직접 실행한다.
+    """
+    from mbam_nextgen.services.cafe_rank_service import find_cafe_rank
+    from ..database import SessionLocal
+    try:
+        res = await find_cafe_rank(payload.get("keyword", ""), payload.get("target_url", ""))
+    except Exception as e:
+        print(f"[cafe_rank] 수집 실패: {e}")
+        return
+    db = SessionLocal()
+    try:
+        _persist_cafe_rank(db, user_id, payload, res)   # 에이전트 결과와 같은 경로로 저장
+        db.commit()
+        print(f"[cafe_rank] 수집 완료 — 통합 {res.get('tongsearch_rank')} / 탭 {res.get('cafetab_rank')}")
+    except Exception as e:
+        db.rollback()
+        print(f"[cafe_rank] 저장 실패: {e}")
+    finally:
+        db.close()
+
+
+@router.post("/items/{item_id}/check", summary="지금 순위 수집")
+def check_now(item_id: str, background: BackgroundTasks,
+              db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    # ⚠ 여기서 asyncio.create_task 를 쓰면 안 된다. 이 엔드포인트는 동기 함수라
+    #   FastAPI 가 별도 스레드에서 실행하고, 그 스레드에는 이벤트 루프가 없어
+    #   'RuntimeError: no running event loop' 로 500 이 난다(실제로 그랬다).
+    #   BackgroundTasks 는 응답을 보낸 뒤 본래 이벤트 루프에서 코루틴을 실행해 준다.
     user_id = _uid(current_user)
     it = db.query(CafeRankItem).filter(CafeRankItem.id == item_id, CafeRankItem.user_id == user_id).first()
     if not it:
         raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
-    jobsvc.enqueue_job(db, user_id, "cafe_rank_check", {
-        "keyword": it.keyword, "target_url": it.target_url, "tracked_id": it.id,
-    }, priority=5)
-    return {"success": True, "message": "순위 수집을 시작했습니다. 에이전트가 실행되면 잠시 후 갱신됩니다."}
+    payload = {"keyword": it.keyword, "target_url": it.target_url, "tracked_id": it.id}
+
+    # 클라우드에서는 집 IP가 필요해 로컬 에이전트에 위임하고, 설치형은 직접 수집한다.
+    if jobsvc.is_cloud_mode():
+        jobsvc.enqueue_job(db, user_id, "cafe_rank_check", payload, priority=5)
+        return {"success": True, "message": "순위 수집을 시작했습니다. 에이전트가 실행되면 잠시 후 갱신됩니다."}
+
+    background.add_task(_collect_rank_now, user_id, payload)
+    return {"success": True, "message": "순위 수집을 시작했습니다. 30초쯤 뒤 [새로고침] 을 눌러주세요."}
 
 
 # ─────────────── 결과 영속화(persister) ───────────────

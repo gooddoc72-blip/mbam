@@ -1,4 +1,5 @@
 "use client";
+import CommentDeletePanel from "./CommentDeletePanel";
 // 카페 소통·육성 탭 — 댓글 작업 / 아이디 풀·가입 카페 매핑 / 예약 육성.
 // 상태·핸들러는 page 에서 useCafeAuto() 로 만든 객체(s)를 받아 공유한다.
 export default function NurtureTab({ s }) {
@@ -342,6 +343,8 @@ export default function NurtureTab({ s }) {
                   </button>
                 )}
               </div>
+
+              <CommentDeletePanel s={s} />
 
               <div style={{ padding: "1rem", background: "#fdf2f8", color: "#831843", border: "1px solid #fbcfe8", borderRadius: "8px" }}>
 ⚙️ <b>육성 예약</b>: 예약을 등록하면 백그라운드 서버가 매일 자동으로 게시글 방문(조회수) 등 육성 작업을 수행합니다. (아이디 풀·카페 매핑은 우측에서 관리)

@@ -20,8 +20,11 @@ from pathlib import Path
 
 from .hwid import get_hwid, machine_name
 
-# 기본 서버 주소 — 배포 시 license_config.json 또는 환경변수로 덮어쓰기
-DEFAULT_SERVER = "http://127.0.0.1:8005"
+# 기본 서버 주소 — 배포 시 license_config.json 또는 환경변수로 덮어쓴다.
+# 기본값을 로컬(127.0.0.1)로 두면 설정 파일이 빠진 빌드가 고객 PC에서 자기 자신에게
+# 인증을 물어보게 되어 무조건 실패한다. 그래서 기본값은 실서버로 둔다.
+# 로컬 테스트는 MBAM_LICENSE_SERVER=http://127.0.0.1:8005 로 우회.
+DEFAULT_SERVER = "https://license.blocklab.co.kr"
 OFFLINE_GRACE_DAYS = 7          # 서버 접속 불가 시 허용할 오프라인 일수
 VERIFY_TIMEOUT = 8             # 초
 
@@ -47,7 +50,10 @@ def _server_url() -> str:
     cfg = Path(__file__).resolve().parent.parent / "license_config.json"
     if cfg.exists():
         try:
-            return json.loads(cfg.read_text(encoding="utf-8")).get("server", DEFAULT_SERVER).rstrip("/")
+            # utf-8-sig — 이 파일은 PowerShell 빌드가 만들어 BOM 이 붙는다.
+            # utf-8 로 읽으면 예외가 나 조용히 DEFAULT_SERVER 로 넘어가므로,
+            # 서버 주소를 바꿔 배포해도 설정이 무시된다.
+            return json.loads(cfg.read_text(encoding="utf-8-sig")).get("server", DEFAULT_SERVER).rstrip("/")
         except Exception:
             pass
     return DEFAULT_SERVER

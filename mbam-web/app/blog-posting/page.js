@@ -180,7 +180,7 @@ function BlogPostingContent() {
   const openLibPicker = async () => {
     setShowLibPicker(true);
     try {
-      const res = await fetchWithAuth("/api/settings/wash-library");
+      const res = await fetchWithAuth("/api/image-wash/library");
       if (res.ok) {
         const d = await res.json();
         const items = d.items || [];
@@ -197,7 +197,7 @@ function BlogPostingContent() {
     if (picked.length === 0) { alert("사용할 이미지를 1장 이상 선택하세요."); return; }
     setLibStaging(true);
     try {
-      const res = await fetchWithAuth("/api/settings/wash-library/stage", {
+      const res = await fetchWithAuth("/api/image-wash/library/stage", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filenames: picked })
       });
@@ -235,6 +235,12 @@ function BlogPostingContent() {
     try {
       const res = await fetchWithAuth("/api/agent/pick-folder", { method: "POST" });
       const data = await res.json().catch(() => ({}));
+      // 설치형(로컬)은 백엔드가 이 PC에서 바로 창을 띄우고 경로를 돌려준다 — 폴링 불필요.
+      if (res.ok && data.path !== undefined) {
+        if (data.path) setImageFolderPath(data.path);
+        else alert("폴더 선택이 취소되었습니다.");
+        return;
+      }
       if (!res.ok || !data.job_id) {
         alert("폴더 선택 요청 실패 — 내 PC 에이전트가 실행 중인지 확인하세요.");
         return;

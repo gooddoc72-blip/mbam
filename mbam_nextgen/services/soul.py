@@ -50,7 +50,12 @@ class SoulRewriter:
             self.gemini_client = None
 
         # 2. Claude Init
-        self.claude_key = _uk.get("claude_key") or os.getenv("ANTHROPIC_API_KEY")
+        self.claude_key = (
+            _uk.get("claude_key")
+            or os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("CLAUDE_API_KEY")
+        )
+        self.claude_model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
         if anthropic and self.claude_key:
             self.claude_client = anthropic.AsyncAnthropic(api_key=self.claude_key)
         else:
@@ -210,7 +215,19 @@ class SoulRewriter:
             except Exception as e:
                 pass
 
+        # 카페 원고(정보성)도 이 함수를 타므로, 설정에 저장한 '추가 지시'를 여기서 붙인다.
+        # 카페 전용판에서만 적용해 블로그 쪽 동작에는 영향을 주지 않는다.
+        _cafe_extra = ""
+        try:
+            import os as _os
+            if (_os.getenv("MBAM_PRODUCT", "") or "").strip().lower() == "cafe":
+                _cafe_extra = self.get_extra_prompt("cafe")
+        except Exception:
+            _cafe_extra = ""
+
         if custom_prompt.strip():
+            if _cafe_extra:
+                custom_prompt += _cafe_extra
             if "{keyword}" not in custom_prompt:
                 custom_prompt += "\n\n위 가이드라인에 따라 아래의 타겟 키워드로 블로그 원고를 작성해주세요.\n\n[기본 정보]\n- 타겟(핵심) 키워드: {keyword}\n- 참고 데이터: {raw_data}\n\n[작성 가이드라인]\n1. 어조: {tone_guide}\n2. 분량 및 구조: {length_guide}\n3. 마크다운 기호 금지: 별표(*), 물결표(~), 샵(#) 등 마크다운 기호를 절대 사용하지 마세요. (단, 해시태그에는 샵 허용)\n4. 이모지 금지: 글에 어떠한 이모지(아이콘)도 절대 사용하지 마세요.\n5. 이미지 삽입 위치 지정: 내용이 전환되거나 문단이 끝나는 적절한 위치(본문 사이사이)에 `[이미지]` 라는 특수 태그를 3~5회 정도 삽입하세요.\n6. 해시태그 추가: 본문 작성이 모두 끝난 후, 맨 마지막 줄에는 이 글과 관련된 검색용 해시태그를 5개 내외로 작성해 주세요. (예: `#해시태그1 #해시태그2`)\n{special_guide}\n\n첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요."
             if _has_lt:
@@ -248,6 +265,7 @@ class SoulRewriter:
         7. 금지 표현: "~에 대해 알아보겠습니다", "이상으로 ~를 마치겠습니다" 등 기계적인 상투 문구, 같은 어미 3회 연속 반복
         {special_guide}
         {ref_injection}
+        {_cafe_extra}
 
         첫 줄에 반드시 '[제목] 클릭하고 싶어지는 매력적인 제목' 형식으로 제목을 작성하고, 그 다음 줄부터 본문을 작성해주세요.
         """
@@ -309,7 +327,7 @@ class SoulRewriter:
                     blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
                 blocks.append({"type": "text", "text": instruction})
                 resp = await self.claude_client.messages.create(
-                    model="claude-opus-4-8",
+                    model=self.claude_model,
                     max_tokens=1500,
                     messages=[{"role": "user", "content": blocks}],
                 )
@@ -323,9 +341,13 @@ class SoulRewriter:
         return ""
 
     async def generate_matjip_with_photos(self, source_data: str, image_paths: list, place_name: str = "",
-                                          keyword: str = "", sub_keywords: list = None) -> str:
-        """[맛집] 사진 + 리뷰를 한 모델에 함께 주고, 사진에 맞는 자리에 [이미지] 마커를 넣은
-        방문 후기(카페글)를 한 번에 생성. 사진을 '직접 본 모델이 글도 쓰므로' 사진↔글이 정확히 맞는다.
+                                          keyword: str = "", sub_keywords: list = None,
+                                          post_type: str = "matjip") -> str:
+        """사진 + 참고자료를 한 모델에 함께 주고, 사진에 맞는 자리에 [이미지] 마커를 넣은
+        카페글을 한 번에 생성. 사진을 '직접 본 모델이 글도 쓰므로' 사진↔글이 정확히 맞는다.
+
+        post_type='matjip'  : 내돈내산 방문 후기 (외관→내부→메뉴→음식 흐름)
+        post_type='keyword' : 일키(일반 키워드) 글 — 맛집이 아니라 방문 흐름을 강요하지 않는다.
         keyword=메인 키워드(제목·본문 SEO), sub_keywords=서브(연관) 키워드(본문에 자연스럽게 녹임).
         Claude(비전+작성) 우선 → 실패 시 Gemini(비전+작성) → 사진 없이 텍스트 생성 순 폴백."""
         import os
@@ -354,22 +376,38 @@ class SoulRewriter:
             kw_rule += f"- 메인 키워드 '{main_kw}'를 제목 앞쪽과 본문에 자연스럽게 포함(본문 최소 2~3회, 억지 반복 금지).\n"
         if subs:
             kw_rule += f"- 서브(연관) 키워드 [{', '.join(subs)}]를 본문에 자연스럽게 녹이세요(나열식 금지).\n"
+        # 맛집이냐 일키(일반 키워드)냐에 따라 화자·사진 배치 흐름·참고자료 이름만 바뀐다.
+        # 사진 마커·키워드 SEO·분량 규칙은 두 경우가 완전히 같다.
+        is_matjip = (post_type or "matjip") != "keyword"
+        if is_matjip:
+            persona = (f"당신은 '{place}'을(를) 실제로 다녀온 손님입니다. 아래 [참고 리뷰]를 사실 근거로 "
+                       f"내돈내산 1인칭 방문 후기(네이버 카페용)를 자연스럽게 작성하세요.\n")
+            flow_rule = "- 사진을 다음 방문 흐름으로 배치하세요: 외관·입구 → 내부·분위기 → 메뉴판/주문 → 음식(제공·먹는 순서) → 마무리.\n"
+            ref_label = "참고 리뷰"
+        else:
+            # 맛집이 아닌 주제에 '외관→메뉴→음식' 흐름을 강요하면 글이 어색해진다.
+            persona = (f"당신은 '{main_kw or place}' 주제로 네이버 카페에 글을 쓰는 회원입니다. "
+                       f"아래 [참고 자료]와 첨부 사진을 근거로, 직접 겪은 것처럼 1인칭으로 "
+                       f"자연스러운 카페글을 작성하세요.\n")
+            flow_rule = "- 사진은 글의 흐름(도입 → 본론 → 마무리)에서 그 사진 이야기가 나오는 자리에 배치하세요.\n"
+            ref_label = "참고 자료"
         rules = (
-            f"당신은 '{place}'을(를) 실제로 다녀온 손님입니다. 아래 [참고 리뷰]를 사실 근거로 "
-            f"내돈내산 1인칭 방문 후기(네이버 카페용)를 자연스럽게 작성하세요.\n"
+            persona
             + (f"사진이 {n}장 첨부돼 있습니다(첨부 순서 = 1~{n}번).\n"
                f"규칙:\n"
-               f"- 사진을 다음 방문 흐름으로 배치하세요: 외관·입구 → 내부·분위기 → 메뉴판/주문 → 음식(제공·먹는 순서) → 마무리.\n"
-               f"- 각 사진을 실제로 보고, 그 사진을 이야기하는 문단 '바로 뒤'에 '[이미지:N]' 마커를 넣으세요(N = 그 자리에 넣을 사진의 번호).\n"
+               + flow_rule
+               + f"- 각 사진을 실제로 보고, 그 사진을 이야기하는 문단 '바로 뒤'에 '[이미지:N]' 마커를 넣으세요(N = 그 자리에 넣을 사진의 번호).\n"
                f"- 사진 {n}장을 모두, 각각 한 번씩만 사용(마커 총 {n}개). 번호(N)는 위 흐름에 맞게 자유롭게 재배열하세요(첨부 순서를 그대로 따를 필요 없음).\n"
                if n else "규칙:\n")
             + kw_rule
             + "- 소제목은 '■ 소제목' 형식. 마크다운(**, ~~) 금지, 이모지 3개 이하.\n"
-              "- 800~1300자. 사진에 안 보이는 내용은 리뷰 근거로만.\n"
-              "- 본문에 URL·링크·웹주소·파일 경로·이미지 파일명·'사진 출처' 같은 표현을 절대 쓰지 마세요. "
-              "사진은 오직 '[이미지:N]' 마커로만 표시합니다(리뷰는 '내용'만 참고).\n"
-              "- 첫 줄은 '제목: ...' 형식으로 시작.\n\n"
-            + f"[참고 리뷰]\n{source_data or ''}"
+            + f"- 800~1300자. 사진에 안 보이는 내용은 [{ref_label}] 근거로만.\n"
+            + "- 본문에 URL·링크·웹주소·파일 경로·이미지 파일명·'사진 출처' 같은 표현을 절대 쓰지 마세요. "
+              "사진은 오직 '[이미지:N]' 마커로만 표시합니다(참고자료는 '내용'만 참고).\n"
+              "- 첫 줄은 '제목: ...' 형식으로 시작.\n"
+            + self.get_extra_prompt("cafe_matjip" if is_matjip else "cafe")   # 설정에서 저장한 추가 지시
+            + "\n"
+            + f"[{ref_label}]\n{source_data or ''}"
         )
         # 사진을 여러 장(최대 20) 보내므로 요청 크기·토큰이 커지지 않게 긴 변 1568px·JPEG로 다운스케일해 base64 인코딩.
         def _downscale_jpeg_b64(path, max_side=1568, quality=85):
@@ -402,7 +440,7 @@ class SoulRewriter:
                     blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
                 blocks.append({"type": "text", "text": rules})
                 resp = await self.claude_client.messages.create(
-                    model="claude-opus-4-8", max_tokens=6000,
+                    model=self.claude_model, max_tokens=6000,
                     messages=[{"role": "user", "content": blocks}])
                 txt = resp.content[0].text if resp.content else ""
                 if txt:
@@ -481,7 +519,7 @@ class SoulRewriter:
     async def _call_claude_client(self, client, prompt: str) -> str:
         try:
             response = await client.messages.create(
-                model="claude-opus-4-8",
+                model=self.claude_model,
                 max_tokens=8000,  # 1,500자 이상 장문(한글)은 토큰 소모가 커서 2500이면 문장 중간에 잘림
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -535,6 +573,25 @@ class SoulRewriter:
             return await self._call_openai_client(self.openai_client, prompt)
         raise RuntimeError(f"{target_provider} 엔진 미설정 (API 키 확인)")
 
+    @staticmethod
+    def get_extra_prompt(key: str) -> str:
+        """설정 화면에서 저장한 '추가 지시문'을 읽는다. (key: cafe | cafe_matjip)
+
+        기본 프롬프트를 통째로 갈아끼우게 하면 출력 형식('제목: ...')이나 맛집의
+        '[이미지:N]' 마커 규칙이 깨져 발행 자체가 실패한다. 그래서 사용자 입력은
+        '규칙에 덧붙이는 문장'으로만 다룬다(말투·길이·금지어 지정에는 충분하다).
+        읽기에 실패해도 기본 동작은 그대로여야 한다.
+        """
+        try:
+            from mbam_nextgen.backend.routers.settings import read_prompts
+            v = (read_prompts() or {}).get(key)
+            if isinstance(v, dict):          # 블로그 프롬프트와 같은 구조로 저장된 경우
+                v = v.get("claude_prompt") or v.get("gemini_prompt") or ""
+            v = (v or "").strip()
+            return f"\n[추가 지시]\n{v}\n" if v else ""
+        except Exception:
+            return ""
+
     def _get_cafe_prompt(self, main_keyword, sub_keywords, reference_text, post_style):
         sub_str = ", ".join(sub_keywords) if sub_keywords else "없음"
         style_map = {
@@ -564,6 +621,10 @@ class SoulRewriter:
             "",
             "(본문 내용)",
         ]
+        # 설정 화면에서 저장한 추가 지시(말투·길이·금지어 등)를 뒤에 붙인다.
+        extra = self.get_extra_prompt("cafe")
+        if extra:
+            lines.insert(-5, extra)      # 출력 형식 안내 앞에 넣어 형식이 흐트러지지 않게
         return "\n".join(lines)
 
     async def analyze_cafe_cheat_keys(self, keyword: str, text: str, provider: str = None) -> dict:
@@ -585,13 +646,19 @@ class SoulRewriter:
 4. chain (커뮤니티 상호작용 및 Chain Score 분석): 글의 문맥이 회원들의 자연스러운 댓글 소통을 유도하도록(질문 던지기 등) 기획되었는지.
 5. author_power (작성자 영향력 추정): 이 글의 서술 방식, 호응 유도 패턴, 전문성 깊이를 볼 때 이 작성자가 해당 카페에서 어느 정도의 네임드(활동 지수)를 가진 사람일지 추정(예: '단순 정보 공유 뉴비', '커뮤니티 여론 주도 핵심 멤버', '홍보 목적의 서브 계정' 등).
 
+[출력 형식 규칙 — 반드시 지킬 것]
+- points 는 짧은 항목의 목록이다. 한 항목은 한 줄, 40자 이내, 명사형으로 끝낸다.
+- 항목마다 3~4개씩 쓴다. 문단으로 풀어쓰지 말고 사실만 끊어서 적는다.
+- 수치로 말할 수 있으면 수치를 넣는다. (예: "메인 키워드 서론 2회 노출")
+- "~것으로 보입니다", "~라고 할 수 있습니다" 같은 서술형 맺음말은 쓰지 않는다.
+
 [출력 포맷 (반드시 아래 구조의 순수 JSON으로만 출력)]
 {{
-    "rcon": {{"score": 85, "title": "RCON 및 문맥 정합성", "analysis": "분석내용..."}},
-    "scqa": {{"score": 90, "title": "SCQA+MPC 프레임워크", "analysis": "분석내용..."}},
-    "dia": {{"score": 80, "title": "D.I.A+ 경험 데이터 지수", "analysis": "분석내용..."}},
-    "chain": {{"score": 75, "title": "커뮤니티 소통(Chain) 로직", "analysis": "분석내용..."}},
-    "author_power": {{"score": 88, "title": "작성자 영향력 (지수) 추정", "analysis": "분석내용..."}}
+    "rcon": {{"score": 85, "title": "RCON 및 문맥 정합성", "points": ["제목에 메인 키워드 앞쪽 배치", "서론 3문장 내 키워드 2회", "스마트블록 의도와 일치"]}},
+    "scqa": {{"score": 90, "title": "SCQA+MPC 프레임워크", "points": ["상황-문제 구조 있음", "소제목 4개로 분절", "표/리스트 없음"]}},
+    "dia": {{"score": 80, "title": "D.I.A+ 경험 데이터 지수", "points": ["실제 방문 묘사 5곳", "가격·시간 등 1차 정보 포함", "사진 설명 부족"]}},
+    "chain": {{"score": 75, "title": "커뮤니티 소통(Chain) 로직", "points": ["마지막에 질문 던짐", "댓글 유도 문구 1회", "회원 호칭 사용"]}},
+    "author_power": {{"score": 88, "title": "작성자 영향력 (지수) 추정", "points": ["커뮤니티 여론 주도 핵심 멤버", "전문 용어 자연스럽게 사용", "홍보 의도 낮음"]}}
 }}
 """
         
@@ -604,11 +671,11 @@ class SoulRewriter:
         except Exception as e:
             # Fallback mock data in case of error
             return {
-                "rcon": {"score": 0, "title": "RCON 및 문맥 정합성", "analysis": f"AI 분석 오류: {e}"},
-                "scqa": {"score": 0, "title": "SCQA+MPC 프레임워크", "analysis": "분석 실패"},
-                "dia": {"score": 0, "title": "D.I.A+ 경험 데이터 지수", "analysis": "분석 실패"},
-                "chain": {"score": 0, "title": "커뮤니티 소통(Chain) 로직", "analysis": "분석 실패"},
-                "author_power": {"score": 0, "title": "작성자 영향력 (지수) 추정", "analysis": "분석 실패"}
+                "rcon": {"score": 0, "title": "RCON 및 문맥 정합성", "points": [f"AI 분석 오류: {e}"]},
+                "scqa": {"score": 0, "title": "SCQA+MPC 프레임워크", "points": ["분석 실패"]},
+                "dia": {"score": 0, "title": "D.I.A+ 경험 데이터 지수", "points": ["분석 실패"]},
+                "chain": {"score": 0, "title": "커뮤니티 소통(Chain) 로직", "points": ["분석 실패"]},
+                "author_power": {"score": 0, "title": "작성자 영향력 (지수) 추정", "points": ["분석 실패"]}
             }
 
     async def analyze_blog_seo_keys(self, keyword: str, text: str, provider: str = None) -> dict:
@@ -633,13 +700,19 @@ class SoulRewriter:
 4. chain (이웃·공감·댓글 유도): 글이 이웃·공감·댓글 등 블로그 내 자연스러운 상호작용(질문 던지기, 공감 유도)을 일으키도록 기획되었는지.
 5. author_power (블로그 지수·작성자 신뢰도 추정): 이 글의 서술 방식, 전문성 깊이, 정보의 밀도를 볼 때 작성자의 블로그 지수 수준(예: '준최적화 생활 블로거', '해당 주제 전문 최적화 블로거', '협찬·홍보 위주 블로거' 등)과 주제 전문성을 추정.
 
+[출력 형식 규칙 — 반드시 지킬 것]
+- points 는 짧은 항목의 목록이다. 한 항목은 한 줄, 40자 이내, 명사형으로 끝낸다.
+- 항목마다 3~4개씩 쓴다. 문단으로 풀어쓰지 말고 사실만 끊어서 적는다.
+- 수치로 말할 수 있으면 수치를 넣는다.
+- "~것으로 보입니다", "~라고 할 수 있습니다" 같은 서술형 맺음말은 쓰지 않는다.
+
 [출력 포맷 (반드시 아래 구조의 순수 JSON으로만 출력)]
 {{
-    "rcon": {{"score": 85, "title": "C-Rank·검색의도 정합성", "analysis": "분석내용..."}},
-    "scqa": {{"score": 90, "title": "본문 구조·가독성(체류시간)", "analysis": "분석내용..."}},
-    "dia": {{"score": 80, "title": "D.I.A+ 경험·오리지널리티", "analysis": "분석내용..."}},
-    "chain": {{"score": 75, "title": "이웃·공감·댓글 유도력", "analysis": "분석내용..."}},
-    "author_power": {{"score": 88, "title": "블로그 지수·작성자 신뢰도 추정", "analysis": "분석내용..."}}
+    "rcon": {{"score": 85, "title": "C-Rank·검색의도 정합성", "points": ["제목 앞쪽 메인 키워드", "서론 키워드 2회", "검색 의도와 일치"]}},
+    "scqa": {{"score": 90, "title": "본문 구조·가독성(체류시간)", "points": ["소제목 5개", "평균 문장 42자", "표·리스트 각 1회"]}},
+    "dia": {{"score": 80, "title": "D.I.A+ 경험·오리지널리티", "points": ["직접 촬영 사진 8장", "실사용 수치 포함", "타 글과 중복 표현 적음"]}},
+    "chain": {{"score": 75, "title": "이웃·공감·댓글 유도력", "points": ["마무리 질문 1회", "공감 유도 문구 2회", "이웃 호칭 사용"]}},
+    "author_power": {{"score": 88, "title": "블로그 지수·작성자 신뢰도 추정", "points": ["해당 주제 전문 최적화 블로거", "용어 사용 정확", "협찬 표기 없음"]}}
 }}
 """
 
@@ -651,11 +724,11 @@ class SoulRewriter:
             return json.loads(json_str)
         except Exception as e:
             return {
-                "rcon": {"score": 0, "title": "C-Rank·검색의도 정합성", "analysis": f"AI 분석 오류: {e}"},
-                "scqa": {"score": 0, "title": "본문 구조·가독성(체류시간)", "analysis": "분석 실패"},
-                "dia": {"score": 0, "title": "D.I.A+ 경험·오리지널리티", "analysis": "분석 실패"},
-                "chain": {"score": 0, "title": "이웃·공감·댓글 유도력", "analysis": "분석 실패"},
-                "author_power": {"score": 0, "title": "블로그 지수·작성자 신뢰도 추정", "analysis": "분석 실패"},
+                "rcon": {"score": 0, "title": "C-Rank·검색의도 정합성", "points": [f"AI 분석 오류: {e}"]},
+                "scqa": {"score": 0, "title": "본문 구조·가독성(체류시간)", "points": ["분석 실패"]},
+                "dia": {"score": 0, "title": "D.I.A+ 경험·오리지널리티", "points": ["분석 실패"]},
+                "chain": {"score": 0, "title": "이웃·공감·댓글 유도력", "points": ["분석 실패"]},
+                "author_power": {"score": 0, "title": "블로그 지수·작성자 신뢰도 추정", "points": ["분석 실패"]},
             }
 
     async def generate_place_news(self, place_name: str, reviews: list, theme: str = "🌟 고객 극찬 릴레이 (방문 후기형)") -> dict:

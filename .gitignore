@@ -105,3 +105,17 @@ agent_config.json
 !requirements.cloud.txt
 !mbam_nextgen/backend/config/plans.json
 !mbam_nextgen/prompts.json
+
+# 설치 페이로드/산출물 — 수백 MB 빌드 결과물이라 커밋 금지
+installer/payload/
+installer/payload_cafe/
+installer/payload_blog/
+installer/payload_agent/
+installer/payload_cafe_mac/
+installer/output/
+installer/.cache/
+
+# 아이콘 시안 비교 시트 (make_*_icon.py --preview 산출물)
+installer/*_icon_preview.png
+# 맥 아이콘 중간 산출물 — make_cafe_icon.py --iconset 이 언제든 다시 만든다
+installer/cafe.iconset/

@@ -144,6 +144,7 @@ class AutoPostRequest(BaseModel):
     sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 최대 5개 — 본문에 자연스럽게 녹임
     insert_map: Optional[bool] = False        # 블로그 글에 네이버 장소(지도) 삽입
     map_query: Optional[str] = None           # 삽입할 장소명/주소
+    keep_image_markers: Optional[bool] = False  # 업로드 원고: 본문의 [이미지] 자리를 그대로 두고 폴더 사진을 넣는다
 
     title: Optional[str] = None
     content: Optional[str] = None
@@ -271,7 +272,30 @@ def scrape_product_info_sync(url: str, extract_images: bool = False) -> tuple[st
         scraped_text = f"상품 URL 스크래핑 실패: {str(e)}"
     return scraped_text, temp_img_dir
 
-async def run_automation_task(task_id: str, req: AutoPostRequest):
+def _register_rank_local(user_id: str, keyword: str, url: str, title: str, log) -> None:
+    """설치형에서 발행 직후 순위추적에 자동 등록한다.
+
+    ⚠ 예전에는 '등록합니다' 로그만 찍고 실제로는 아무것도 하지 않았다.
+      실제 등록은 클라우드 잡의 persister(_persist_auto_post)에만 있어서,
+      로컬 에이전트를 쓰지 않는 설치본에서는 영영 등록되지 않았다.
+    """
+    if not user_id or not keyword or not url:
+        return
+    from ..database import SessionLocal
+    from .cafe_rank_router import register_cafe_rank_if_absent
+    db = SessionLocal()
+    try:
+        added = register_cafe_rank_if_absent(db, user_id, keyword, url, title=title or None)
+        db.commit()
+        log("📈 순위추적에 등록했습니다." if added else "📈 순위추적에 이미 등록돼 있습니다.")
+    except Exception as e:
+        db.rollback()
+        log(f"⚠️ 순위추적 자동등록 실패(수동 등록 필요): {e}")
+    finally:
+        db.close()
+
+
+async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str = None):
     task_status_store[task_id] = {"status": "running", "logs": ["작업이 시작되었습니다."]}
     
     def log(msg: str):
@@ -357,6 +381,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 if getattr(req, "track_rank", False):
                     if result.get("result_url"):
                         log("📈 발행 글을 블로그 순위 추적에 등록합니다.")
+                        _register_rank_local(user_id, req.target_keyword or "",
+                                             result.get("result_url", ""), result.get("title", ""), log)
                     else:
                         log("⚠️ 발행 글 URL을 확보하지 못해 순위추적 자동등록을 건너뜁니다(수동 등록 필요).")
             else:
@@ -388,6 +414,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 card_count=int(getattr(req, "card_count", 3) or 3),
                 insert_map=bool(getattr(req, "insert_map", False)),
                 map_query=getattr(req, "map_query", None),
+                keep_image_markers=bool(getattr(req, "keep_image_markers", False)),
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")
@@ -402,6 +429,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest):
                 if getattr(req, "track_rank", False):
                     if result.get("result_url"):
                         log("📈 발행 글을 카페 통검 순위 추적에 등록합니다.")
+                        _register_rank_local(user_id, req.target_keyword or "",
+                                             result.get("result_url", ""), result.get("title", ""), log)
                     else:
                         log("⚠️ 발행 글 URL을 확보하지 못해 순위추적 자동등록을 건너뜁니다(수동 등록 필요).")
             else:
@@ -457,7 +486,8 @@ async def trigger_auto_post(req: AutoPostRequest,
         return {"mode": "agent", "job_id": job_id,
                 "message": "내 PC의 에이전트가 발행을 실행합니다. (로컬 에이전트 실행 필요)"}
     task_id = str(uuid.uuid4())
-    task = asyncio.create_task(run_automation_task(task_id, req))
+    # user_id 를 넘겨야 발행 후 순위추적 자동등록을 '누구 것'으로 넣을지 알 수 있다.
+    task = asyncio.create_task(run_automation_task(task_id, req, current_user.get("sub")))
     active_tasks[task_id] = task
     return {
         "success": True,
@@ -501,17 +531,32 @@ async def run_register_task(task_id: str, naver_id: str, naver_pw: Optional[str]
 async def register_account(req: RegisterAccountRequest,
                            current_user: dict = Depends(get_current_user),
                            db: Session = Depends(get_db)):
+    # 저장된 비밀번호로 채워준다.
+    # 프론트는 저장된 비밀번호를 알 수 없어서(계정 목록 응답에 비번을 담지 않는다) 여기로
+    # naver_pw 를 비워 보낸다. 그걸 그대로 넘기면 로그인 단계가
+    # '❌ 비밀번호가 제공되지 않았습니다(빈 문자열)' 로 자동 입력을 통째로 건너뛰고,
+    # 고객은 열린 창에 아이디·비밀번호를 매번 손으로 쳐야 한다.
+    from mbam_nextgen.backend.database import NaverAccount
+    naver_pw = (req.naver_pw or "").strip()
+    if not naver_pw:
+        acc = (db.query(NaverAccount)
+                 .filter(NaverAccount.user_id == current_user.get("sub"),
+                         NaverAccount.naver_id == req.naver_id)
+                 .first())
+        if acc and acc.naver_pw:
+            naver_pw = acc.naver_pw
+
     # [방법 B] 기기 인증은 사용자 PC에서 브라우저(headless=False)를 띄워 수동 로그인+2FA 하는 작업.
     # 클라우드에선 브라우저를 못 여므로 반드시 로컬 에이전트에 위임한다.
     from mbam_nextgen.backend import jobs as jobsvc
     if jobsvc.is_cloud_mode():
         job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "register_account",
-                                    {"naver_id": req.naver_id, "naver_pw": req.naver_pw})
+                                    {"naver_id": req.naver_id, "naver_pw": naver_pw})
         return {"mode": "agent", "job_id": job_id,
                 "message": "내 PC에서 브라우저가 열립니다. 로그인 + 2단계 인증을 완료해 주세요. (로컬 에이전트 실행 필요)"}
     import uuid
     task_id = str(uuid.uuid4())
-    task = asyncio.create_task(run_register_task(task_id, req.naver_id, req.naver_pw))
+    task = asyncio.create_task(run_register_task(task_id, req.naver_id, naver_pw))
     active_tasks[task_id] = task
     return {
         "success": True,
