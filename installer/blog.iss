@@ -12,7 +12,7 @@
 ; ⚠ build_blog_payload.ps1 의 -Version 과 반드시 같아야 한다.
 ;   이 값이 version.json 으로 설치본에 들어가고, 런처가 서버의 최신 버전과 비교한다.
 ;   어긋나면 방금 설치한 고객에게도 업데이트 안내가 뜬다.
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "마케팅연구소"
 ; 런처는 동봉된 pythonw.exe 로 blog_launcher.py 를 실행 (별도 exe 빌드 불필요)
 #define LauncherExe "runtime\python\pythonw.exe"

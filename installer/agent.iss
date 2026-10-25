@@ -9,7 +9,7 @@
 ; ============================================================
 
 #define MyAppName "MBAM 웹 관제 에이전트"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "MBAM"
 ; 콘솔 없이 백그라운드 실행하는 동봉 pythonw 로 agent.py 를 구동 (agent_startup.vbs 경유)
 #define AgentPyw "runtime\python\pythonw.exe"
