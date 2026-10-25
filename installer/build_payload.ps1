@@ -82,7 +82,7 @@ $exDirsAnywhere = @(
 #   그것만으로 10분 넘게 걸린다(실측). 애초에 복사하지 않는다.
 $exDirsTop = @("installer","auth_server","mbam-web","db_backup_20260621",
                "naver_place_crawler","nodejs_qa_crawler","chrome_extension",
-               "docs","build","dist","_startup_backup")
+               "docs","build","dist","_startup_backup","_보관")
 # 개발 산출물/덤프 제외 (prompts.json 등 *.json 은 유지해야 하므로 통째 제외 금지)
 #
 # ⚠ *.db 를 반드시 제외한다. 백엔드 DB(seo_history.db)에는 등록된 네이버 계정(비밀번호)·
@@ -192,8 +192,31 @@ $PyExe = Join-Path $Runtime "python\python.exe"
 
 Write-Host "  파이썬 패키지 설치..."
 & $PyExe -m pip install --upgrade pip
-& $PyExe -m pip install -r (Join-Path $Src "requirements.txt")
-& $PyExe -m pip install playwright
+
+# requirements.txt 는 개발 PC(Python 3.14)에서 뽑은 freeze 목록이라 동봉 Python($PythonVersion)
+# 에 설치할 수 없는 항목이 섞여 있다. audioop-lts 는 3.13+ 전용이라 3.12 에서는 resolver 가
+# 통째로 실패하고 '아무 패키지도 설치되지 않는다'. MBAM_Setup_1.0.1 이 실제로 이렇게 나가서
+# 고객 PC 에서 백엔드가 'No module named uvicorn' 으로 뜨지 못했다. (카페/블로그 스크립트와 같은 처리)
+# 또 이 파일은 UTF-16 로 저장돼 있어 .NET 이 BOM 을 보고 읽게 한다.
+$reqSrc = Join-Path $Src "requirements.txt"
+$skipPkgs = @("audioop-lts")     # 3.13+ 전용 (3.12 에는 audioop 이 표준 라이브러리로 있음)
+$reqKept = [System.IO.File]::ReadAllLines($reqSrc) | Where-Object {
+    -not ($skipPkgs -contains ($_ -split '[=<>!~\[; ]')[0].Trim().ToLower())
+}
+$reqFiltered = Join-Path $Cache "requirements_mbam_payload.txt"
+Set-Content -Path $reqFiltered -Value $reqKept -Encoding utf8
+& $PyExe -m pip install -r $reqFiltered
+# pyperclip: freeze 목록에 빠져 있지만 네이버 로그인(클립보드 붙여넣기)에 쓴다.
+& $PyExe -m pip install playwright pyperclip
+
+# pip 종료코드는 믿을 수 없으므로 실제 import 로 확인한다. 실패하면 고객 PC 에서 안 뜨는 설치본이 나가므로 중단.
+Write-Host "  설치 검증(핵심 패키지 import)..."
+$probe = "import fastapi,uvicorn,sqlalchemy,pydantic,dotenv,bs4,aiohttp,apscheduler,requests,PIL,tkinter,jwt,cryptography,pyperclip;import playwright.async_api,greenlet,numpy,pandas;print('PKG_OK')"
+$probeOut = & $PyExe -c $probe 2>&1
+if ($probeOut -notmatch "PKG_OK") {
+    throw "동봉 Python 패키지 설치가 불완전합니다. pip 로그를 확인하세요.`n$probeOut"
+}
+Write-Host "    핵심 패키지 정상" -ForegroundColor Green
 
 Write-Host "  Chromium(Playwright) 설치..."
 $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $Runtime "ms-playwright")

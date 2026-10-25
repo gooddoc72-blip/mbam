@@ -48,9 +48,9 @@ $exDirsAny = @("__pycache__",".git","node_modules",".next",
 # 루트 특정 폴더만 제외
 $exDirsRoot = @("venv","installer","auth_server","mbam-web","tests",
                 "nodejs_qa_crawler","chrome_extension","naver_place_crawler",
-                "build","dist","docs","output","payload","payload_agent")
+                "build","dist","docs","output","payload","payload_agent","_보관")
 # 운영자 계정/키/DB/무관 산출물(크롤러 설치본 등)은 고객 설치본에 절대 포함 금지
-$exFiles = @("agent_config.json", ".env",
+$exFiles = @("agent_config.json", ".env", "user_settings.json", "*.pem",
              "*.db","*.zip","*.log","*.pyc","*.spec",
              "CrawlerPro*.exe","*_Setup*.exe","관리자_승인도구.exe",
              "crash*.txt","crash*.log","test_*.py","test_image.*","editor_fail*.png",
@@ -63,6 +63,24 @@ foreach ($d in $exDirsRoot) { $rcArgs += @("/XD", (Join-Path $Src $d)) }   # 루
 foreach ($f in $exFiles)    { $rcArgs += @("/XF", $f) }
 & robocopy @rcArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy 실패(code $LASTEXITCODE)" }
+
+# 최상위는 화이트리스트로 다시 거른다. 위 복사는 블랙리스트라 루트에 새로 생긴 파일이 그대로 따라온다.
+# 실제로 1.0.1 빌드에 my-key.pem(AWS 서버 접속 키), 관리자 승인도구 exe(관리자 토큰 내장),
+# deploy_aws_update.bat, .claude\, _startup_backup\ 이 들어갔다. (build_payload.ps1 의 1-b 와 같은 방식)
+$keepFiles = @("agent.py", "agent_startup.vbs", "agent_config.example.json",
+               "license_config.json", "requirements.txt")
+$keepDirs  = @("mbam_nextgen", "licensing", "runtime")
+Get-ChildItem $Payload -File -Force | Where-Object { $keepFiles -notcontains $_.Name } |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem $Payload -Directory -Force | Where-Object { $keepDirs -notcontains $_.Name } |
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# 안전장치 — 키·계정 정보가 섞여 들어갔으면 즉시 중단(제외 규칙이 나중에 잘못 바뀌어도 막는다)
+$leaks = Get-ChildItem $Payload -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object {
+  $_.FullName -notmatch '\\runtime\\' -and
+  ($_.Extension -in ".pem", ".key", ".db" -or $_.Name -in ".env", "agent_config.json", "user_settings.json")
+}
+if ($leaks) { throw "고객 설치본에 들어가면 안 되는 파일이 있습니다:`n$($leaks.FullName -join "`n")" }
 
 # 에이전트 실행에 꼭 필요한 진입 파일 존재 확인
 foreach ($f in @("agent.py","agent_startup.vbs","requirements.txt")) {
@@ -83,8 +101,21 @@ $PyExe = Join-Path $Runtime "python\python.exe"
 
 Write-Host "  파이썬 패키지 설치(requirements.txt)..."
 & $PyExe -m pip install --upgrade pip
-& $PyExe -m pip install -r (Join-Path $Src "requirements.txt")
-& $PyExe -m pip install playwright
+# audioop-lts 는 3.13+ 전용이라 동봉 Python 3.12 에서 resolver 가 통째로 실패한다(→ 아무것도 설치 안 됨).
+# 개발 PC freeze 목록이라 생기는 문제 — build_payload.ps1 / 카페 / 블로그 스크립트와 같은 처리.
+$reqKept = [System.IO.File]::ReadAllLines((Join-Path $Src "requirements.txt")) | Where-Object {
+    -not (@("audioop-lts") -contains ($_ -split '[=<>!~\[; ]')[0].Trim().ToLower())
+}
+$reqFiltered = Join-Path $Cache "requirements_agent_payload.txt"
+Set-Content -Path $reqFiltered -Value $reqKept -Encoding utf8
+& $PyExe -m pip install -r $reqFiltered
+& $PyExe -m pip install playwright pyperclip
+
+# pip 종료코드는 믿을 수 없으므로 실제 import 로 확인한다. 에이전트가 쓰는 핵심 패키지가 없으면 중단.
+$probeOut = & $PyExe -c "import httpx,requests,bs4,aiohttp,PIL,tkinter,pyperclip;import playwright.async_api,greenlet;print('PKG_OK')" 2>&1
+if ($probeOut -notmatch "PKG_OK") {
+    throw "동봉 Python 패키지 설치가 불완전합니다. pip 로그를 확인하세요.`n$probeOut"
+}
 
 # ── 2-b. 동봉 런타임 네이티브 의존성 보정 ───────────────────
 # 동봉 Python 은 C 런타임(vcruntime140*)만 들어 있고 C++ 런타임(msvcp140.dll)이 없다.

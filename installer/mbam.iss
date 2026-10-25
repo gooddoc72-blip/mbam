@@ -5,7 +5,7 @@
 ; ============================================================
 
 #define MyAppName "MBAM 마케팅 프로그램"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "MBAM"
 ; 런처는 동봉된 pythonw.exe 로 mbam_launcher.py 를 실행 (별도 exe 빌드 불필요)
 #define LauncherExe "runtime\python\pythonw.exe"
@@ -17,7 +17,10 @@ AppId={{B7A3E2C1-9F4D-4A8E-8C21-MBAM00000001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\MBAM
+; 앱이 실행 중에 설치 폴더 안에 파일을 쓴다(seo_history.db 등 SQLite DB, 네이버 로그인 프로필,
+; 임시 이미지). Program Files 는 일반 사용자 권한으로 쓸 수 없으므로 카페·블로그·에이전트처럼
+; 사용자 폴더에 설치한다. (1.0.1 까지는 {autopf}\MBAM + 관리자 권한이었다)
+DefaultDirName={localappdata}\Programs\MBAM
 DefaultGroupName=MBAM
 DisableProgramGroupPage=yes
 OutputDir=output
@@ -27,7 +30,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=admin
+; 사용자 폴더에 설치하므로 관리자 권한이 필요 없다(회사 PC 에서도 설치 가능).
+PrivilegesRequired=lowest
 ; 아이콘 (있으면)
 ; SetupIconFile=mbam.ico
 UninstallDisplayName={#MyAppName}

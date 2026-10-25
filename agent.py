@@ -36,6 +36,11 @@ _bundled_browsers = os.path.join(APP_DIR, "runtime", "ms-playwright")
 if os.path.isdir(_bundled_browsers):
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", _bundled_browsers)
 
+# 핸들러가 import 하는 backend.routers.* 는 backend.auth 를 거치는데, auth 는 JWT_SECRET 이 없으면
+# import 시점에 ValueError 를 던진다. 에이전트는 토큰을 발급·검증하지 않으므로 프로세스 한정 임의값이면
+# 충분하다. 설치형 에이전트에는 .env 가 없어서(운영자 키라 동봉 금지) 플레이스·카페글 분석이 전부 실패했다.
+os.environ.setdefault("JWT_SECRET", __import__("secrets").token_urlsafe(48))
+
 # 로그인 후 채워짐 — 일부 핸들러가 클라우드로 파일 업로드 등 인증 요청을 할 때 사용
 _AGENT_AUTH = {"cloud_url": "", "token": ""}
 

@@ -10,6 +10,7 @@ MBAM 통합 런처
 없으면 시스템 PATH 의 python/node 를 사용합니다(개발 환경 호환).
 """
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -23,6 +24,47 @@ WEB_DIR = APP_DIR / "mbam-web"
 
 LOG_DIR = Path(os.environ.get("LOCALAPPDATA", str(APP_DIR))) / "MBAM" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+SECRETS_FILE = LOG_DIR.parent / "secrets.env"
+
+
+def _ensure_secrets() -> dict:
+    """JWT_SECRET / ENV_CIPHER_KEY 를 이 PC 에서 1회 만들어 두고 계속 재사용한다. (cafe_launcher 와 같은 처리)
+
+    - JWT_SECRET     : 로그인 토큰 서명. 없으면 백엔드가 기동 자체를 거부한다.
+    - ENV_CIPHER_KEY : 저장된 네이버 계정 비밀번호 암호화 키. 매번 새로 만들면 이전에 저장한 비밀번호를 못 푼다.
+
+    개발 환경의 .env 는 고객 설치본에 넣지 않으므로(운영자 키가 들어 있음) 여기서 만든다.
+    설치 폴더가 아니라 %LOCALAPPDATA%\\MBAM 에 두어 프로그램을 다시 설치해도 유지된다.
+    """
+    data = {}
+    if SECRETS_FILE.exists():
+        try:
+            for line in SECRETS_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    data[k.strip()] = v.strip()
+        except Exception:
+            data = {}
+
+    changed = False
+    if not data.get("JWT_SECRET"):
+        data["JWT_SECRET"] = secrets.token_urlsafe(48)
+        changed = True
+    if not data.get("ENV_CIPHER_KEY"):
+        try:
+            from cryptography.fernet import Fernet
+            data["ENV_CIPHER_KEY"] = Fernet.generate_key().decode()
+        except Exception:
+            data["ENV_CIPHER_KEY"] = secrets.token_urlsafe(32)
+        changed = True
+
+    if changed:
+        SECRETS_FILE.write_text(
+            "# 이 파일은 이 PC 전용 보안키입니다. 삭제하면 저장된 계정 비밀번호를 복호화할 수 없습니다.\n"
+            + "\n".join(f"{k}={v}" for k, v in data.items()) + "\n",
+            encoding="utf-8")
+    return data
 
 BACKEND_PORT = 8000
 FRONTEND_PORT = 3000
@@ -78,6 +120,8 @@ def start_backend():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(APP_DIR)
     env["PYTHONIOENCODING"] = "utf-8"
+    # 보안키 주입 — 없으면 백엔드가 JWT_SECRET 없다고 기동을 거부한다.
+    env.update(_ensure_secrets())
     # 설치형: 동봉된 Chromium(Playwright) 경로를 백엔드에 알려줌
     bundled_browsers = APP_DIR / "runtime" / "ms-playwright"
     if bundled_browsers.exists():
