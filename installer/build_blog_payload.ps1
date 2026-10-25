@@ -88,7 +88,7 @@ $exDirsAnywhere = @(
 # 최상위에서만 제외할 것들(같은 이름이 하위에 또 있어도 지우면 안 되는 경우)
 $exDirsTop = @("installer","auth_server","mbam-web","db_backup_20260621",
                "nodejs_qa_crawler","chrome_extension","naver_place_crawler",
-               "build","dist","_startup_backup")
+               "build","dist","_startup_backup","_보관")
 # 개발 산출물/덤프 제외 (prompts.json 등 *.json 은 유지해야 하므로 통째 제외 금지)
 # agent_config.json / .env: 빌드 PC(운영자)의 로그인 계정·API 키가 고객 설치본에
 # 들어가면 안 됨 — 반드시 제외 (고객 키는 각자 설치 후 [설정]에서 입력)

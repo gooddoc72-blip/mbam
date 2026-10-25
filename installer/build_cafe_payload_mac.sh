@@ -107,7 +107,7 @@ rsync -a \
   --exclude '/installer' --exclude '/auth_server' --exclude '/mbam-web' \
   --exclude '/db_backup_20260621' --exclude '/nodejs_qa_crawler' \
   --exclude '/chrome_extension' --exclude '/naver_place_crawler' \
-  --exclude '/docs' --exclude '/build' --exclude '/dist' --exclude '/_startup_backup' \
+  --exclude '/docs' --exclude '/build' --exclude '/dist' --exclude '/_startup_backup' --exclude '/_보관' \
   --exclude 'agent_config.json' --exclude '.env' --exclude 'user_settings.json' \
   --exclude '*.db' --exclude 'my-key.pem' --exclude 'deploy_aws_update.bat' \
   --exclude '*.log' --exclude '*.pyc' --exclude 'crash*.txt' --exclude 'crash*.log' \

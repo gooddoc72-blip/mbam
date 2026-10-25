@@ -9,6 +9,7 @@ nodejs_qa_crawler/
 naver_place_crawler/
 chrome_extension/
 db_backup_*/
+_보관/
 saved_images/
 temp_uploaded_images/
 temp_images/
