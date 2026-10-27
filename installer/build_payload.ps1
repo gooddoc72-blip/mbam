@@ -211,7 +211,9 @@ Set-Content -Path $reqFiltered -Value $reqKept -Encoding utf8
 
 # pip 종료코드는 믿을 수 없으므로 실제 import 로 확인한다. 실패하면 고객 PC 에서 안 뜨는 설치본이 나가므로 중단.
 Write-Host "  설치 검증(핵심 패키지 import)..."
-$probe = "import fastapi,uvicorn,sqlalchemy,pydantic,dotenv,bs4,aiohttp,apscheduler,requests,PIL,tkinter,jwt,cryptography,pyperclip;import playwright.async_api,greenlet,numpy,pandas;print('PKG_OK')"
+# passlib 1.7.4 는 bcrypt 4.1+ 와 맞지 않아 hash() 에서 ValueError 가 난다(설치형 로그인·회원가입 불가).
+# import 만으로는 안 잡히므로 실제로 해시를 만들어 본다.
+$probe = "import fastapi,uvicorn,sqlalchemy,pydantic,dotenv,bs4,aiohttp,apscheduler,requests,PIL,tkinter,jwt,cryptography,pyperclip;import playwright.async_api,greenlet,numpy,pandas;from passlib.context import CryptContext;c=CryptContext(schemes=['bcrypt']);assert c.verify('x',c.hash('x'));print('PKG_OK')"
 $probeOut = & $PyExe -c $probe 2>&1
 if ($probeOut -notmatch "PKG_OK") {
     throw "동봉 Python 패키지 설치가 불완전합니다. pip 로그를 확인하세요.`n$probeOut"

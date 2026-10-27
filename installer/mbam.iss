@@ -5,7 +5,7 @@
 ; ============================================================
 
 #define MyAppName "MBAM 마케팅 프로그램"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "MBAM"
 ; 런처는 동봉된 pythonw.exe 로 mbam_launcher.py 를 실행 (별도 exe 빌드 불필요)
 #define LauncherExe "runtime\python\pythonw.exe"
