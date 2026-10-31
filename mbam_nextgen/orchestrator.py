@@ -838,7 +838,7 @@ class WorkflowOrchestrator:
         accounts: list,
         keyword: str = None,
         interval_mins: int = 5,
-        wash_images: bool = False,
+        wash_images: bool = True,      # 발행 사진 자동 세탁(기본 켬)
         image_folder_path: str = None,
         generated_contents: list = None,
         **kwargs
@@ -948,7 +948,7 @@ class WorkflowOrchestrator:
         post_mode: str = "ai_generate",
         manual_title: str = None,
         manual_content: str = None,
-        wash_images: bool = False,
+        wash_images: bool = True,      # 발행 사진 자동 세탁(기본 켬)
         image_folder_path: str = None,
         source_data: str = None,
         generate_card_news: bool = False,
@@ -961,6 +961,7 @@ class WorkflowOrchestrator:
         # 로그엔 인증정보 노출 없이 서버 호스트만 표기
         proxy_label = f"프록시: {(proxy_config or {}).get('server', '?')}" if proxy_config else "직접 연결"
 
+        self.armor.reset_stats()   # 이번 발행(계정)의 사진 세탁 집계
         logger.info(f"🚀 [Orchestrator] 워크플로우 시작: {account_id} / {keyword}")
         logger.info(f"⚡ 속도: {speed_mode} x{speed_multiplier} | 발행: {publish_mode} | {proxy_label}")
         
@@ -1145,6 +1146,11 @@ class WorkflowOrchestrator:
                         washed_images.append(washed_img)
                 # 카드(표지 + 소제목별)를 소제목 위치에 맞춰 배치: 본문 [이미지] 마커 재정렬
                 blog_content = self._align_card_markers(blog_content, len(washed_images))
+
+            if self.armor.summary():
+                logger.info(f"🧼 [Orchestrator] {self.armor.summary()}")
+            elif washed_images and not wash_images:
+                logger.info("[Orchestrator] 사진 세탁 꺼짐 — 원본 사진 그대로 사용")
 
             # 4. 글쓰기 자동 진입 및 에디터 감지
             # blog_id(블로그 주소)가 화면에서 안 넘어왔으면 계정관리(DB)에 저장된 값을 자동 조회.
@@ -1675,6 +1681,7 @@ class WorkflowOrchestrator:
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
 
+        self.armor.reset_stats()
         logger.info(f"\n☕ [Orchestrator] 카페 워크플로우 시작")
         logger.info(f"   계정: {account_id} | 카페: {cafe_id} | 게시판: {board_name}")
         logger.info(f"   키워드: {keyword} | 자동등록: {'ON' if auto_submit else 'OFF'}")
@@ -1859,6 +1866,8 @@ class WorkflowOrchestrator:
                         cafe_content = self._align_card_markers(cafe_content, len(washed_images))
 
                     # 8. 원고 타이핑 (이미지를 [이미지] 마커 위치에 인라인 삽입)
+                    if self.armor.summary():
+                        logger.info(f"🧼 [Orchestrator] {self.armor.summary()}")
                     post_title = title if title else f"{keyword} 관련 테스트"
                     await self.cafe.write_post(
                         editor_frame, post_title, cafe_content,

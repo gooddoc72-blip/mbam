@@ -165,6 +165,15 @@ function BlogPostingContent() {
 
   // 3. Image Settings
   const [washImages, setWashImages] = useState(true);
+  // 사진 세탁 강도(약/표준/강) — 다음 방문에도 유지
+  const [washStrength, setWashStrength] = useState("standard");
+  useEffect(() => {
+    try { const v = localStorage.getItem("mbam_wash_strength"); if (v) setWashStrength(v); } catch (e) {}
+  }, []);
+  const changeWashStrength = (v) => {
+    setWashStrength(v);
+    try { localStorage.setItem("mbam_wash_strength", v); } catch (e) {}
+  };
   const [imageUploadMode, setImageUploadMode] = useState("folder"); // "folder" or "direct"
   const [imageFolderPath, setImageFolderPath] = useState("");
   const [directImages, setDirectImages] = useState("");
@@ -805,6 +814,7 @@ function BlogPostingContent() {
         accounts: validAccounts,
         interval_mins: parseInt(intervalMins) || 0,
         wash_images: washImages,
+        wash_strength: washStrength,
         image_folder_path: imageFolderPath || null,
         insert_map: insertMap,
         map_query: mapQuery,
@@ -1359,7 +1369,15 @@ function BlogPostingContent() {
                <input type="checkbox" checked={washImages} onChange={e => setWashImages(e.target.checked)} style={{ transform: "scale(1.2)" }} />
                ✨ 이미지 자동 세탁 적용 (메타데이터 제거 및 노이즈 추가)
              </label>
+             {washImages && (
+               <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.35rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.85rem" }}>
+                 <option value="light">세탁 약 — 촬영정보만 교체</option>
+                 <option value="standard">세탁 표준 — 미세 회전·자르기 (권장)</option>
+                 <option value="strong">세탁 강 — 색감·크기까지 변경</option>
+               </select>
+             )}
           </div>
+          {washImages && <p style={{ margin: "-0.5rem 0 1rem", fontSize: "0.76rem", color: "#94a3b8" }}>* 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다. 같은 사진을 여러 계정에 쓸 때는 '강'을 권장합니다.</p>}
           <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: trackRank ? "#16a34a" : "#64748b" }}>
                <input type="checkbox" checked={trackRank} onChange={e => setTrackRank(e.target.checked)} style={{ transform: "scale(1.2)" }} />

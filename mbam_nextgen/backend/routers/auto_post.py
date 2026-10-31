@@ -9,6 +9,7 @@ from mbam_nextgen.backend.database import get_db, Advertiser
 from mbam_nextgen.backend.auth import get_current_user
 from mbam_nextgen.backend.limits import check_daily_limit, consume_daily
 from mbam_nextgen.services.seo_analyzer import SeoAnalyzer
+from mbam_nextgen.services.armor import normalize_strength
 
 
 def _action_type_for(req) -> str:
@@ -129,7 +130,8 @@ class AutoPostRequest(BaseModel):
     # For multiple accounts
     accounts: Optional[List[dict]] = None
     interval_mins: Optional[int] = 5
-    wash_images: Optional[bool] = False
+    wash_images: Optional[bool] = True    # 발행 사진 자동 세탁(기본 켬, 끌 수 있음)
+    wash_strength: Optional[str] = "standard"  # light | standard | strong
     image_folder_path: Optional[str] = None
     
     # Pre-generated contents
@@ -314,6 +316,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
 
     try:
         orchestrator = WorkflowOrchestrator()
+        # 이번 발행의 사진 세탁 강도 — 블로그·카페 워크플로우의 모든 세탁이 이 값을 쓴다
+        orchestrator.armor.strength = normalize_strength(getattr(req, "wash_strength", None))
         account_id = req.naver_id if req.naver_id else "unknown_account"
 
         # 병원 카테고리는 '완전 자동' — 요청 플래그 또는 병원(promo_type/prompt_category)이면 AI 이미지 자동 생성
@@ -350,6 +354,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                 result = await orchestrator.execute_blog_workflow(
                     account_id=account_id,
                     account_pw=req.naver_pw,
+                    wash_images=bool(req.wash_images),
                     keyword=req.target_keyword or "테스트",
                     proxy=req.proxy,
                     publish_mode=req.publish_mode,
