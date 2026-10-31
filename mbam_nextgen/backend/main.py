@@ -26,6 +26,11 @@ if sys.platform == 'win32':
 env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
 load_dotenv(env_path)
 
+# mbam_nextgen/data 는 git 에 없어 깨끗한 컨테이너(Railway)에는 처음에 없다.
+# 여러 라우터·서비스가 import 시점에 data/ranking.db 를 열기 때문에, 라우터 import 보다 먼저 만든다.
+# (라우터 import 순서가 바뀌자 schedule.py 가 폴더 생성 전에 열려 운영 백엔드가 기동 실패했었다)
+os.makedirs(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"), exist_ok=True)
+
 # ── 제품 프로파일 ──────────────────────────────────────────────────────────
 # MBAM_PRODUCT=cafe 면 '네이버 카페 전용판', =blog 면 '블로그 자동화 전용판'이 된다.
 # 그 제품에 필요 없는 라우터를 아예 마운트하지 않아, 프론트를 우회해 직접 호출해도 404 가 난다.

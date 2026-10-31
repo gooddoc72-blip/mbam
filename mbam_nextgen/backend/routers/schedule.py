@@ -8,6 +8,8 @@ router = APIRouter(prefix="/api/schedule", tags=["Schedule"])
 db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ranking.db")
 
 def init_db():
+    # data/ 는 git 에 없다 — 깨끗한 컨테이너(Railway)에선 아직 없을 수 있어 먼저 만든다.
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('''
