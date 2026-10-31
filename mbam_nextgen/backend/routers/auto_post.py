@@ -488,6 +488,9 @@ async def trigger_auto_post(req: AutoPostRequest,
     if jobsvc.is_cloud_mode():
         payload = req.model_dump() if hasattr(req, "model_dump") else req.dict()
         job_id = jobsvc.enqueue_job(db, current_user.get("sub"), "auto_post", payload)
+        # 웹은 job_id 로 /status 를 폴링한다. 에이전트의 첫 로그가 오기 전에 404 로 끝나지 않게 미리 만들어 둔다.
+        task_status_store[job_id] = {"status": "running",
+                                     "logs": ["⏳ 내 PC 에이전트가 작업을 받기를 기다리는 중... (에이전트가 꺼져 있으면 시작되지 않습니다)"]}
         return {"mode": "agent", "job_id": job_id,
                 "message": "내 PC의 에이전트가 발행을 실행합니다. (로컬 에이전트 실행 필요)"}
     task_id = str(uuid.uuid4())

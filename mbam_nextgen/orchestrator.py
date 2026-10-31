@@ -1797,7 +1797,10 @@ class WorkflowOrchestrator:
                     if _img_folder and os.path.isdir(_img_folder):
                         # 사용자가 첨부한 이미지(글감 생성용 업로드 등)를 글에 첨부
                         import glob as _glob
-                        files = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")))
+                        # 파일 이름 속 숫자를 숫자로 비교한다(자연 정렬) — 글자순이면 1, 10, 2, 3… 으로 섞였다.
+                        _natural = lambda fp: [int(t) if t.isdigit() else t.lower()
+                                               for t in _re_map.split(r'(\d+)', os.path.basename(fp))]
+                        files = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
                                  if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))]
                         # 업로드 원고는 본문의 [이미지] 자리 수만큼만 가져온다.
                         # 폴더에 사진이 더 많으면 남는 사진이 글 끝에 몰려 붙어버린다.

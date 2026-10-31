@@ -212,7 +212,7 @@ async def _download_uploaded_images(folder_id: str):
         return None
 
 
-async def _handle_auto_post(payload: dict) -> dict:
+async def _handle_auto_post(payload: dict, log=None) -> dict:
     # 발행(블로그/카페): 사용자 PC에서 네이버 로그인+글쓰기 브라우저 자동화 실행
     import uuid as _uuid, os
     # 클라우드에서 만든 첨부 이미지 폴더는 이 PC에 없다 → 다운로드 URL로 받아 로컬 폴더로 대체(없으면 이미지 없이 진행)
@@ -223,7 +223,21 @@ async def _handle_auto_post(payload: dict) -> dict:
     from mbam_nextgen.backend.routers.auto_post import run_automation_task, task_status_store, AutoPostRequest
     req = AutoPostRequest(**payload)
     tid = _uuid.uuid4().hex
-    await run_automation_task(tid, req)   # 워크플로우 실행 + 로컬 task_status_store에 상태 기록
+    # 워크플로우 실행 + 로컬 task_status_store에 상태 기록.
+    # 실행 중 쌓이는 로그를 1초마다 웹(클라우드)으로 중계해 '실시간 모니터링 로그'에 보이게 한다.
+    runner = asyncio.create_task(run_automation_task(tid, req))
+    sent = 0
+    while True:
+        done = runner.done()
+        lines = task_status_store.get(tid, {}).get("logs", [])
+        if log:
+            for line in lines[sent:]:
+                log(line)
+        sent = len(lines)
+        if done:
+            break
+        await asyncio.sleep(1)
+    await runner
     st = task_status_store.get(tid, {})
     if st.get("status") == "failed":
         logs = st.get("logs", [])
@@ -711,6 +725,9 @@ class AgentClient:
         job_type = job.get("job_type")
         payload = job.get("payload") or {}
         task_id = payload.get("task_id") if isinstance(payload, dict) else None
+        # 발행은 웹이 job_id 로 /api/auto_post/status 를 폴링한다 → job_id 로 로그를 중계해야 화면에 보인다.
+        if not task_id and job_type == "auto_post":
+            task_id = job_id
         print(f"[agent] 작업 수신: {job_type} ({job_id})")
 
         # 진행 로그 실시간 중계용 콜백(동기) — task_id 가 있는 위임 작업만.
@@ -761,6 +778,10 @@ def _try_login(cloud_url: str, email: str, password: str):
                        timeout=15)
         if r.status_code == 200:
             return True, ""
+        # 404·5xx 는 계정 오류가 아니라 서버가 내려간 것(배포 중단 등) — 로그인 창을 띄우지 않고
+        # 에이전트가 백그라운드에서 재시도하게 둔다.
+        if r.status_code == 404 or r.status_code >= 500:
+            return None, f"서버 응답 없음 ({r.status_code})"
         try:
             detail = (r.json() or {}).get("detail") or ""
         except Exception:
