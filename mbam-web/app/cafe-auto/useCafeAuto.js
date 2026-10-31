@@ -704,6 +704,7 @@ export function useCafeAuto() {
   // 저장된 원고 일괄 발행 (계정별 카페/게시판으로 순차)
   const handleBatchPublish = async () => {
     if (savedManuscripts.length === 0) return alert("저장된 원고가 없습니다. 먼저 '원고 저장'을 하세요.");
+    if (cafeInsertMap && !(cafeMapQuery || "").trim()) return alert("'네이버 지도(장소) 첨부'를 켰다면 삽입할 장소명 또는 주소를 입력하세요.");
     if (!window.confirm(`${savedManuscripts.length}개 저장 원고를 일괄 발행할까요?`)) return;
     batchCancelRef.current = false;  // 취소 플래그 초기화
     setBatchPosting(true); setLoading(true); setStatusLogs([]); setTaskStatus("running"); setTaskId(null); setTaskKind("post");
@@ -767,6 +768,8 @@ export function useCafeAuto() {
       if (!jobs.some(j => j.acc.id === acc.id)) missing.push(acc.naver_id);
     }
     if (missing.length > 0) return alert("아래 '계정별 타겟 카페·게시판 매칭'에서 카페/게시판을 지정하세요.\n(미지정 계정: " + missing.join(", ") + ")");
+    // 지도 첨부를 켜고 장소명을 비우면 발행 쪽에서 조용히 건너뛰어 '지도가 안 들어간다'로 보인다.
+    if (cafeInsertMap && !(cafeMapQuery || "").trim()) return alert("'네이버 지도(장소) 첨부'를 켰다면 삽입할 장소명 또는 주소를 입력하세요.");
     if (isUpload) {
       if (uploadedManuscripts.length === 0) return alert("발행할 원고 파일을 먼저 올리세요.");
       const noMs = jobs.filter(j => !uploadedManuscripts[msAssign[j.key]]);

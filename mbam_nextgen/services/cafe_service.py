@@ -292,8 +292,6 @@ class CafeService:
         # 관대한 마커 인식: [이미지] / [이미지:3] / [이미지 3] / [이미지3] 모두 허용(AI 형식 이탈 대비)
         MARKER_RE = r'\[이미지\s*:?\s*\d*\]'
         parts = re.split(r'(' + MARKER_RE + r')', content)
-        pending_text = ""
-        inserted = 0
 
         def _next_seq_idx():
             for k in range(n_imgs):
@@ -301,37 +299,73 @@ class CafeService:
                     return k
             return -1
 
-        if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {n_imgs}장, 조각 {len(parts)}개)")
+        # 1) 원고를 [('text', 문단) | ('img', 사진번호, 번호지정여부)] 순서열로 만든다. 문단은 빈 줄 기준.
+        items = []
         for part in parts:
             mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
             if mk:
-                idx = -1
+                idx, fixed = -1, False
                 if mk.group(1):                       # 번호 지정 [이미지:N]
                     cand = int(mk.group(1)) - 1
                     if 0 <= cand < n_imgs and not used[cand]:
-                        idx = cand
+                        idx, fixed = cand, True
                 if idx < 0:                            # 번호 없음/무효/중복 → 순차 폴백
                     idx = _next_seq_idx()
                 if 0 <= idx < n_imgs:
-                    img_path = images[idx]
-                    if img_path and os.path.exists(img_path):
-                        if pending_text.strip():
-                            await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
-                            pending_text = ""
-                        inserted += 1
-                        if logger: logger.info(f"[CafeService] 이미지 업로드 {inserted}/{n_imgs} (사진 #{idx+1})")
-                        await _safe_upload(img_path)
                     used[idx] = True
+                    items.append(("img", idx, fixed))
             elif part and part.strip():
                 # 형식을 벗어나 캡처되지 않은 잔여 이미지 표기([이미지 두번째] 등)는 본문에 새지 않게 제거
                 clean = re.sub(r'\[이미지[^\]]*\]', '', part).strip()
-                if clean:
-                    pending_text += clean + "\n\n"
+                for para in re.split(r'\n\s*\n', clean):
+                    if para.strip():
+                        items.append(("text", para.strip()))
+
+        # 2) 제목 다음은 글부터 — 맨 앞에 온 사진은 첫 문단 뒤로 보낸다.
+        first_text = next((i for i, it in enumerate(items) if it[0] == "text"), -1)
+        if first_text > 0:
+            items = [items[first_text]] + items[:first_text] + items[first_text + 1:]
+
+        # 3) 마커보다 사진이 많으면 남은 사진을 맨 아래에 몰지 않고,
+        #    아직 사진이 없는 문단 뒤 자리에 고르게 나눠 '글 → 사진 → 글 → 사진' 이 되게 한다.
+        leftover = [k for k in range(n_imgs) if not used[k]]
+        gaps = [i for i, it in enumerate(items)
+                if it[0] == "text" and (i + 1 >= len(items) or items[i + 1][0] != "img")]
+        if leftover and gaps:
+            take = min(len(leftover), len(gaps))
+            # gaps 중 take 개를 균등 간격으로 고른다(마지막 문단 뒤 자리도 포함).
+            chosen = sorted({gaps[round(j * (len(gaps) - 1) / max(take - 1, 1))] if take > 1 else gaps[0]
+                             for j in range(take)})
+            for pos, k in zip(reversed(chosen), reversed(leftover[:len(chosen)])):
+                items.insert(pos + 1, ("img", k, False))
+                used[k] = True
+
+        # 번호 지정이 아닌 자리는 위에서부터 폴더 순서(1, 2, 3…)대로 채운다 — 사진 순서가 섞이지 않게.
+        free_slots = [i for i, it in enumerate(items) if it[0] == "img" and not it[2]]
+        for i, k in zip(free_slots, sorted(items[i][1] for i in free_slots)):
+            items[i] = ("img", k, False)
+
+        # 4) 순서대로 입력
+        pending_text = ""
+        inserted = 0
+        if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {n_imgs}장, 문단 {sum(1 for it in items if it[0] == 'text')}개)")
+        for kind, val, *_ in items:
+            if kind == "text":
+                pending_text += val + "\n\n"
+                continue
+            img_path = images[val]
+            if img_path and os.path.exists(img_path):
+                if pending_text.strip():
+                    await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+                    pending_text = ""
+                inserted += 1
+                if logger: logger.info(f"[CafeService] 이미지 업로드 {inserted}/{n_imgs} (사진 #{val+1})")
+                await _safe_upload(img_path)
 
         if pending_text.strip():
             await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
 
-        # 남은(미사용) 이미지는 글 맨 하단에 추가 (안전장치)
+        # 문단보다 사진이 많아 자리를 못 받은 사진만 글 맨 하단에 추가 (안전장치)
         for k in range(n_imgs):
             if not used[k]:
                 img_path = images[k]

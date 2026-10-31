@@ -1873,6 +1873,8 @@ class WorkflowOrchestrator:
                             await self.cafe.insert_place_map(editor_frame, _map_q)
                         except Exception as _e:
                             logger.error(f"[Orchestrator] 카페 지도 삽입 중 오류(무시): {_e}")
+                    elif insert_map:
+                        logger.warning("[Orchestrator] 지도 첨부가 켜져 있지만 장소명이 비어 있어 지도를 넣지 않았습니다.")
 
                     # 10. 등록
                     if auto_submit:
