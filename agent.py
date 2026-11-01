@@ -666,12 +666,173 @@ HANDLERS = {
 }
 
 
+# ── 자동 업데이트 ─────────────────────────────────────────────────────────
+#   서버(/api/agent/update/*)에 배포된 코드(agent.py + mbam_nextgen/**/*.py)로 이 폴더를 맞춘다.
+#   작업이 없을 때만 받아서 → 문법 검사 → 바꿀 파일 백업 → 교체 → 스스로 다시 시작.
+#   새 코드로 3번 연속 로그인까지 못 가면 백업으로 되돌리고 그 버전은 다시 받지 않는다.
+#   설치 폴더(runtime\python 이 있는 곳)에서만 동작 — 개발 중인 소스 폴더를 덮어쓰지 않게.
+UPDATE_CHECK_SEC = 600
+_VERSION_FILE = os.path.join(APP_DIR, "agent_version.json")
+_UPDATE_BACKUP = os.path.join(APP_DIR, "_update_backup")
+
+
+def _auto_update_enabled() -> bool:
+    if os.environ.get("AGENT_NO_UPDATE"):
+        return False
+    return os.path.isdir(os.path.join(APP_DIR, "runtime", "python"))
+
+
+def _read_version_state() -> dict:
+    try:
+        with open(_VERSION_FILE, "r", encoding="utf-8") as f:
+            st = json.load(f)
+        return st if isinstance(st, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_version_state(st: dict):
+    try:
+        tmp = _VERSION_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False)
+        os.replace(tmp, _VERSION_FILE)
+    except Exception as e:
+        print(f"[update] 버전 기록 저장 실패: {e}")
+
+
+def _restore_update_backup(st: dict):
+    """백업해 둔 이전 파일로 되돌린다(새로 생긴 파일은 지운다)."""
+    import shutil
+    for rel in st.get("added", []):
+        try:
+            os.remove(os.path.join(APP_DIR, rel))
+        except Exception:
+            pass
+    if os.path.isdir(_UPDATE_BACKUP):
+        for dp, _, fns in os.walk(_UPDATE_BACKUP):
+            for fn in fns:
+                src = os.path.join(dp, fn)
+                rel = os.path.relpath(src, _UPDATE_BACKUP)
+                dst = os.path.join(APP_DIR, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+
+
+def _check_pending_update():
+    """시작할 때 호출 — 방금 받은 버전이 계속 실패하면(3번째 시작에도 로그인 전) 되돌린다."""
+    st = _read_version_state()
+    if not st.get("pending"):
+        return
+    st["tries"] = int(st.get("tries", 0)) + 1
+    if st["tries"] > 3:
+        print(f"[update] ⚠️ 새 버전 {st['pending']} 이 계속 실패 — 이전 버전으로 되돌립니다.")
+        try:
+            _restore_update_backup(st)
+        except Exception as e:
+            print(f"[update] 되돌리기 실패: {e}")
+        bad = st["pending"]
+        st = {"version": st.get("previous"), "bad": bad}
+        _write_version_state(st)
+        _restart_self()
+    _write_version_state(st)
+
+
+def _confirm_update():
+    """로그인까지 성공 — 새 버전 확정."""
+    st = _read_version_state()
+    if st.get("pending"):
+        print(f"[update] ✅ 새 버전 {st['pending']} 정상 시작")
+        _write_version_state({"version": st["pending"], "updated_at": st.get("updated_at")})
+
+
+def _restart_self():
+    """같은 파이썬으로 agent.py 를 새로 띄우고 이 프로세스는 끝낸다."""
+    import subprocess
+    exe = sys.executable
+    if sys.platform == "win32" and exe.lower().endswith("python.exe"):
+        w = exe[:-len("python.exe")] + "pythonw.exe"
+        if os.path.exists(w):
+            exe = w
+    flags = 0
+    if sys.platform == "win32":
+        flags = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen([exe, os.path.join(APP_DIR, "agent.py")], cwd=APP_DIR,
+                     creationflags=flags, close_fds=True)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def _apply_update_zip(blob: bytes, version: str) -> int:
+    """zip 을 검사하고 설치 폴더에 반영한다. 반환: 바뀐 파일 수."""
+    import io, shutil, warnings, zipfile
+    z = zipfile.ZipFile(io.BytesIO(blob))
+    new = {}
+    for name in z.namelist():
+        rel = name.replace("\\", "/")
+        # 허용: agent.py, mbam_nextgen/**/*.py — 그 밖의 경로(../, 절대경로 등)는 거부
+        if rel.startswith("/") or ".." in rel.split("/") or ":" in rel:
+            raise RuntimeError(f"잘못된 경로: {rel}")
+        if not (rel == "agent.py" or (rel.startswith("mbam_nextgen/") and rel.endswith(".py"))):
+            raise RuntimeError(f"허용되지 않은 파일: {rel}")
+        data = z.read(name)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            compile(data, rel, "exec")   # 문법 오류가 있는 코드는 받지 않는다
+        new[rel] = data
+    if "agent.py" not in new:
+        raise RuntimeError("agent.py 가 없는 묶음")
+
+    changed, added = [], []
+    for rel, data in new.items():
+        dst = os.path.join(APP_DIR, *rel.split("/"))
+        try:
+            with open(dst, "rb") as f:
+                if f.read() == data:
+                    continue
+            changed.append(rel)
+        except FileNotFoundError:
+            added.append(rel)
+    if not changed and not added:
+        return 0
+
+    # 바꿀 파일만 백업(직전 버전 1개만 보관)
+    shutil.rmtree(_UPDATE_BACKUP, ignore_errors=True)
+    for rel in changed:
+        src = os.path.join(APP_DIR, *rel.split("/"))
+        bak = os.path.join(_UPDATE_BACKUP, *rel.split("/"))
+        os.makedirs(os.path.dirname(bak), exist_ok=True)
+        shutil.copy2(src, bak)
+    prev = _read_version_state().get("version")
+    import datetime as _dt
+    _write_version_state({"pending": version, "previous": prev, "tries": 0, "added": added,
+                          "updated_at": _dt.datetime.now().isoformat(timespec="seconds")})
+    for rel in changed + added:
+        dst = os.path.join(APP_DIR, *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        tmp = dst + ".upd"
+        with open(tmp, "wb") as f:
+            f.write(new[rel])
+        os.replace(tmp, dst)
+    # 예전 .pyc 가 새 .py 보다 먼저 잡히지 않게 캐시 정리
+    for dp, dns, _ in os.walk(os.path.join(APP_DIR, "mbam_nextgen")):
+        if "__pycache__" in dns:
+            shutil.rmtree(os.path.join(dp, "__pycache__"), ignore_errors=True)
+    return len(changed) + len(added)
+
+
 class AgentClient:
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.token = None
         self.agent_id = _agent_id()
         self._relogin_lock = asyncio.Lock()   # 2-레인 동시 재로그인 방지
+        self._active = 0        # 실행 중인 작업 수
+        self._inflight = 0      # 응답을 기다리는 next-job 요청 수
+        self._updating = False  # True 면 새 작업을 받지 않는다(업데이트 적용 직전)
 
     async def login(self, client: httpx.AsyncClient) -> bool:
         try:
@@ -700,28 +861,80 @@ class AgentClient:
                 if await self.login(client):
                     break
                 await asyncio.sleep(5)
+            _confirm_update()
 
             fast_sec = self.cfg.get("fast_poll_sec", 1)
             print(f"[agent] 폴링 시작 → {self.cfg['cloud_url']} "
                   f"(배경 {self.cfg['poll_sec']}초 / 즉시성 {fast_sec}초)")
             # 2-레인 폴링: 즉시성 작업(폴더 선택 등)은 빠른 레인(fast_sec), 배경 작업은 기본 레인(poll_sec).
             # 두 레인은 서로소 집합만 claim 하므로 이중 처리되지 않는다.
-            await asyncio.gather(
+            loops = [
                 self._poll_loop(client, interactive=True, interval=fast_sec),
                 self._poll_loop(client, interactive=False, interval=self.cfg["poll_sec"]),
-            )
+            ]
+            if _auto_update_enabled():
+                loops.append(self._update_loop(client))
+            await asyncio.gather(*loops)
+
+    async def _update_loop(self, client: httpx.AsyncClient):
+        """작업이 없을 때 서버의 최신 코드 버전을 확인해 받아서 다시 시작한다."""
+        import hashlib
+        await asyncio.sleep(30)
+        while True:
+            try:
+                st = _read_version_state()
+                r = await client.get(f"{self.cfg['cloud_url']}/api/agent/update/manifest",
+                                     headers=self._headers(), timeout=20)
+                m = r.json() if r.status_code == 200 else {}
+                ver = m.get("version")
+                if ver and ver != st.get("version") and ver != st.get("bad") and not st.get("pending"):
+                    # 작업이 끝날 때까지 기다린다 — 발행 중에는 절대 바꾸지 않는다
+                    if self._active:
+                        await asyncio.sleep(20)
+                        continue
+                    self._updating = True
+                    while self._active or self._inflight:   # 이미 보낸 next-job 응답·작업이 끝날 때까지
+                        await asyncio.sleep(1)
+                    try:
+                        print(f"[update] 새 버전 {ver} 받는 중... (현재 {st.get('version') or '설치본'})")
+                        b = await client.get(f"{self.cfg['cloud_url']}/api/agent/update/bundle",
+                                             headers=self._headers(), timeout=120)
+                        if b.status_code != 200:
+                            raise RuntimeError(f"묶음 다운로드 실패 {b.status_code}")
+                        if hashlib.sha256(b.content).hexdigest() != m.get("sha256"):
+                            raise RuntimeError("묶음 검증(sha256) 불일치")
+                        n = await asyncio.to_thread(_apply_update_zip, b.content, ver)
+                        if n:
+                            print(f"[update] ✅ 파일 {n}개 업데이트 — 에이전트를 다시 시작합니다.")
+                            _restart_self()
+                        # 바뀐 파일이 없으면 버전만 기록
+                        _write_version_state({**st, "version": ver})
+                        print(f"[update] 이미 최신 코드입니다 ({ver})")
+                    finally:
+                        self._updating = False
+            except Exception as e:
+                print(f"[update] 업데이트 확인 실패(다음에 다시 시도): {e}")
+                self._updating = False
+            await asyncio.sleep(UPDATE_CHECK_SEC)
 
     async def _poll_loop(self, client: httpx.AsyncClient, interactive: bool, interval: float):
         """한 레인의 폴링 루프. interactive=True면 즉시성 작업만, False면 배경 작업만 가져온다."""
         lane = "fast" if interactive else "bg"
         while True:
+            if self._updating:   # 업데이트 적용 중 — 새 작업을 받지 않는다
+                await asyncio.sleep(1)
+                continue
             try:
                 sent_token = self.token   # 이 요청에 쓴 토큰(재로그인 중복 판단용)
-                r = await client.get(
-                    f"{self.cfg['cloud_url']}/api/agent/next-job",
-                    params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0"},
-                    headers={"Authorization": f"Bearer {sent_token}"}, timeout=30,
-                )
+                self._inflight += 1
+                try:
+                    r = await client.get(
+                        f"{self.cfg['cloud_url']}/api/agent/next-job",
+                        params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0"},
+                        headers={"Authorization": f"Bearer {sent_token}"}, timeout=30,
+                    )
+                finally:
+                    self._inflight -= 1
                 if r.status_code == 401:
                     # 두 레인이 동시에 만료를 봐도 재로그인은 한 번만(다른 레인이 이미 갱신했으면 스킵)
                     async with self._relogin_lock:
@@ -734,7 +947,11 @@ class AgentClient:
                 if not job:
                     await asyncio.sleep(interval)
                     continue
-                await self._process(client, job)   # 잡 처리 후 즉시 다음 폴링(큐 빠르게 소진)
+                self._active += 1
+                try:
+                    await self._process(client, job)   # 잡 처리 후 즉시 다음 폴링(큐 빠르게 소진)
+                finally:
+                    self._active -= 1
             except Exception as e:
                 print(f"[agent:{lane}] 폴링 오류: {e}")
                 await asyncio.sleep(interval)
@@ -956,6 +1173,8 @@ def _setup_file_logging():
 
 def main():
     _setup_file_logging()
+    if _auto_update_enabled():
+        _check_pending_update()
     if sys.platform == "win32":
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())

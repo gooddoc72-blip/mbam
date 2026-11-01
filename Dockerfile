@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.cloud.txt
 # 백엔드 코드 (프론트 mbam-web 은 Vercel 이 담당하므로 제외)
 COPY mbam_nextgen ./mbam_nextgen
 COPY run_backend.py .
+# 설치형 에이전트 자동 업데이트용(/api/agent/update/bundle) — 서버에서 실행하지는 않는다
+COPY agent.py .
 
 # Railway 가 $PORT 를 주입 → run_backend.py 가 읽음
 EXPOSE 8000

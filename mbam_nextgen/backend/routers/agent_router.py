@@ -105,6 +105,66 @@ class TaskLog(BaseModel):
     status: Optional[str] = None   # "running" | "completed" | "failed"
 
 
+# ── 에이전트 자동 업데이트 ───────────────────────────────────────────────
+# 서버에 배포된 코드(agent.py + mbam_nextgen/**/*.py)를 그대로 묶어 내려준다.
+# 푸시 배포 = 새 버전. 에이전트는 작업이 없을 때 /update/manifest 의 version 을 비교해 받아 간다.
+# 코드(.py)만 — 파이썬 패키지·Chromium·설정·세션은 건드리지 않는다(설치본 몫).
+_UPDATE_CACHE = {}
+
+
+def _update_bundle():
+    if "zip" in _UPDATE_CACHE:
+        return _UPDATE_CACHE
+    import io, os, hashlib, zipfile
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    skip_dirs = {"__pycache__", "tests", "test", "profiles", "sessions", "temp_images", "temp_clips",
+                 "temp_uploaded_images", "saved_images", "generated_images", "data", "logs"}
+    files = []
+    if os.path.isfile(os.path.join(root, "agent.py")):
+        files.append("agent.py")
+    for dp, dns, fns in os.walk(os.path.join(root, "mbam_nextgen")):
+        dns[:] = sorted(d for d in dns if d not in skip_dirs)
+        for fn in sorted(fns):
+            if fn.endswith(".py") and not fn.startswith("test_"):
+                files.append(os.path.relpath(os.path.join(dp, fn), root).replace("\\", "/"))
+    h = hashlib.sha256()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for rel in sorted(files):
+            with open(os.path.join(root, rel), "rb") as f:
+                data = f.read()
+            h.update(rel.encode() + b"\0" + data + b"\0")
+            # 날짜를 고정해 같은 코드면 같은 zip(=같은 sha256)이 되게 한다
+            zi = zipfile.ZipInfo(rel, date_time=(2020, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(zi, data)
+    blob = buf.getvalue()
+    _UPDATE_CACHE.update({
+        "zip": blob,
+        "version": h.hexdigest()[:16],
+        "sha256": hashlib.sha256(blob).hexdigest(),
+        "files": len(files),
+        "has_agent": "agent.py" in files,
+    })
+    return _UPDATE_CACHE
+
+
+@router.get("/update/manifest", summary="로컬 에이전트: 최신 코드 버전 확인(자동 업데이트)")
+async def update_manifest(current_user: dict = Depends(get_current_user)):
+    b = _update_bundle()
+    # agent.py 가 없는 배포(이미지 구성 오류)면 업데이트를 내주지 않는다 — 반쪽 코드 배포 방지
+    return {"version": b["version"] if b["has_agent"] else None,
+            "sha256": b["sha256"], "files": b["files"], "size": len(b["zip"])}
+
+
+@router.get("/update/bundle", summary="로컬 에이전트: 최신 코드 묶음(zip)")
+async def update_bundle(current_user: dict = Depends(get_current_user)):
+    from fastapi import Response
+    b = _update_bundle()
+    return Response(content=b["zip"], media_type="application/zip",
+                    headers={"X-Bundle-Version": b["version"], "X-Bundle-Sha256": b["sha256"]})
+
+
 @router.get("/cancel-check/{task_id}", summary="로컬 에이전트: 웹에서 '작업 강제 중지'를 눌렀는지 확인")
 async def cancel_check(task_id: str, current_user: dict = Depends(get_current_user)):
     from mbam_nextgen.backend.routers.auto_post import agent_cancel_requests
