@@ -307,10 +307,28 @@ class CafeService:
                 pass
 
         # 이미지 업로드는 카페 사진 팝업 때문에 멈출(hang) 수 있어 타임아웃으로 보호 → 실패해도 본문은 계속
+        IMG_COMP = ".se-component.se-image, .se-component.se-imageStrip"
+
+        async def _img_count():
+            try:
+                return await frame.locator(IMG_COMP).count()
+            except Exception:
+                return -1
+
         async def _safe_upload(img_path):
             try:
+                before = await _img_count()
                 await asyncio.wait_for(self.stealth.upload_image(frame, img_path), timeout=25)
-                await asyncio.sleep(2)
+                # 사진이 실제로 본문에 들어갈 때까지 기다린다. 늦게 들어오면 다음 글을 치는 도중
+                # 문장 한가운데 끼어들고, 선택된 사진 때문에 그 뒤 글자가 사라졌다('…나온대서 고' 잘림).
+                if before >= 0:
+                    for _ in range(60):
+                        if await _img_count() > before:
+                            break
+                        await asyncio.sleep(0.5)
+                    else:
+                        if logger: logger.warning(f"[CafeService] 사진이 30초 안에 본문에 나타나지 않음: {os.path.basename(img_path)}")
+                await asyncio.sleep(1.5)
                 await _cursor_to_end()
                 try:
                     await frame.page.keyboard.press("Enter")
