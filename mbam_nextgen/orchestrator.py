@@ -1062,6 +1062,15 @@ class WorkflowOrchestrator:
                     blog_title = title_match.group(1).strip()
                     blog_content = re.sub(r'^\s*\[제목\].*?\n+', '', blog_content, count=1).strip()
             
+            # 원고 속 사진 표시를 표준 마커로 통일 — 번호/사람이 쓴 표시가 있으면 '표시대로' 넣는다.
+            from mbam_nextgen.services.photo_markers import (
+                normalize_photo_markers, honors_markers, order_files_by_markers)
+            blog_content, _bmk = normalize_photo_markers(blog_content)
+            _bstrict = honors_markers(_bmk)
+            _bneed = max(_bmk["numbered"] + _bmk["plain"], _bmk["max_no"])
+            if _bstrict:
+                logger.info(f"[Orchestrator] 📌 원고 사진 표시 {_bmk['numbered'] + _bmk['plain']}개(번호 {_bmk['numbered']}개) — 표시대로 넣습니다.")
+
             # 4. 이미지 세척 및 준비
             washed_images = []
             
@@ -1071,7 +1080,14 @@ class WorkflowOrchestrator:
                 img_paths = []
                 for _ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
                     img_paths += glob.glob(os.path.join(image_folder_path, _ext))
-                if len(img_paths) > 0:
+                if len(img_paths) > 0 and _bstrict:
+                    # 표시대로: 폴더 이름순(1, 2, 3…, 10) — 번호 N = N번째 사진, 표시 수만큼만
+                    import re as _re_b   # 이 함수 안의 지역 'import re' 와 엮이지 않게 별칭으로
+                    _nat = lambda fp: [int(t) if t.isdigit() else t.lower() for t in _re_b.split(r'(\d+)', os.path.basename(fp))]
+                    selected_imgs = order_files_by_markers(sorted(set(img_paths), key=_nat), _bmk)[:_bneed]
+                    if len(selected_imgs) < _bneed:
+                        logger.warning(f"[Orchestrator] 원고 사진 표시는 {_bneed}번까지인데 폴더에는 {len(selected_imgs)}장뿐 — 없는 번호는 비워 둡니다.")
+                elif len(img_paths) > 0:
                     selected_imgs = random.sample(img_paths, min(3, len(img_paths))) # 최대 3장 추출
                     for idx, img in enumerate(selected_imgs):
                         if wash_images:
@@ -1098,7 +1114,8 @@ class WorkflowOrchestrator:
                             _w = self.armor.wash_image(_gp, f"washed_aisup_{account_id}_{_i}.jpg") if wash_images else _gp
                             washed_images.append(_w if _w else _gp)
                         logger.info(f"[Orchestrator] AI 연출컷 {len(_paths)}장 추가 (실사진+연출컷 총 {len(washed_images)}장)")
-                        blog_content = self._align_card_markers(blog_content, len(washed_images))
+                        if not _bstrict:
+                            blog_content = self._align_card_markers(blog_content, len(washed_images))
                 except Exception as _e:
                     logger.error(f"[Orchestrator] AI 연출컷 추가 실패(무시): {_e}")
 
@@ -1130,7 +1147,7 @@ class WorkflowOrchestrator:
                 except Exception as e:
                     logger.error(f"[Orchestrator] AI 이미지 생성 실패: {e}")
                 # 생성된 이미지를 소제목 위치에 분산 배치(표지 + 본문 곳곳)
-                if washed_images:
+                if washed_images and not _bstrict:
                     blog_content = self._align_card_markers(blog_content, len(washed_images))
             elif not washed_images and generate_card_news:
                 logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
@@ -1145,7 +1162,8 @@ class WorkflowOrchestrator:
                     if washed_img:
                         washed_images.append(washed_img)
                 # 카드(표지 + 소제목별)를 소제목 위치에 맞춰 배치: 본문 [이미지] 마커 재정렬
-                blog_content = self._align_card_markers(blog_content, len(washed_images))
+                if not _bstrict:
+                    blog_content = self._align_card_markers(blog_content, len(washed_images))
 
             if self.armor.summary():
                 logger.info(f"🧼 [Orchestrator] {self.armor.summary()}")
@@ -1185,7 +1203,8 @@ class WorkflowOrchestrator:
             await self.blog.write_post(
                 editor_frame, blog_title, blog_content,
                 images=washed_images,
-                speed_mode=speed_mode, speed_multiplier=speed_multiplier
+                speed_mode=speed_mode, speed_multiplier=speed_multiplier,
+                strict_markers=_bstrict
             )
 
             # 6.5 지도(장소) 삽입 — 본문 작성 후 글 하단에 추가
@@ -1809,6 +1828,18 @@ class WorkflowOrchestrator:
                         logger.info(f"[Orchestrator] 🎬 원고에 동영상 자리 {_n_video}개 — 글 맨 아래(지도 다음)에 넣습니다.")
                     _videos = []
 
+                    # 원고 속 사진 표시([이미지1: 설명] (사진 2) 사진 3 📷 등)를 표준 마커로 통일한다.
+                    # 번호나 사람이 쓴 표시가 있으면 '표시대로' — AI 배치·재정렬·하단 추가를 하지 않는다.
+                    from mbam_nextgen.services.photo_markers import (
+                        normalize_photo_markers, honors_markers, order_files_by_markers)
+                    cafe_content, _mk_info = normalize_photo_markers(cafe_content)
+                    _strict = honors_markers(_mk_info)
+                    _mk_total = _mk_info["numbered"] + _mk_info["plain"]
+                    if _strict:
+                        has_photo_map = True
+                        logger.info(f"[Orchestrator] 📌 원고 사진 표시 {_mk_total}개(번호 {_mk_info['numbered']}개) — 표시대로 넣습니다."
+                                    + (f" 파일명 지정 {len(_mk_info['filenames'])}개" if _mk_info["filenames"] else ""))
+
                     # 4. 이미지 세척 / 대체
                     washed_images = []
                     _img_folder = image_folder_path
@@ -1822,11 +1853,19 @@ class WorkflowOrchestrator:
                                  if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))]
                         _videos = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
                                    if fp.lower().endswith((".mp4", ".mov", ".m4v", ".avi", ".wmv", ".mkv"))]
+                        if _strict:
+                            # 번호 = 폴더 이름순 번째 사진. '파일명' 지정이 있으면 그 파일을 그 번호 자리로.
+                            files = order_files_by_markers(files, _mk_info)
+                            _need = max(_mk_total, _mk_info["max_no"])
+                            if len(files) < _need:
+                                logger.warning(f"[Orchestrator] 원고 사진 표시는 {_need}번까지인데 폴더에는 {len(files)}장뿐 — 없는 번호는 비워 둡니다.")
+                            files = files[:_need]
                         # 업로드 원고는 본문의 [이미지] 자리 수만큼만 가져온다.
                         # 폴더에 사진이 더 많으면 남는 사진이 글 끝에 몰려 붙어버린다.
                         _want = None
                         if keep_image_markers:
-                            _want = len(_re_map.findall(r'\[이미지(?::\s*\d+)?\]', cafe_content or ""))
+                            _want = max(len(_re_map.findall(r'\[이미지(?::\s*\d+)?\]', cafe_content or "")),
+                                        _mk_info["max_no"])
                             if _want == 0:
                                 logger.info("[Orchestrator] 업로드 원고에 [이미지] 자리가 없어 사진을 넣지 않습니다.")
                                 files = []
@@ -1919,7 +1958,8 @@ class WorkflowOrchestrator:
                     await self.cafe.write_post(
                         editor_frame, post_title, cafe_content,
                         images=washed_images,
-                        speed_mode=speed_mode, speed_multiplier=speed_multiplier
+                        speed_mode=speed_mode, speed_multiplier=speed_multiplier,
+                        strict_markers=_strict
                     )
 
                     # 9.5 지도(장소) 삽입 — 본문 작성 후 글 하단에 추가 (블로그와 동일)

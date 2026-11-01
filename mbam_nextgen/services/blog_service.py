@@ -295,8 +295,10 @@ class BlogService:
         except Exception:
             pass
 
-    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
-        """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)"""
+    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0,
+                         strict_markers: bool = False):
+        """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)
+        strict_markers=True: 원고의 사진 표시([이미지:N])대로만 넣고 남는 사진은 붙이지 않는다."""
         import os, asyncio, re
 
         # 본문 줄바꿈/단락 가공 (블로그·카페 공용 로직)
@@ -341,62 +343,83 @@ class BlogService:
         #  '작성 취소/나가기'를 유발해 창이 닫히던 원인. 셀렉터(fs16/fs19)는 이미 확보됨)
 
         # 마커 인식은 카페(cafe_service)와 동일한 '관대한' 규칙을 쓴다.
-        # 예전에는 정확히 '[이미지]' 만 잘라 AI/사진매핑 원고의 [이미지:1] 형태를 전혀 인식하지 못했다.
-        # → 본문 중간 삽입이 0장이 되어 사진이 전부 글 맨 아래로 몰리고,
-        #   '[이미지:1]' 글자가 본문에 그대로 찍혔다. 카페는 되는데 블로그만 안 되던 원인.
-        chunks = re.split(r'\[이미지\s*:?\s*\d*\]', content)
+        # [이미지:N] → N번 사진(폴더 이름순), [이미지] → 아직 안 쓴 다음 사진.
+        # strict_markers=True(원고에 사진 번호·표시가 있는 경우)면 표시대로만 넣고 하단에 남은 사진을 붙이지 않는다.
+        parts = re.split(r'(\[이미지\s*:?\s*\d*\])', content)
         images = images or []
-        img_idx = 0
+        used = [False] * len(images)
         pending_text = ""
-        
-        for i, chunk in enumerate(chunks):
-            # 형식을 벗어나 캡처되지 않은 표기([이미지 두번째] 등)는 본문에 새지 않게 제거(카페와 동일)
-            chunk = re.sub(r'\[이미지[^\]]*\]', '', chunk or '')
-            if chunk.strip():
-                pending_text += chunk.strip() + "\n\n"
-            
-            # 중간에 이미지가 삽입되어야 하는 위치
-            if i < len(chunks) - 1 and img_idx < len(images):
-                img_path = images[img_idx]
-                if os.path.exists(img_path):
-                    if pending_text.strip():
-                        await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
-                        pending_text = ""
-                        
-                    await self.stealth.upload_image(frame, img_path)
-                    await asyncio.sleep(3)  # 업로드 대기
-                    # 포커스를 문서 맨 끝으로 이동
-                    await frame.locator(self.selectors["body"]).first.evaluate("""el => {
-                        const selection = window.getSelection();
-                        const range = document.createRange();
-                        range.selectNodeContents(el);
-                        range.collapse(false);
-                        selection.removeAllRanges();
-                        selection.addRange(range);
-                    }""")
-                    await frame.page.keyboard.press("Enter")
-                img_idx += 1
-                
+
+        IMG_COMP = ".se-component.se-image, .se-component.se-imageStrip"
+
+        async def _img_count():
+            try:
+                return await frame.locator(IMG_COMP).count()
+            except Exception:
+                return -1
+
+        async def _upload(img_path):
+            # 사진이 본문에 실제로 들어갈 때까지 기다린 뒤 다음 글을 친다(늦게 들어온 사진이 문장을 자르던 문제).
+            before = await _img_count()
+            await self.stealth.upload_image(frame, img_path)
+            if before >= 0:
+                for _ in range(60):
+                    if await _img_count() > before:
+                        break
+                    await asyncio.sleep(0.5)
+            await asyncio.sleep(1.5)
+            # 포커스를 문서 맨 끝으로 이동
+            await frame.locator(self.selectors["body"]).first.evaluate("""el => {
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }""")
+            await frame.page.keyboard.press("Enter")
+
+        for part in parts:
+            mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
+            if not mk:
+                # 형식을 벗어나 캡처되지 않은 표기([이미지 두번째] 등)는 본문에 새지 않게 제거(카페와 동일)
+                chunk = re.sub(r'\[이미지[^\]]*\]', '', part or '')
+                if chunk.strip():
+                    pending_text += chunk.strip() + "\n\n"
+                continue
+            idx = -1
+            if mk.group(1):
+                cand = int(mk.group(1)) - 1
+                if 0 <= cand < len(images) and not used[cand]:
+                    idx = cand
+                elif strict_markers:
+                    print(f"⚠️ [BlogService] 사진 {mk.group(1)}번 자리 — 폴더에 해당 사진이 없어 비워 둡니다 (사진 {len(images)}장)")
+                    continue
+            if idx < 0:
+                idx = next((k for k in range(len(images)) if not used[k]), -1)
+            if idx < 0:
+                continue
+            used[idx] = True
+            img_path = images[idx]
+            if os.path.exists(img_path):
+                if pending_text.strip():
+                    await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
+                    pending_text = ""
+                print(f"[BlogService] 사진 #{idx + 1} 삽입")
+                await _upload(img_path)
+
         if pending_text.strip():
             await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
 
-        # 남은 이미지가 있다면 글 맨 하단에 추가 (안전장치)
-        while img_idx < len(images):
-            img_path = images[img_idx]
-            if os.path.exists(img_path):
-                await self.stealth.upload_image(frame, img_path)
-                await asyncio.sleep(3)
-                await frame.locator(self.selectors["body"]).first.evaluate("""el => {
-                    const selection = window.getSelection();
-                    const range = document.createRange();
-                    range.selectNodeContents(el);
-                    range.collapse(false);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }""")
-                await frame.page.keyboard.press("Enter")
-            img_idx += 1
-            
+        # 남은 이미지가 있다면 글 맨 하단에 추가 (안전장치) — 표시대로 모드에서는 넣지 않는다.
+        if strict_markers:
+            if not all(used):
+                print(f"[BlogService] 원고에 표시가 없는 사진 {used.count(False)}장은 넣지 않았습니다 (표시대로)")
+        else:
+            for k in range(len(images)):
+                if not used[k] and os.path.exists(images[k]):
+                    await _upload(images[k])
+
         print("✅ [BlogService] 원고 타이핑(이미지 교차) 완료")
 
     async def insert_place_map(self, frame, query: str) -> bool:

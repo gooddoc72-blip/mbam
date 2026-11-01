@@ -198,7 +198,9 @@ class CafeService:
                 print("[CafeService] 방해 팝업 제거 완료")
         except: pass
 
-    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0):
+    async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0,
+                         strict_markers: bool = False):
+        """strict_markers=True: 원고의 사진 표시([이미지:N])대로만 넣는다 — 재배치·하단 추가 없음."""
         """카페 원고 타이핑 (블로그와 동일: 본문 가공 + 소제목 위치에 이미지 인라인 삽입)"""
         import re
         print(f"[CafeService] 타이핑 시작: {title[:15]}... (속도: {speed_mode} x{speed_multiplier})")
@@ -368,6 +370,10 @@ class CafeService:
                     cand = int(mk.group(1)) - 1
                     if 0 <= cand < n_imgs and not used[cand]:
                         idx, fixed = cand, True
+                    elif strict_markers:
+                        # 표시대로 모드: 그 번호 사진이 없으면 다른 사진으로 메우지 않고 비워 둔다.
+                        if logger: logger.warning(f"[CafeService] 사진 {mk.group(1)}번 자리 — 폴더에 {mk.group(1)}번째 사진이 없어 비워 둡니다 (사진 {n_imgs}장)")
+                        continue
                 if idx < 0:                            # 번호 없음/무효/중복 → 순차 폴백
                     idx = _next_seq_idx()
                 if 0 <= idx < n_imgs:
@@ -387,7 +393,7 @@ class CafeService:
 
         # 3) 원고의 [이미지] 자리가 사진 수보다 적으면 그 자리는 무시하고,
         #    글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진 → 글 → 사진 … → 글' 로 다시 배치한다.
-        if not all(used):
+        if not all(used) and not strict_markers:
             items = plan_even_layout([it[1] for it in items if it[0] == "text"], n_imgs)
             used = [True] * n_imgs
             if logger: logger.info(f"[CafeService] 원고 [이미지] 자리가 사진보다 적어 글·사진 교차 배치로 재구성 (글 덩어리 {sum(1 for it in items if it[0] == 'text')}개)")
@@ -418,6 +424,10 @@ class CafeService:
             await self.stealth.human_type(frame, body_sel, pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
 
         # 문단보다 사진이 많아 자리를 못 받은 사진만 글 맨 하단에 추가 (안전장치)
+        # 표시대로 모드에서는 표시가 없는 사진은 넣지 않는다.
+        if strict_markers and not all(used):
+            if logger: logger.info(f"[CafeService] 원고에 표시가 없는 사진 {used.count(False)}장은 넣지 않았습니다 (표시대로)")
+            used = [True] * n_imgs
         for k in range(n_imgs):
             if not used[k]:
                 img_path = images[k]

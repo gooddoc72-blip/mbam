@@ -690,11 +690,16 @@ def _split_title_body(text: str):
     return "", text
 
 
+def _count_photo_markers(body: str) -> int:
+    from mbam_nextgen.services.photo_markers import normalize_photo_markers
+    _, info = normalize_photo_markers(body)
+    return max(info["numbered"] + info["plain"], info["max_no"])
+
+
 @router.post("/parse-manuscript", summary="원고 파일(txt/md/docx) → 제목·본문")
 async def parse_manuscript(files: List[UploadFile] = File(...),
                            current_user: dict = Depends(get_current_user)):
     import os as _os
-    import re as _re
     items, errors = [], []
     for f in files:
         name = f.filename or "원고"
@@ -714,7 +719,8 @@ async def parse_manuscript(files: List[UploadFile] = File(...),
                 "title": title,
                 "content": body,
                 # 본문에 사진 자리가 몇 개 있는지 — 화면에서 '폴더 사진 N장 필요' 안내에 쓴다
-                "image_markers": len(_re.findall(r"\[이미지(?::\s*\d+)?\]", body)),
+                # ([사진3] (사진 2) 사진 4 [이미지1: 설명] 등 사람이 쓴 표시도 같은 규칙으로 센다)
+                "image_markers": _count_photo_markers(body),
             })
         except Exception as e:
             errors.append({"filename": name, "error": f"읽지 못했습니다: {e}"})
