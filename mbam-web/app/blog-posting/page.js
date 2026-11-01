@@ -164,8 +164,7 @@ function BlogPostingContent() {
   const [isGenerating, setIsGenerating] = usePersistentState("blog-posting:isGenerating", false);
 
   // 3. Image Settings
-  const [washImages, setWashImages] = useState(true);
-  // 사진 세탁 강도(약/표준/강) — 다음 방문에도 유지
+  // 사진 세탁 강도(선택 안 함/약/표준/강) — 카페 발행 화면과 같은 저장값, 다음 방문에도 유지
   const [washStrength, setWashStrength] = useState("standard");
   useEffect(() => {
     try { const v = localStorage.getItem("mbam_wash_strength"); if (v) setWashStrength(v); } catch (e) {}
@@ -173,6 +172,16 @@ function BlogPostingContent() {
   const changeWashStrength = (v) => {
     setWashStrength(v);
     try { localStorage.setItem("mbam_wash_strength", v); } catch (e) {}
+  };
+  const washImages = washStrength !== "none";
+  // 사진 배치(내용에 맞게/순서대로) — 카페 발행 화면과 같은 저장값
+  const [photoLayout, setPhotoLayout] = useState("content");
+  useEffect(() => {
+    try { const v = localStorage.getItem("mbam_photo_layout"); if (v) setPhotoLayout(v); } catch (e) {}
+  }, []);
+  const changePhotoLayout = (v) => {
+    setPhotoLayout(v);
+    try { localStorage.setItem("mbam_photo_layout", v); } catch (e) {}
   };
   const [imageUploadMode, setImageUploadMode] = useState("folder"); // "folder" or "direct"
   const [imageFolderPath, setImageFolderPath] = useState("");
@@ -815,6 +824,7 @@ function BlogPostingContent() {
         interval_mins: parseInt(intervalMins) || 0,
         wash_images: washImages,
         wash_strength: washStrength,
+        photo_layout: photoLayout,          // 사진 배치(카페와 동일)
         image_folder_path: imageFolderPath || null,
         insert_map: insertMap,
         map_query: mapQuery,
@@ -1364,21 +1374,27 @@ function BlogPostingContent() {
         {/* 3. Image Settings (원고 설정 아래로 이동) */}
         <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
           <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem", color: "#334155" }}>3. 이미지 설정</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
-             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: washImages ? "#3b82f6" : "#64748b" }}>
-               <input type="checkbox" checked={washImages} onChange={e => setWashImages(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-               ✨ 이미지 자동 세탁 적용 (메타데이터 제거 및 노이즈 추가)
-             </label>
-             {washImages && (
-               <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.35rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.85rem" }}>
-                 <option value="none">세탁 선택 안 함 — 원본 그대로</option>
-                 <option value="light">세탁 약 — 촬영정보만 교체</option>
-                 <option value="standard">세탁 표준 — 미세 회전·자르기 (권장)</option>
-                 <option value="strong">세탁 강 — 색감·크기까지 변경</option>
-               </select>
-             )}
+          {/* 사진 세탁·배치 — 카페 발행 화면과 같은 선택지(저장값도 공유) */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", fontWeight: "bold", color: "#334155" }}>
+            🧼 사진 자동 세탁
+            <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.35rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.85rem", fontWeight: "normal" }}>
+              <option value="none">선택 안 함 — 원본 그대로</option>
+              <option value="light">약 — 촬영정보만 교체</option>
+              <option value="standard">표준 — 미세 회전·자르기 (권장)</option>
+              <option value="strong">강 — 색감·크기까지 변경</option>
+            </select>
           </div>
-          {washImages && <p style={{ margin: "-0.5rem 0 1rem", fontSize: "0.76rem", color: "#94a3b8" }}>* 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다. 같은 사진을 여러 계정에 쓸 때는 '강'을 권장합니다.</p>}
+          <p style={{ margin: "0.3rem 0 0.8rem", fontSize: "0.76rem", color: "#94a3b8" }}>{washStrength === "none"
+            ? "* 사진을 세탁하지 않고 원본 파일 그대로 올립니다. 같은 사진을 여러 계정·글에 쓰면 중복 사진으로 보일 수 있습니다."
+            : "* 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다. 같은 사진을 여러 계정에 쓸 때는 '강'을 권장합니다."}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", fontWeight: "bold", color: "#334155" }}>
+            📸 사진 배치
+            <select value={photoLayout} onChange={e => changePhotoLayout(e.target.value)} style={{ padding: "0.35rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.85rem", fontWeight: "normal" }}>
+              <option value="content">내용에 맞게 — AI가 사진을 보고 어울리는 문단 뒤에 (권장)</option>
+              <option value="sequence">순서대로 — 사진 1, 2, 3… 을 글과 번갈아</option>
+            </select>
+          </div>
+          <p style={{ margin: "0.3rem 0 1rem", fontSize: "0.76rem", color: "#94a3b8" }}>* 폴더 사진은 이름순(1, 2, 3…)으로 모두 넣습니다. 원고에 사진 번호(사진1, [이미지:2] 등)가 있으면 그 자리에 그 번호 사진을 넣습니다. '내용에 맞게'는 사진 분석으로 30초~1분 더 걸리고, 실패하면 순서대로 넣습니다.</p>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: trackRank ? "#16a34a" : "#64748b" }}>
                <input type="checkbox" checked={trackRank} onChange={e => setTrackRank(e.target.checked)} style={{ transform: "scale(1.2)" }} />

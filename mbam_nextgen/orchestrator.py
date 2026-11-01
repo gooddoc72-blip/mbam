@@ -708,6 +708,80 @@ class WorkflowOrchestrator:
         text = re.sub(r'^\s*[-–—=]{2,}\s*$', '', text, flags=re.MULTILINE)  # --- === 구분선 줄
         return text
 
+    def _prepare_folder_images(self, content: str, folder: str, account_id: str, prefix: str,
+                               keep_image_markers: bool = False) -> dict:
+        """블로그·카페 공용 사진 준비.
+        1) 원고 속 사진 표시([이미지1: 설명] (사진 2) 사진 3 📷 등)를 표준 마커로 통일
+           — 번호나 사람이 쓴 표시가 있으면 '표시대로'(strict): AI 배치·재정렬·하단 추가 없음
+        2) 폴더 사진을 이름순(자연 정렬: 1, 2, … 10)으로 — 번호 N = N번째 사진, '파일명' 지정 반영
+        3) 사진 세탁(세탁 강도 'none' 이면 원본 그대로)
+        반환: {content, mk_info, strict, mk_total, images, videos}"""
+        from mbam_nextgen.services.photo_markers import (
+            normalize_photo_markers, honors_markers, order_files_by_markers)
+        content, mk_info = normalize_photo_markers(content)
+        strict = honors_markers(mk_info)
+        mk_total = mk_info["numbered"] + mk_info["plain"]
+        if strict:
+            logger.info(f"[Orchestrator] 📌 원고 사진 표시 {mk_total}개(번호 {mk_info['numbered']}개) — 표시대로 넣습니다."
+                        + (f" 파일명 지정 {len(mk_info['filenames'])}개" if mk_info["filenames"] else ""))
+        images, videos = [], []
+        if folder and os.path.isdir(folder):
+            # 파일 이름 속 숫자를 숫자로 비교한다(자연 정렬) — 글자순이면 1, 10, 2, 3… 으로 섞였다.
+            _natural = lambda fp: [int(t) if t.isdigit() else t.lower()
+                                   for t in re.split(r'(\d+)', os.path.basename(fp))]
+            entries = sorted(glob.glob(os.path.join(folder, "*")), key=_natural)
+            files = [fp for fp in entries if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))]
+            videos = [fp for fp in entries if fp.lower().endswith((".mp4", ".mov", ".m4v", ".avi", ".wmv", ".mkv"))]
+            if strict:
+                # 번호 = 폴더 이름순 번째 사진. '파일명' 지정이 있으면 그 파일을 그 번호 자리로.
+                files = order_files_by_markers(files, mk_info)
+                need = max(mk_total, mk_info["max_no"])
+                if len(files) < need:
+                    logger.warning(f"[Orchestrator] 원고 사진 표시는 {need}번까지인데 폴더에는 {len(files)}장뿐 — 없는 번호는 비워 둡니다.")
+                files = files[:need]
+            # 업로드 원고는 본문의 [이미지] 자리 수만큼만 가져온다.
+            # 폴더에 사진이 더 많으면 남는 사진이 글 끝에 몰려 붙어버린다.
+            want = None
+            if keep_image_markers:
+                want = max(len(re.findall(r'\[이미지(?::\s*\d+)?\]', content or "")), mk_info["max_no"])
+                if want == 0:
+                    logger.info("[Orchestrator] 업로드 원고에 [이미지] 자리가 없어 사진을 넣지 않습니다.")
+                    files = []
+                else:
+                    if len(files) < want:
+                        logger.warning(f"[Orchestrator] 사진 자리 {want}개인데 폴더에는 {len(files)}장뿐 — 있는 만큼만 넣습니다.")
+                    files = files[:want]
+            if files and self.armor.strength != "none":
+                logger.info(f"[Orchestrator] 🧼 사진 {len(files)}장 세탁 중... (사진이 많으면 1~2분 걸립니다)")
+            for idx_f, fp in enumerate(files):
+                wimg = self.armor.wash_image(fp, f"washed_{prefix}_{account_id}_{idx_f}.jpg")
+                if wimg:
+                    images.append(wimg)
+            logger.info(f"[Orchestrator] 첨부 이미지 폴더에서 {len(images)}장 사용"
+                        + (f" (사진 자리 {want}개)" if want else ""))
+        return {"content": content, "mk_info": mk_info, "strict": strict, "mk_total": mk_total,
+                "images": images, "videos": videos}
+
+    async def _layout_photos_by_content(self, content: str, images: list, keyword: str = "") -> str:
+        """사진 배치 '내용에 맞게': AI가 사진과 문단을 함께 보고, 사진마다 어울리는 문단 뒤에
+        [이미지:N] 을 찍는다(원고 글은 그대로). 실패하면 None — 호출한 쪽은 순서대로 교차 배치."""
+        paras = [x.strip() for x in re.split(r'\n\s*\n', re.sub(r'\[이미지[^\]]*\]', '', content)) if x.strip()]
+        if len(paras) < len(images) // 2:   # 문단이 너무 적으면 줄 단위로 나눠 자리를 늘린다
+            paras = [ln.strip() for x in paras for ln in x.split("\n") if ln.strip()]
+        logger.info(f"[Orchestrator] 📸 사진 {len(images)}장을 원고 내용에 맞춰 배치하는 중 (문단 {len(paras)}개)...")
+        matched = await self.soul.match_photos_to_paragraphs(paras, images, keyword=keyword)
+        if not matched:
+            logger.warning("[Orchestrator] 사진-원고 내용 매칭 실패 → 사진 순서대로 글과 교차 배치합니다.")
+            return None
+        place, desc = matched
+        blocks = []
+        for i, p in enumerate(paras):
+            blocks.append(p)
+            blocks += [f"[이미지:{k + 1}]" for k in sorted(k for k, v in place.items() if v == i)]
+        logger.info("[Orchestrator] 📸 사진 배치: " + ", ".join(
+            f"#{k + 1}→문단{place[k] + 1}" + (f"({desc[k]})" if desc.get(k) else "") for k in sorted(place)))
+        return "\n\n".join(blocks)
+
     @staticmethod
     def _align_card_markers(content: str, n_images: int) -> str:
         """카드 이미지를 [표지=맨 위] + 본문 곳곳에 '분산' 배치하도록 [이미지] 마커를 재정렬.
@@ -955,9 +1029,14 @@ class WorkflowOrchestrator:
         generate_ai_images: bool = False,   # 나노바나나(Gemini) AI 이미지 자동 생성·삽입 (병원 등)
         ai_supplement_count: int = 0,        # 실사진이 있어도 AI 연출컷을 N장 추가(상품 블로그 등)
         blog_id: str = None,   # 로그인ID와 다른 실제 블로그 주소(예: bonetacasa). 있으면 다이렉트 진입에 사용
+        photo_layout: str = "sequence",     # 사진 배치: "sequence"(순서대로 교차) | "content"(AI가 내용에 맞춰) — 카페와 동일
         **kwargs
     ):
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
+        # 예전 화면의 '세탁 끄기'(wash_images=False)는 세탁 강도 '선택 안 함'과 같다 — 원본 그대로
+        if not wash_images:
+            self.armor.strength = "none"
+        wash_images = self.armor.strength != "none"
         # 로그엔 인증정보 노출 없이 서버 호스트만 표기
         proxy_label = f"프록시: {(proxy_config or {}).get('server', '?')}" if proxy_config else "직접 연결"
 
@@ -1062,40 +1141,19 @@ class WorkflowOrchestrator:
                     blog_title = title_match.group(1).strip()
                     blog_content = re.sub(r'^\s*\[제목\].*?\n+', '', blog_content, count=1).strip()
             
-            # 원고 속 사진 표시를 표준 마커로 통일 — 번호/사람이 쓴 표시가 있으면 '표시대로' 넣는다.
-            from mbam_nextgen.services.photo_markers import (
-                normalize_photo_markers, honors_markers, order_files_by_markers)
-            blog_content, _bmk = normalize_photo_markers(blog_content)
-            _bstrict = honors_markers(_bmk)
-            _bneed = max(_bmk["numbered"] + _bmk["plain"], _bmk["max_no"])
-            if _bstrict:
-                logger.info(f"[Orchestrator] 📌 원고 사진 표시 {_bmk['numbered'] + _bmk['plain']}개(번호 {_bmk['numbered']}개) — 표시대로 넣습니다.")
-
-            # 4. 이미지 세척 및 준비
-            washed_images = []
-            
-            # (A) 폴더 연동 방식
-            if image_folder_path and os.path.exists(image_folder_path):
+            # 4. 원고 사진 표시 정리 + 폴더 사진 준비·세탁 (카페와 공용)
+            #    폴더 사진은 이름순으로 전부 사용(번호 표시가 있으면 표시대로), 세탁 강도 'none' 이면 원본 그대로.
+            import re as _re_b   # 이 함수 안의 지역 'import re' 와 엮이지 않게 별칭으로
+            from mbam_nextgen.services.photo_markers import analyze_photo_plan
+            # AI 맛집 원고처럼 [이미지:N] 으로 사진 자리를 이미 정해 둔 원고는 재배치하지 않는다(카페와 동일)
+            _bmap = bool(blog_content and _re_b.search(r'\[이미지:\s*\d+\]', blog_content))
+            if image_folder_path and os.path.isdir(image_folder_path):
                 logger.info(f"📂 [Orchestrator] 로컬 폴더 연동 시작: {image_folder_path}")
-                img_paths = []
-                for _ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
-                    img_paths += glob.glob(os.path.join(image_folder_path, _ext))
-                if len(img_paths) > 0 and _bstrict:
-                    # 표시대로: 폴더 이름순(1, 2, 3…, 10) — 번호 N = N번째 사진, 표시 수만큼만
-                    import re as _re_b   # 이 함수 안의 지역 'import re' 와 엮이지 않게 별칭으로
-                    _nat = lambda fp: [int(t) if t.isdigit() else t.lower() for t in _re_b.split(r'(\d+)', os.path.basename(fp))]
-                    selected_imgs = order_files_by_markers(sorted(set(img_paths), key=_nat), _bmk)[:_bneed]
-                    if len(selected_imgs) < _bneed:
-                        logger.warning(f"[Orchestrator] 원고 사진 표시는 {_bneed}번까지인데 폴더에는 {len(selected_imgs)}장뿐 — 없는 번호는 비워 둡니다.")
-                elif len(img_paths) > 0:
-                    selected_imgs = random.sample(img_paths, min(3, len(img_paths))) # 최대 3장 추출
-                    for idx, img in enumerate(selected_imgs):
-                        if wash_images:
-                            washed_name = f"washed_{account_id}_{idx}.jpg"
-                            washed = self.armor.wash_image(img, washed_name)
-                            if washed: washed_images.append(washed)
-                        else:
-                            washed_images.append(img)
+            _bprep = self._prepare_folder_images(blog_content, image_folder_path, account_id, "blog_up")
+            blog_content, _bmk, _bstrict = _bprep["content"], _bprep["mk_info"], _bprep["strict"]
+            washed_images = _bprep["images"]
+            if _bstrict:
+                _bmap = True
 
             # (A') 실사진 + AI 연출컷 보조 — 실사진이 있어도 나노바나나 연출컷을 N장 추가(상품 블로그 등)
             #      제품 실물은 실사진으로, 연출컷은 분위기/사용장면(실물 재현 X)으로 보강.
@@ -1114,8 +1172,6 @@ class WorkflowOrchestrator:
                             _w = self.armor.wash_image(_gp, f"washed_aisup_{account_id}_{_i}.jpg") if wash_images else _gp
                             washed_images.append(_w if _w else _gp)
                         logger.info(f"[Orchestrator] AI 연출컷 {len(_paths)}장 추가 (실사진+연출컷 총 {len(washed_images)}장)")
-                        if not _bstrict:
-                            blog_content = self._align_card_markers(blog_content, len(washed_images))
                 except Exception as _e:
                     logger.error(f"[Orchestrator] AI 연출컷 추가 실패(무시): {_e}")
 
@@ -1146,9 +1202,6 @@ class WorkflowOrchestrator:
                         logger.info("[Orchestrator] AI 이미지 프롬프트 생성 실패 → 이미지 없이 진행")
                 except Exception as e:
                     logger.error(f"[Orchestrator] AI 이미지 생성 실패: {e}")
-                # 생성된 이미지를 소제목 위치에 분산 배치(표지 + 본문 곳곳)
-                if washed_images and not _bstrict:
-                    blog_content = self._align_card_markers(blog_content, len(washed_images))
             elif not washed_images and generate_card_news:
                 logger.info("[Orchestrator] 등록된 이미지가 없어 AI 카드 뉴스 이미지(5장)를 자동 생성합니다.")
                 # 카드 제목: '테스트'/빈 키워드면 실제 글 제목을 사용
@@ -1161,9 +1214,21 @@ class WorkflowOrchestrator:
                     washed_img = self.armor.wash_image(gp, f"washed_gen_{account_id}_{idx_c}.jpg")
                     if washed_img:
                         washed_images.append(washed_img)
-                # 카드(표지 + 소제목별)를 소제목 위치에 맞춰 배치: 본문 [이미지] 마커 재정렬
-                if not _bstrict:
-                    blog_content = self._align_card_markers(blog_content, len(washed_images))
+
+            # 사진 배치 (카페와 동일)
+            # '내용에 맞게': AI가 사진과 문단을 함께 보고 어울리는 문단 뒤에 넣는다(실패하면 아래 순서 배치).
+            if (photo_layout or "") == "content" and not _bmap and len(washed_images) >= 2 and blog_content:
+                _laid = await self._layout_photos_by_content(blog_content, washed_images, keyword=keyword)
+                if _laid:
+                    blog_content = _laid
+                    _bmap = True
+            # 사진 자리를 정해 둔 원고가 아니면 표지 + 소제목 위치에 분산 배치
+            if washed_images and not _bmap:
+                blog_content = self._align_card_markers(blog_content, len(washed_images))
+            # 원고 분석: 사진 표시 점검(인식 못 한 표시·빠진 번호)을 글쓰기 전에 알린다
+            if _bstrict or _bprep["mk_total"]:
+                for _w in analyze_photo_plan(blog_content, _bmk, len(washed_images)):
+                    logger.warning(f"[Orchestrator] ⚠️ 원고 사진 점검: {_w}")
 
             if self.armor.summary():
                 logger.info(f"🧼 [Orchestrator] {self.armor.summary()}")
@@ -1826,62 +1891,15 @@ class WorkflowOrchestrator:
                         cafe_content = _re_map.sub(_VIDEO_RE, "", cafe_content, flags=_re_map.M)
                         cafe_content = _re_map.sub(r"\n{3,}", "\n\n", cafe_content).strip()
                         logger.info(f"[Orchestrator] 🎬 원고에 동영상 자리 {_n_video}개 — 글 맨 아래(지도 다음)에 넣습니다.")
-                    _videos = []
-
-                    # 원고 속 사진 표시([이미지1: 설명] (사진 2) 사진 3 📷 등)를 표준 마커로 통일한다.
-                    # 번호나 사람이 쓴 표시가 있으면 '표시대로' — AI 배치·재정렬·하단 추가를 하지 않는다.
-                    from mbam_nextgen.services.photo_markers import (
-                        normalize_photo_markers, honors_markers, order_files_by_markers)
-                    cafe_content, _mk_info = normalize_photo_markers(cafe_content)
-                    _strict = honors_markers(_mk_info)
-                    _mk_total = _mk_info["numbered"] + _mk_info["plain"]
+                    # 4. 원고 사진 표시 정리 + 폴더 사진 준비·세탁 (블로그와 공용)
                     from mbam_nextgen.services.photo_markers import analyze_photo_plan
+                    _prep = self._prepare_folder_images(cafe_content, image_folder_path, account_id, "cafe_up",
+                                                        keep_image_markers=keep_image_markers)
+                    cafe_content, _mk_info, _strict, _mk_total = (
+                        _prep["content"], _prep["mk_info"], _prep["strict"], _prep["mk_total"])
+                    washed_images, _videos = _prep["images"], _prep["videos"]
                     if _strict:
                         has_photo_map = True
-                        logger.info(f"[Orchestrator] 📌 원고 사진 표시 {_mk_total}개(번호 {_mk_info['numbered']}개) — 표시대로 넣습니다."
-                                    + (f" 파일명 지정 {len(_mk_info['filenames'])}개" if _mk_info["filenames"] else ""))
-
-                    # 4. 이미지 세척 / 대체
-                    washed_images = []
-                    _img_folder = image_folder_path
-                    if _img_folder and os.path.isdir(_img_folder):
-                        # 사용자가 첨부한 이미지(글감 생성용 업로드 등)를 글에 첨부
-                        import glob as _glob
-                        # 파일 이름 속 숫자를 숫자로 비교한다(자연 정렬) — 글자순이면 1, 10, 2, 3… 으로 섞였다.
-                        _natural = lambda fp: [int(t) if t.isdigit() else t.lower()
-                                               for t in _re_map.split(r'(\d+)', os.path.basename(fp))]
-                        files = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
-                                 if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))]
-                        _videos = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
-                                   if fp.lower().endswith((".mp4", ".mov", ".m4v", ".avi", ".wmv", ".mkv"))]
-                        if _strict:
-                            # 번호 = 폴더 이름순 번째 사진. '파일명' 지정이 있으면 그 파일을 그 번호 자리로.
-                            files = order_files_by_markers(files, _mk_info)
-                            _need = max(_mk_total, _mk_info["max_no"])
-                            if len(files) < _need:
-                                logger.warning(f"[Orchestrator] 원고 사진 표시는 {_need}번까지인데 폴더에는 {len(files)}장뿐 — 없는 번호는 비워 둡니다.")
-                            files = files[:_need]
-                        # 업로드 원고는 본문의 [이미지] 자리 수만큼만 가져온다.
-                        # 폴더에 사진이 더 많으면 남는 사진이 글 끝에 몰려 붙어버린다.
-                        _want = None
-                        if keep_image_markers:
-                            _want = max(len(_re_map.findall(r'\[이미지(?::\s*\d+)?\]', cafe_content or "")),
-                                        _mk_info["max_no"])
-                            if _want == 0:
-                                logger.info("[Orchestrator] 업로드 원고에 [이미지] 자리가 없어 사진을 넣지 않습니다.")
-                                files = []
-                            else:
-                                if len(files) < _want:
-                                    logger.warning(f"[Orchestrator] 사진 자리 {_want}개인데 폴더에는 {len(files)}장뿐 — 있는 만큼만 넣습니다.")
-                                files = files[:_want]
-                        if files and self.armor.strength != "none":
-                            logger.info(f"[Orchestrator] 🧼 사진 {len(files)}장 세탁 중... (사진이 많으면 1~2분 걸립니다)")
-                        for idx_f, fp in enumerate(files):
-                            wimg = self.armor.wash_image(fp, f"washed_cafe_up_{account_id}_{idx_f}.jpg")
-                            if wimg:
-                                washed_images.append(wimg)
-                        logger.info(f"[Orchestrator] 첨부 이미지 폴더에서 {len(washed_images)}장 사용"
-                                    + (f" (사진 자리 {_want}개)" if _want else ""))
                     _n_cards = max(1, int(card_count or 3))
                     # 업로드 원고에 사진 자리가 아예 없으면 카드뉴스도 만들지 않는다.
                     # 마커 재정렬을 꺼둔 상태라 넣을 자리가 없어 글 끝에 몰려 붙는다.
@@ -1933,24 +1951,10 @@ class WorkflowOrchestrator:
                     # 사진 배치 '내용에 맞게': AI가 사진과 문단을 함께 보고, 사진마다 어울리는 문단 뒤에
                     # [이미지:N] 을 찍는다(원고 글은 그대로). 실패하면 아래 순서대로 교차 배치로 넘어간다.
                     if (photo_layout or "") == "content" and not has_photo_map and len(washed_images) >= 2 and cafe_content:
-                        _paras = [x.strip() for x in _re_map.split(r'\n\s*\n', _re_map.sub(r'\[이미지[^\]]*\]', '', cafe_content))
-                                  if x.strip()]
-                        if len(_paras) < len(washed_images) // 2:   # 문단이 너무 적으면 줄 단위로 나눠 자리를 늘린다
-                            _paras = [ln.strip() for x in _paras for ln in x.split("\n") if ln.strip()]
-                        logger.info(f"[Orchestrator] 📸 사진 {len(washed_images)}장을 원고 내용에 맞춰 배치하는 중 (문단 {len(_paras)}개)...")
-                        _matched = await self.soul.match_photos_to_paragraphs(_paras, washed_images, keyword=keyword)
-                        if _matched:
-                            _place, _desc = _matched
-                            _blocks = []
-                            for _i, _p in enumerate(_paras):
-                                _blocks.append(_p)
-                                _blocks += [f"[이미지:{k + 1}]" for k in sorted(k for k, v in _place.items() if v == _i)]
-                            cafe_content = "\n\n".join(_blocks)
+                        _laid = await self._layout_photos_by_content(cafe_content, washed_images, keyword=keyword)
+                        if _laid:
+                            cafe_content = _laid
                             has_photo_map = True
-                            logger.info("[Orchestrator] 📸 사진 배치: " + ", ".join(
-                                f"#{k + 1}→문단{_place[k] + 1}" + (f"({_desc[k]})" if _desc.get(k) else "") for k in sorted(_place)))
-                        else:
-                            logger.warning("[Orchestrator] 사진-원고 내용 매칭 실패 → 사진 순서대로 글과 교차 배치합니다.")
 
                     # 카드(표지+소제목별)를 소제목 위치에 맞춰 배치 (블로그와 동일)
                     # 단, 사진 매핑 원고([이미지:N])는 이미 AI가 순서·위치를 정했으므로 재정렬하지 않는다.

@@ -342,12 +342,13 @@ class BlogService:
         # (진단용 _dump_toolbar 제거 — 폰트크기 드롭다운 열고 Escape 누르는 동작이 SE3에서
         #  '작성 취소/나가기'를 유발해 창이 닫히던 원인. 셀렉터(fs16/fs19)는 이미 확보됨)
 
-        # 마커 인식은 카페(cafe_service)와 동일한 '관대한' 규칙을 쓴다.
-        # [이미지:N] → N번 사진(폴더 이름순), [이미지] → 아직 안 쓴 다음 사진.
+        # 사진 자리는 카페와 같은 규칙(plan_photo_items)으로 정한다.
+        # [이미지:N] → N번 사진(폴더 이름순), [이미지] → 아직 안 쓴 다음 사진,
+        # 자리가 사진보다 적으면 글·사진 교차로 고르게 재배치.
         # strict_markers=True(원고에 사진 번호·표시가 있는 경우)면 표시대로만 넣고 하단에 남은 사진을 붙이지 않는다.
-        parts = re.split(r'(\[이미지\s*:?\s*\d*\])', content)
+        from .cafe_service import plan_photo_items
         images = images or []
-        used = [False] * len(images)
+        items, used = plan_photo_items(content, len(images), strict_markers, tag="BlogService")
         pending_text = ""
 
         IMG_COMP = ".se-component.se-image, .se-component.se-imageStrip"
@@ -379,46 +380,39 @@ class BlogService:
             }""")
             await frame.page.keyboard.press("Enter")
 
-        for part in parts:
-            mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
-            if not mk:
-                # 형식을 벗어나 캡처되지 않은 표기([이미지 두번째] 등)는 본문에 새지 않게 제거(카페와 동일)
-                chunk = re.sub(r'\[이미지[^\]]*\]', '', part or '')
-                if chunk.strip():
-                    pending_text += chunk.strip() + "\n\n"
+        inserted = 0
+        _img_before = await _img_count()
+        for kind, val, *_ in items:
+            if kind == "text":
+                pending_text += val + "\n\n"
                 continue
-            idx = -1
-            if mk.group(1):
-                cand = int(mk.group(1)) - 1
-                if 0 <= cand < len(images) and not used[cand]:
-                    idx = cand
-                elif strict_markers:
-                    print(f"⚠️ [BlogService] 사진 {mk.group(1)}번 자리 — 폴더에 해당 사진이 없어 비워 둡니다 (사진 {len(images)}장)")
-                    continue
-            if idx < 0:
-                idx = next((k for k in range(len(images)) if not used[k]), -1)
-            if idx < 0:
-                continue
-            used[idx] = True
-            img_path = images[idx]
-            if os.path.exists(img_path):
+            img_path = images[val]
+            if img_path and os.path.exists(img_path):
                 if pending_text.strip():
                     await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
                     pending_text = ""
-                print(f"[BlogService] 사진 #{idx + 1} 삽입")
+                inserted += 1
+                logger.info(f"[BlogService] 이미지 업로드 {inserted}/{len(images)} (사진 #{val + 1})")
                 await _upload(img_path)
 
         if pending_text.strip():
             await self.stealth.human_type(frame, self.selectors["body"], pending_text, speed_mode=speed_mode, speed_multiplier=speed_multiplier, do_click=False)
 
-        # 남은 이미지가 있다면 글 맨 하단에 추가 (안전장치) — 표시대로 모드에서는 넣지 않는다.
+        # 자리를 못 받은 사진만 글 맨 하단에 추가 (안전장치) — 표시대로 모드에서는 넣지 않는다.
         if strict_markers:
             if not all(used):
-                print(f"[BlogService] 원고에 표시가 없는 사진 {used.count(False)}장은 넣지 않았습니다 (표시대로)")
+                logger.info(f"[BlogService] 원고에 표시가 없는 사진 {used.count(False)}장은 넣지 않았습니다 (표시대로)")
         else:
             for k in range(len(images)):
                 if not used[k] and os.path.exists(images[k]):
+                    inserted += 1
+                    logger.info(f"[BlogService] (하단)이미지 업로드 {inserted}/{len(images)} (사진 #{k + 1})")
                     await _upload(images[k])
+
+        # 계획한 사진이 실제로 다 들어갔는지 확인 (카페와 동일)
+        _img_after = await _img_count()
+        if _img_before >= 0 and _img_after >= 0 and _img_after - _img_before < inserted:
+            logger.warning(f"[BlogService] ⚠️ 사진 {inserted}장을 넣었는데 본문에는 {_img_after - _img_before}장만 보입니다 — 글에서 확인해 주세요")
 
         print("✅ [BlogService] 원고 타이핑(이미지 교차) 완료")
 

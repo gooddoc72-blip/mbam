@@ -380,6 +380,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     use_tethering=req.use_tethering,
                     insert_map=req.insert_map,
                     map_query=req.map_query,
+                    photo_layout=(getattr(req, "photo_layout", None) or "content"),
                     log_callback=log
                 )
             else:
@@ -404,7 +405,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     source_data=req.source_data,
                     generate_card_news=req.generate_card_news,
                     insert_map=req.insert_map,
-                    map_query=req.map_query
+                    map_query=req.map_query,
+                    photo_layout=(getattr(req, "photo_layout", None) or "content"),
                 )
             if result.get("success"):
                 log("✅ 블로그 포스팅이 성공적으로 완료되었습니다!")

@@ -7,6 +7,77 @@ except Exception:
     logger = None
 
 
+def plan_photo_items(content, n_imgs, strict_markers=False, tag="CafeService"):
+    """원고를 [('text', 문단) | ('img', 사진번호, 번호지정여부)] 순서열로 만든다(블로그·카페 공용).
+    [이미지:N] → N번(1-based) 사진을 그 자리에, [이미지](번호 없음)·무효·중복 번호 → 다음 미사용 사진.
+    strict_markers=True 면 원고 표시대로만 — 없는 번호는 비우고 재배치하지 않는다.
+    반환: (items, used) — used[k] 가 False 인 사진은 자리를 못 받은 사진."""
+    import re
+    used = [False] * n_imgs
+    # 관대한 마커 인식: [이미지] / [이미지:3] / [이미지 3] / [이미지3] 모두 허용(AI 형식 이탈 대비)
+    parts = re.split(r'(\[이미지\s*:?\s*\d*\])', content or "")
+
+    def _next_seq_idx():
+        for k in range(n_imgs):
+            if not used[k]:
+                return k
+        return -1
+
+    # 1) 문단은 빈 줄 기준
+    items = []
+    for part in parts:
+        mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
+        if mk:
+            idx, fixed = -1, False
+            if mk.group(1):                       # 번호 지정 [이미지:N]
+                cand = int(mk.group(1)) - 1
+                if 0 <= cand < n_imgs and not used[cand]:
+                    idx, fixed = cand, True
+                elif strict_markers:
+                    # 표시대로 모드: 그 번호 사진이 없으면 다른 사진으로 메우지 않고 비워 둔다.
+                    if logger: logger.warning(f"[{tag}] 사진 {mk.group(1)}번 자리 — 폴더에 {mk.group(1)}번째 사진이 없어 비워 둡니다 (사진 {n_imgs}장)")
+                    continue
+            if idx < 0:                            # 번호 없음/무효/중복 → 순차 폴백
+                idx = _next_seq_idx()
+            if 0 <= idx < n_imgs:
+                used[idx] = True
+                items.append(("img", idx, fixed))
+        elif part and part.strip():
+            # 형식을 벗어나 캡처되지 않은 잔여 이미지 표기([이미지 두번째] 등)는 본문에 새지 않게 제거
+            clean = re.sub(r'\[이미지[^\]]*\]', '', part).strip()
+            for para in re.split(r'\n\s*\n', clean):
+                if para.strip():
+                    items.append(("text", para.strip()))
+
+    # 2) 제목 다음은 글부터 — 맨 앞에 온 사진은 첫 문단 뒤로 보낸다.
+    first_text = next((i for i, it in enumerate(items) if it[0] == "text"), -1)
+    if first_text > 0:
+        items = [items[first_text]] + items[:first_text] + items[first_text + 1:]
+
+    # 3) 원고의 [이미지] 자리가 사진 수보다 적으면 그 자리는 무시하고,
+    #    글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진 → 글 → 사진 … → 글' 로 다시 배치한다.
+    if not all(used) and not strict_markers:
+        items = plan_even_layout([it[1] for it in items if it[0] == "text"], n_imgs)
+        used = [True] * n_imgs
+        if logger: logger.info(f"[{tag}] 원고 [이미지] 자리가 사진보다 적어 글·사진 교차 배치로 재구성 (글 덩어리 {sum(1 for it in items if it[0] == 'text')}개)")
+
+    # 번호 지정이 아닌 자리는 위에서부터 폴더 순서(1, 2, 3…)대로 채운다 — 사진 순서가 섞이지 않게.
+    free_slots = [i for i, it in enumerate(items) if it[0] == "img" and not it[2]]
+    for i, k in zip(free_slots, sorted(items[i][1] for i in free_slots)):
+        items[i] = ("img", k, False)
+
+    # 사진 위치 계획을 글쓰기 전에 남긴다 — 어떤 문장 뒤에 몇 번 사진이 들어가는지
+    if logger:
+        _plan, _last = [], "(글 시작)"
+        for it in items:
+            if it[0] == "text":
+                _last = it[1].replace("\n", " ")
+            else:
+                _plan.append(f"사진{it[1] + 1}←'…{_last[-15:]}'")
+        logger.info(f"[{tag}] 📋 사진 위치 계획({len(_plan)}장): " + " | ".join(_plan))
+    return items, used
+
+
 def plan_even_layout(paragraphs, n_imgs):
     """글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진1 → 글 → 사진2 … → 글' 순서열을 만든다.
     문단이 모자라면 줄 단위, 그래도 모자라면 문장 단위로 쪼갠다. 사진은 항상 1, 2, 3… 순서."""
@@ -344,74 +415,9 @@ class CafeService:
                 if logger: logger.error(f"[CafeService] 이미지 업로드 실패(건너뜀): {e}")
                 return False
 
-        # 마커([이미지] 또는 [이미지:N])를 캡처하며 분리.
-        # [이미지:N] → N번(1-based) 사진을 그 자리에 삽입(AI가 입구컷부터 순서로 지정).
-        # [이미지](번호 없음)·무효·중복 번호 → 다음 미사용 사진으로 순차 폴백.
         images = images or []
         n_imgs = len(images)
-        used = [False] * n_imgs
-        # 관대한 마커 인식: [이미지] / [이미지:3] / [이미지 3] / [이미지3] 모두 허용(AI 형식 이탈 대비)
-        MARKER_RE = r'\[이미지\s*:?\s*\d*\]'
-        parts = re.split(r'(' + MARKER_RE + r')', content)
-
-        def _next_seq_idx():
-            for k in range(n_imgs):
-                if not used[k]:
-                    return k
-            return -1
-
-        # 1) 원고를 [('text', 문단) | ('img', 사진번호, 번호지정여부)] 순서열로 만든다. 문단은 빈 줄 기준.
-        items = []
-        for part in parts:
-            mk = re.fullmatch(r'\[이미지\s*:?\s*(\d*)\]', part or "")
-            if mk:
-                idx, fixed = -1, False
-                if mk.group(1):                       # 번호 지정 [이미지:N]
-                    cand = int(mk.group(1)) - 1
-                    if 0 <= cand < n_imgs and not used[cand]:
-                        idx, fixed = cand, True
-                    elif strict_markers:
-                        # 표시대로 모드: 그 번호 사진이 없으면 다른 사진으로 메우지 않고 비워 둔다.
-                        if logger: logger.warning(f"[CafeService] 사진 {mk.group(1)}번 자리 — 폴더에 {mk.group(1)}번째 사진이 없어 비워 둡니다 (사진 {n_imgs}장)")
-                        continue
-                if idx < 0:                            # 번호 없음/무효/중복 → 순차 폴백
-                    idx = _next_seq_idx()
-                if 0 <= idx < n_imgs:
-                    used[idx] = True
-                    items.append(("img", idx, fixed))
-            elif part and part.strip():
-                # 형식을 벗어나 캡처되지 않은 잔여 이미지 표기([이미지 두번째] 등)는 본문에 새지 않게 제거
-                clean = re.sub(r'\[이미지[^\]]*\]', '', part).strip()
-                for para in re.split(r'\n\s*\n', clean):
-                    if para.strip():
-                        items.append(("text", para.strip()))
-
-        # 2) 제목 다음은 글부터 — 맨 앞에 온 사진은 첫 문단 뒤로 보낸다.
-        first_text = next((i for i, it in enumerate(items) if it[0] == "text"), -1)
-        if first_text > 0:
-            items = [items[first_text]] + items[:first_text] + items[first_text + 1:]
-
-        # 3) 원고의 [이미지] 자리가 사진 수보다 적으면 그 자리는 무시하고,
-        #    글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진 → 글 → 사진 … → 글' 로 다시 배치한다.
-        if not all(used) and not strict_markers:
-            items = plan_even_layout([it[1] for it in items if it[0] == "text"], n_imgs)
-            used = [True] * n_imgs
-            if logger: logger.info(f"[CafeService] 원고 [이미지] 자리가 사진보다 적어 글·사진 교차 배치로 재구성 (글 덩어리 {sum(1 for it in items if it[0] == 'text')}개)")
-
-        # 번호 지정이 아닌 자리는 위에서부터 폴더 순서(1, 2, 3…)대로 채운다 — 사진 순서가 섞이지 않게.
-        free_slots = [i for i, it in enumerate(items) if it[0] == "img" and not it[2]]
-        for i, k in zip(free_slots, sorted(items[i][1] for i in free_slots)):
-            items[i] = ("img", k, False)
-
-        # 사진 위치 계획을 글쓰기 전에 남긴다 — 어떤 문장 뒤에 몇 번 사진이 들어가는지
-        if logger:
-            _plan, _last = [], "(글 시작)"
-            for it in items:
-                if it[0] == "text":
-                    _last = it[1].replace("\n", " ")
-                else:
-                    _plan.append(f"사진{it[1] + 1}←'…{_last[-15:]}'")
-            logger.info(f"[CafeService] 📋 사진 위치 계획({len(_plan)}장): " + " | ".join(_plan))
+        items, used = plan_photo_items(content, n_imgs, strict_markers, tag="CafeService")
 
         # 4) 순서대로 입력
         pending_text = ""
