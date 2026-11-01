@@ -127,6 +127,8 @@ export default function PostTab({ s }) {
     setCafeMapQuery,
     washStrength,
     changeWashStrength,
+    photoLayout,
+    changePhotoLayout,
     subKeywords,
     setSubKeywords,
     showLibPicker,
@@ -510,6 +512,14 @@ export default function PostTab({ s }) {
                       </select>
                     </div>
                     <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 발행하는 사진은 항상 세탁됩니다. 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다.</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", fontWeight: "bold", color: "#64748b" }}>
+                      📸 사진 배치
+                      <select value={photoLayout} onChange={e => changePhotoLayout(e.target.value)} style={{ padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.83rem", fontWeight: "normal" }}>
+                        <option value="content">내용에 맞게 — AI가 사진을 보고 어울리는 문단 뒤에 (권장)</option>
+                        <option value="sequence">순서대로 — 사진 1, 2, 3… 을 글과 번갈아</option>
+                      </select>
+                    </div>
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* '내용에 맞게'는 발행 때 사진 분석으로 30초~1분 더 걸립니다. 분석에 실패하면 자동으로 순서대로 넣습니다. 업로드 원고에 직접 찍은 [이미지] 자리는 그대로 지킵니다.</p>
                   </div>
                 )}
                 {/* 업로드 원고는 AI 생성을 거치지 않으므로 버튼을 아예 내린다 (경로 분리) */}

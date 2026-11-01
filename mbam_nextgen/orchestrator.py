@@ -1676,7 +1676,8 @@ class WorkflowOrchestrator:
         card_count: int = 3,               # 카드뉴스 장수
         insert_map: bool = False,          # 본문 하단에 네이버 장소(지도) 삽입
         map_query: str = None,             # 삽입할 장소명/주소
-        keep_image_markers: bool = False   # 업로드 원고: 글쓴이가 찍어둔 [이미지] 자리를 그대로 둔다
+        keep_image_markers: bool = False,  # 업로드 원고: 글쓴이가 찍어둔 [이미지] 자리를 그대로 둔다
+        photo_layout: str = "sequence"     # 사진 배치: "sequence"(순서대로 교차) | "content"(AI가 내용에 맞춰)
     ):
         """네이버 카페 자동 포스팅 워크플로우"""
         proxy_config = self.proxy_manager.get_browser_proxy_config(proxy)
@@ -1862,6 +1863,28 @@ class WorkflowOrchestrator:
                             if not title:
                                 title = extracted_title
                             cafe_content = re.sub(r'^\s*\[제목\].*?\n+', '', cafe_content, count=1).strip()
+
+                    # 사진 배치 '내용에 맞게': AI가 사진과 문단을 함께 보고, 사진마다 어울리는 문단 뒤에
+                    # [이미지:N] 을 찍는다(원고 글은 그대로). 실패하면 아래 순서대로 교차 배치로 넘어간다.
+                    if (photo_layout or "") == "content" and not has_photo_map and len(washed_images) >= 2 and cafe_content:
+                        _paras = [x.strip() for x in _re_map.split(r'\n\s*\n', _re_map.sub(r'\[이미지[^\]]*\]', '', cafe_content))
+                                  if x.strip()]
+                        if len(_paras) < len(washed_images) // 2:   # 문단이 너무 적으면 줄 단위로 나눠 자리를 늘린다
+                            _paras = [ln.strip() for x in _paras for ln in x.split("\n") if ln.strip()]
+                        logger.info(f"[Orchestrator] 📸 사진 {len(washed_images)}장을 원고 내용에 맞춰 배치하는 중 (문단 {len(_paras)}개)...")
+                        _matched = await self.soul.match_photos_to_paragraphs(_paras, washed_images, keyword=keyword)
+                        if _matched:
+                            _place, _desc = _matched
+                            _blocks = []
+                            for _i, _p in enumerate(_paras):
+                                _blocks.append(_p)
+                                _blocks += [f"[이미지:{k + 1}]" for k in sorted(k for k, v in _place.items() if v == _i)]
+                            cafe_content = "\n\n".join(_blocks)
+                            has_photo_map = True
+                            logger.info("[Orchestrator] 📸 사진 배치: " + ", ".join(
+                                f"#{k + 1}→문단{_place[k] + 1}" + (f"({_desc[k]})" if _desc.get(k) else "") for k in sorted(_place)))
+                        else:
+                            logger.warning("[Orchestrator] 사진-원고 내용 매칭 실패 → 사진 순서대로 글과 교차 배치합니다.")
 
                     # 카드(표지+소제목별)를 소제목 위치에 맞춰 배치 (블로그와 동일)
                     # 단, 사진 매핑 원고([이미지:N])는 이미 AI가 순서·위치를 정했으므로 재정렬하지 않는다.

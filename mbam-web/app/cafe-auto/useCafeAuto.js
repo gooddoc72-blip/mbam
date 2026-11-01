@@ -122,6 +122,15 @@ export function useCafeAuto() {
     setWashStrength(v);
     try { localStorage.setItem("mbam_wash_strength", v); } catch (e) {}
   };
+  // 사진 배치(내용에 맞게=AI / 순서대로) — 다음 방문에도 유지
+  const [photoLayout, setPhotoLayout] = useState("content");
+  useEffect(() => {
+    try { const v = localStorage.getItem("mbam_photo_layout"); if (v) setPhotoLayout(v); } catch (e) {}
+  }, []);
+  const changePhotoLayout = (v) => {
+    setPhotoLayout(v);
+    try { localStorage.setItem("mbam_photo_layout", v); } catch (e) {}
+  };
   const [subKeywords, setSubKeywords] = useState("");        // 서브(연관) 키워드 — 쉼표 구분, 최대 5개
 
   // 이미지 보관함에서 가져오기 (기본 전체 + 골라담기)
@@ -746,7 +755,7 @@ export function useCafeAuto() {
           cafe_action_type: "post", source_data: m.content, use_tethering: useTethering,
           generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
           insert_map: cafeInsertMap, map_query: cafeMapQuery,  // 본문 하단 네이버 장소(지도) 삽입
-          wash_strength: washStrength,              // 사진 세탁 강도
+          photo_layout: photoLayout, wash_strength: washStrength,              // 사진 세탁 강도
           image_folder_path: imageFolder || null,  // 지정한 이미지 폴더(발행 PC=에이전트 기준). 있으면 카드뉴스 대신 사용
           // 업로드 원고를 대기열에 넣어 일괄 발행할 때도 [이미지] 자리를 그대로 지킨다.
           keep_image_markers: sourceMode === "upload",
@@ -831,7 +840,7 @@ export function useCafeAuto() {
           generate_card_news: cafeCardNews,        // 첨부 이미지 없을 때 카드뉴스 자동 생성 여부
           card_count: Number(cafeCardCount) || 3,  // 카드뉴스 장수
           track_rank: cafeTrackRank,               // 발행 후 통검 순위 추적 자동 등록
-          wash_strength: washStrength,             // 사진 세탁 강도
+          photo_layout: photoLayout, wash_strength: washStrength,             // 사진 세탁 강도
           insert_map: cafeInsertMap,               // 본문 하단 네이버 장소(지도) 삽입
           map_query: cafeMapQuery                  // 삽입할 장소명/주소
         };
@@ -1262,6 +1271,8 @@ export function useCafeAuto() {
     setCafeMapQuery,
     washStrength,
     changeWashStrength,
+    photoLayout,
+    changePhotoLayout,
     subKeywords,
     setSubKeywords,
     handlePickFolder,

@@ -126,6 +126,38 @@ async def get_uploaded_image(folder_id: str, filename: str, current_user: dict =
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
     return FileResponse(fp)
 
+
+class MatchPhotosRequest(BaseModel):
+    paragraphs: List[str]
+    images: List[str]            # JPEG base64 (에이전트가 긴 변 768px 로 줄여 보냄)
+    keyword: Optional[str] = ""
+
+
+@router.post("/match-photos", summary="사진-원고 내용 매칭 — AI 키가 없는 로컬 에이전트용")
+async def match_photos(req: MatchPhotosRequest, current_user: dict = Depends(get_current_user)):
+    """에이전트가 보낸 문단·사진으로 '사진마다 어울리는 문단'을 정해 돌려준다(원고는 바꾸지 않음)."""
+    import base64, os, shutil, tempfile
+    from mbam_nextgen.services.soul import SoulRewriter
+    if not req.paragraphs or not req.images:
+        raise HTTPException(status_code=400, detail="문단과 사진이 필요합니다.")
+    if len(req.images) > 20 or len(req.paragraphs) > 80:
+        raise HTTPException(status_code=400, detail="사진은 20장, 문단은 80개까지입니다.")
+    tmp = tempfile.mkdtemp(prefix="match_")
+    try:
+        paths = []
+        for i, b in enumerate(req.images):
+            fp = os.path.join(tmp, f"{i}.jpg")
+            with open(fp, "wb") as f:
+                f.write(base64.b64decode(b))
+            paths.append(fp)
+        r = await SoulRewriter().match_photos_to_paragraphs(req.paragraphs, paths, keyword=req.keyword or "")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not r:
+        raise HTTPException(status_code=502, detail="사진 매칭에 실패했습니다.")
+    place, descs = r
+    return {"placements": {str(k): v for k, v in place.items()}, "descs": {str(k): v for k, v in descs.items()}}
+
 class AutoPostRequest(BaseModel):
     # For multiple accounts
     accounts: Optional[List[dict]] = None
@@ -147,6 +179,7 @@ class AutoPostRequest(BaseModel):
     insert_map: Optional[bool] = False        # 블로그 글에 네이버 장소(지도) 삽입
     map_query: Optional[str] = None           # 삽입할 장소명/주소
     keep_image_markers: Optional[bool] = False  # 업로드 원고: 본문의 [이미지] 자리를 그대로 두고 폴더 사진을 넣는다
+    photo_layout: Optional[str] = "content"     # 카페 사진 배치: "content"(AI가 원고 내용에 맞춰) | "sequence"(순서대로)
 
     title: Optional[str] = None
     content: Optional[str] = None
@@ -420,6 +453,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                 insert_map=bool(getattr(req, "insert_map", False)),
                 map_query=getattr(req, "map_query", None),
                 keep_image_markers=bool(getattr(req, "keep_image_markers", False)),
+                photo_layout=(getattr(req, "photo_layout", None) or "content"),
             )
             if result.get("success"):
                 log("✅ 카페 포스팅이 성공적으로 완료되었습니다!")

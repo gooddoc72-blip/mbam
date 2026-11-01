@@ -25,6 +25,16 @@ try:
 except ImportError:
     openai = None
 
+# 사진-문단 매칭을 서버에 맡기는 함수(에이전트가 등록). AI 키가 없는 PC에서만 쓴다.
+# 시그니처: async (paragraphs, jpeg_b64_list, keyword) -> {"placements": {"0": 2, ...}, "descs": {...}} | None
+_REMOTE_PHOTO_MATCHER = None
+
+
+def set_remote_photo_matcher(fn):
+    global _REMOTE_PHOTO_MATCHER
+    _REMOTE_PHOTO_MATCHER = fn
+
+
 class SoulRewriter:
     """
     [L2. The Soul] - Multi-AI Support (Updated for google-genai)
@@ -339,6 +349,125 @@ class SoulRewriter:
                 print(f"[Soul] Claude 비전 폴백 실패: {e}")
 
         return ""
+
+    async def match_photos_to_paragraphs(self, paragraphs: list, image_paths: list, keyword: str = ""):
+        """이미 완성된 원고의 문단들과 사진들을 비전 모델에 함께 보여 주고,
+        사진마다 '내용이 가장 잘 맞는 문단' 번호를 받는다. (원고는 바꾸지 않고 사진 자리만 정함)
+        반환: ({사진번호: 문단번호}, {사진번호: 한 줄 설명}) — 0-based, 모든 사진 포함. 실패 시 None.
+        Gemini 우선(빠르고 저렴) → 실패 시 Claude 비전 폴백."""
+        import os, io, re, json, base64
+        from PIL import Image
+        valid = [p for p in (image_paths or []) if p and os.path.exists(p)]
+        n, m = len(valid), len(paragraphs or [])
+        if n == 0 or m == 0 or n != len(image_paths):
+            return None
+
+        def _small(path, max_side=768):
+            im = Image.open(path)
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            return im
+
+        # 이 PC에 AI 키가 없으면(설치형 에이전트) 작게 줄인 사진을 서버로 보내 매칭을 맡긴다.
+        if not self.gemini_client and not self.claude_client:
+            if _REMOTE_PHOTO_MATCHER is None:
+                return None
+            try:
+                b64s = []
+                for p in valid:
+                    buf = io.BytesIO()
+                    _small(p).save(buf, format="JPEG", quality=80)
+                    b64s.append(base64.standard_b64encode(buf.getvalue()).decode())
+                res = await _REMOTE_PHOTO_MATCHER(list(paragraphs), b64s, keyword)
+                place = {int(k): int(v) for k, v in ((res or {}).get("placements") or {}).items()}
+                descs = {int(k): str(v) for k, v in ((res or {}).get("descs") or {}).items()}
+                if sorted(place) != list(range(n)) or not all(0 <= v < m for v in place.values()):
+                    return None
+                return place, descs
+            except Exception as e:
+                print(f"[Soul] 사진-문단 매칭 서버 요청 실패: {e}")
+                return None
+
+        numbered = "\n\n".join(f"[문단 {i + 1}]\n{p[:600]}" for i, p in enumerate(paragraphs))
+        prompt = (
+            f"네이버 카페 글{f'({keyword})' if keyword else ''}에 넣을 사진 {n}장이 첨부 순서대로 1~{n}번입니다.\n"
+            f"아래 글은 문단 {m}개로 나뉘어 있습니다. 각 사진을 실제로 보고, 그 사진 내용을 이야기하는 문단 번호를 고르세요.\n"
+            "규칙:\n"
+            f"- 사진 {n}장을 모두 한 번씩 배정(문단 번호는 1~{m}).\n"
+            "- 사진은 고른 문단 '바로 뒤'에 들어갑니다. 내용이 딱 맞는 문단이 없으면 흐름상 가장 가까운 문단을 고르세요.\n"
+            "- 한 문단에 사진이 몰리지 않게, 비슷하게 맞으면 사진이 없는 문단을 우선하세요(한 문단 최대 3장).\n"
+            "- 글 흐름(외관→내부→메뉴→음식 등)과 사진 순서가 자연스럽게 이어지게 하세요.\n"
+            '- 출력은 JSON 한 줄만: {"placements":[{"photo":1,"paragraph":2,"desc":"사진 한 줄 설명"}, ...]}\n\n'
+            + numbered
+        )
+
+        def _parse(txt):
+            mobj = re.search(r'\{.*\}', txt or "", re.S)
+            if not mobj:
+                return None
+            data = json.loads(mobj.group(0))
+            out, descs = {}, {}
+            for pl in data.get("placements", []):
+                try:
+                    k, para = int(pl.get("photo")) - 1, int(pl.get("paragraph")) - 1
+                except Exception:
+                    continue
+                if 0 <= k < n and k not in out:
+                    out[k] = min(max(para, 0), m - 1)
+                    descs[k] = str(pl.get("desc") or "")[:40]
+            if len(out) < max(1, n // 2):   # 절반도 못 받으면 믿지 않는다
+                return None
+            # 빠진 사진은 앞뒤 사진이 들어간 문단 근처에 넣는다(순서 보존).
+            for k in range(n):
+                if k not in out:
+                    prev = max((out[j] for j in out if j < k), default=0)
+                    out[k] = prev
+            # 한 문단에 사진이 너무 몰리면(최대 cap장) 넘치는 뒷번호 사진을 가까운 다음(없으면 이전) 문단으로 옮긴다.
+            cap = max(3, -(-n // m))
+            for i in range(m):
+                ks = sorted(k for k, v in out.items() if v == i)
+                for k in ks[cap:]:
+                    cnt = lambda j: sum(1 for v in out.values() if v == j)
+                    dest = next((j for j in range(i + 1, m) if cnt(j) < cap), None)
+                    if dest is None:
+                        dest = next((j for j in range(i - 1, -1, -1) if cnt(j) < cap), i)
+                    out[k] = dest
+            return out, descs
+
+        # 1) Gemini 비전
+        if self.gemini_client:
+            for attempt in range(2):
+                try:
+                    parts = [prompt] + [_small(p) for p in valid]
+                    resp = await asyncio.to_thread(
+                        self.gemini_client.models.generate_content, model="gemini-2.5-flash", contents=parts)
+                    r = _parse(resp.text)
+                    if r:
+                        return r
+                except Exception as e:
+                    print(f"[Soul] 사진-문단 매칭 Gemini 시도{attempt + 1} 실패: {str(e)[:120]}")
+                    if "spending cap" in str(e) or "PERMISSION_DENIED" in str(e):
+                        break   # 월 한도 초과·권한 문제는 재시도해도 같다 → 바로 Claude 로
+                    await asyncio.sleep(2)
+        # 2) Claude 비전 폴백
+        if self.claude_client:
+            try:
+                blocks = []
+                for p in valid:
+                    buf = io.BytesIO()
+                    _small(p).save(buf, format="JPEG", quality=80)
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                               "data": base64.standard_b64encode(buf.getvalue()).decode()}})
+                blocks.append({"type": "text", "text": prompt})
+                resp = await self.claude_client.messages.create(
+                    model=self.claude_model, max_tokens=1500, messages=[{"role": "user", "content": blocks}])
+                r = _parse(resp.content[0].text if resp.content else "")
+                if r:
+                    return r
+            except Exception as e:
+                print(f"[Soul] 사진-문단 매칭 Claude 폴백 실패: {e}")
+        return None
 
     async def generate_matjip_with_photos(self, source_data: str, image_paths: list, place_name: str = "",
                                           keyword: str = "", sub_keywords: list = None,

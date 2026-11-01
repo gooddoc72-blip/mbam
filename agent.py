@@ -212,6 +212,21 @@ async def _download_uploaded_images(folder_id: str):
         return None
 
 
+async def _remote_match_photos(paragraphs, images_b64, keyword=""):
+    """사진-원고 내용 매칭을 클라우드에 맡긴다(이 PC에는 AI 키가 없음)."""
+    base = _AGENT_AUTH.get("cloud_url")
+    if not base:
+        return None
+    hdr = {"Authorization": f"Bearer {_AGENT_AUTH.get('token', '')}"}
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{base}/api/auto_post/match-photos", headers=hdr, timeout=180,
+                              json={"paragraphs": paragraphs, "images": images_b64, "keyword": keyword or ""})
+    if r.status_code != 200:
+        print(f"[agent] 사진 매칭 요청 실패 {r.status_code}: {r.text[:120]}")
+        return None
+    return r.json()
+
+
 async def _handle_auto_post(payload: dict, log=None) -> dict:
     # 발행(블로그/카페): 사용자 PC에서 네이버 로그인+글쓰기 브라우저 자동화 실행
     import uuid as _uuid, os
@@ -221,6 +236,11 @@ async def _handle_auto_post(payload: dict, log=None) -> dict:
         _local = await _download_uploaded_images(os.path.basename(str(_ifp).rstrip("/\\")))
         payload["image_folder_path"] = _local  # None이면 오케스트레이터가 카드뉴스/텍스트로 폴백
     from mbam_nextgen.backend.routers.auto_post import run_automation_task, task_status_store, AutoPostRequest
+    try:
+        from mbam_nextgen.services.soul import set_remote_photo_matcher
+        set_remote_photo_matcher(_remote_match_photos)   # 사진 '내용에 맞게' 배치는 서버 AI로
+    except Exception:
+        pass
     req = AutoPostRequest(**payload)
     tid = _uuid.uuid4().hex
     # 워크플로우 실행 + 로컬 task_status_store에 상태 기록.
