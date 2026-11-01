@@ -1765,8 +1765,8 @@ class WorkflowOrchestrator:
                     }
                 
                 else:
-                    # 3. AI 콘텐츠 생성
-                    logger.info("[Orchestrator] AI 카페 원고 생성 중...")
+                    # 3. AI 콘텐츠 생성 (원고를 받아 왔으면 생성하지 않으므로 그에 맞게 안내)
+                    logger.info("[Orchestrator] 원고 준비 중..." if content else "[Orchestrator] AI 카페 원고 생성 중...")
                     # 사진 매핑 원고: 맛집 사진 비전 생성이 이미 '[이미지:N]'(입구컷부터 순서)로 사진 자리를
                     # 정해둔 경우 → 재생성/재정렬하지 않고 그대로 사용(사진↔글 매칭·순서 보존).
                     import re as _re_map
@@ -1815,6 +1815,8 @@ class WorkflowOrchestrator:
                                 if len(files) < _want:
                                     logger.warning(f"[Orchestrator] 사진 자리 {_want}개인데 폴더에는 {len(files)}장뿐 — 있는 만큼만 넣습니다.")
                                 files = files[:_want]
+                        if files:
+                            logger.info(f"[Orchestrator] 🧼 사진 {len(files)}장 세탁 중... (사진이 많으면 1~2분 걸립니다)")
                         for idx_f, fp in enumerate(files):
                             wimg = self.armor.wash_image(fp, f"washed_cafe_up_{account_id}_{idx_f}.jpg")
                             if wimg:
