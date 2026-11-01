@@ -6,6 +6,47 @@ try:
 except Exception:
     logger = None
 
+
+def plan_even_layout(paragraphs, n_imgs):
+    """글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진1 → 글 → 사진2 … → 글' 순서열을 만든다.
+    문단이 모자라면 줄 단위, 그래도 모자라면 문장 단위로 쪼갠다. 사진은 항상 1, 2, 3… 순서."""
+    import re
+    want = n_imgs + 1
+    units = [("\n\n", p) for p in paragraphs if p.strip()]  # (앞 구분자, 텍스트)
+    if len(units) < want:
+        units = [(sep if j == 0 else "\n", ln.strip())
+                 for sep, p in units for j, ln in enumerate(l for l in p.split("\n") if l.strip())]
+    if len(units) < want:
+        units = [(sep if j == 0 else " ", sn)
+                 for sep, ln in units for j, sn in enumerate(x for x in re.split(r'(?<=[.!?~])\s+', ln) if x.strip())]
+    if not units:
+        return [("img", k, False) for k in range(n_imgs)]
+
+    # 글자 수 기준으로 균등하게 자른다(각 덩어리 최소 1개).
+    groups_n = min(want, len(units))
+    total = sum(len(t) for _, t in units) or 1
+    bounds, acc, g = [0], 0, 1
+    for i, (_, t) in enumerate(units[:-1]):
+        acc += len(t)
+        left_units, left_groups = len(units) - (i + 1), groups_n - g
+        if g < groups_n and left_units >= left_groups and (acc >= total * g / groups_n or left_units == left_groups):
+            bounds.append(i + 1)
+            g += 1
+    bounds.append(len(units))
+    texts = [units[a][1] + "".join(sep + t for sep, t in units[a + 1:b]) for a, b in zip(bounds, bounds[1:])]
+
+    # 사진을 덩어리 사이 자리에 고르게 배분(남는 사진은 앞쪽 자리부터 1장씩 더).
+    gaps = max(len(texts) - 1, 1)
+    per_gap = [n_imgs // gaps + (1 if j < n_imgs % gaps else 0) for j in range(gaps)]
+    items, k = [], 0
+    for j, t in enumerate(texts):
+        items.append(("text", t))
+        for _ in range(per_gap[j] if j < gaps else 0):
+            items.append(("img", k, False))
+            k += 1
+    return items
+
+
 class CafeService:
     """
     [Domain Service] 네이버 카페 자동화 특화 로직
@@ -326,19 +367,12 @@ class CafeService:
         if first_text > 0:
             items = [items[first_text]] + items[:first_text] + items[first_text + 1:]
 
-        # 3) 마커보다 사진이 많으면 남은 사진을 맨 아래에 몰지 않고,
-        #    아직 사진이 없는 문단 뒤 자리에 고르게 나눠 '글 → 사진 → 글 → 사진' 이 되게 한다.
-        leftover = [k for k in range(n_imgs) if not used[k]]
-        gaps = [i for i, it in enumerate(items)
-                if it[0] == "text" and (i + 1 >= len(items) or items[i + 1][0] != "img")]
-        if leftover and gaps:
-            take = min(len(leftover), len(gaps))
-            # gaps 중 take 개를 균등 간격으로 고른다(마지막 문단 뒤 자리도 포함).
-            chosen = sorted({gaps[round(j * (len(gaps) - 1) / max(take - 1, 1))] if take > 1 else gaps[0]
-                             for j in range(take)})
-            for pos, k in zip(reversed(chosen), reversed(leftover[:len(chosen)])):
-                items.insert(pos + 1, ("img", k, False))
-                used[k] = True
+        # 3) 원고의 [이미지] 자리가 사진 수보다 적으면 그 자리는 무시하고,
+        #    글을 (사진 수 + 1) 덩어리로 고르게 나눠 '글 → 사진 → 글 → 사진 … → 글' 로 다시 배치한다.
+        if not all(used):
+            items = plan_even_layout([it[1] for it in items if it[0] == "text"], n_imgs)
+            used = [True] * n_imgs
+            if logger: logger.info(f"[CafeService] 원고 [이미지] 자리가 사진보다 적어 글·사진 교차 배치로 재구성 (글 덩어리 {sum(1 for it in items if it[0] == 'text')}개)")
 
         # 번호 지정이 아닌 자리는 위에서부터 폴더 순서(1, 2, 3…)대로 채운다 — 사진 순서가 섞이지 않게.
         free_slots = [i for i, it in enumerate(items) if it[0] == "img" and not it[2]]

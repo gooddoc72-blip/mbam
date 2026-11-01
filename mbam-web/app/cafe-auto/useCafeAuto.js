@@ -133,6 +133,7 @@ export function useCafeAuto() {
   const [accountTargets, setAccountTargets] = useState({});
   const [savedManuscripts, setSavedManuscripts] = useState([]); // 저장된 일괄 원고
   const [batchPosting, setBatchPosting] = usePersistentState("cafe-auto:batchPosting", false);
+  const statusMissRef = useRef(0); // 상태 폴링 연속 404 횟수
   const batchCancelRef = useRef(false); // 일괄 발행 강제 중지 플래그
   const [editMs, setEditMs] = useState(null); // 수정 중인 저장 원고
 
@@ -298,6 +299,7 @@ export function useCafeAuto() {
   useEffect(() => {
     let intervalId;
     if (taskId && taskStatus !== "completed" && taskStatus !== "failed") {
+      statusMissRef.current = 0;
       intervalId = setInterval(async () => {
         try {
           // Check which endpoint to poll based on task kind
@@ -307,6 +309,7 @@ export function useCafeAuto() {
             
           const res = await fetchWithAuth(endpoint);
           if (res.ok) {
+            statusMissRef.current = 0;
             const data = await res.json();
             setStatusLogs(data.logs || []);
             setTaskStatus(data.status);
@@ -314,8 +317,12 @@ export function useCafeAuto() {
               setLoading(false);
             }
           } else if (res.status === 404) {
-            setLoading(false);
-            setTaskStatus("failed");
+            // 내 PC 에이전트 작업은 에이전트가 받기 전까지 서버에 상태가 없을 수 있다 → 1분은 기다린다.
+            statusMissRef.current += 1;
+            if (statusMissRef.current >= 30) {
+              setLoading(false);
+              setTaskStatus("failed");
+            }
           }
         } catch (e) {
           console.error("Status check failed", e);
