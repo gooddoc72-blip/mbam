@@ -1723,8 +1723,15 @@ class WorkflowOrchestrator:
                 if not has_session:
                     pw = naver_pw or os.getenv("NAVER_PW", "")
                     ok = await self.authenticator.login_with_bypass(page, account_id, pw)
-                    if ok:
-                        self.session_manager.mark_registered(account_id)
+                    if not ok:
+                        # 로그인 없이 계속하면 글쓰기·게시판 선택에서 몇 분을 더 헤매다 실패한다 → 바로 멈춘다.
+                        _why = ("저장된 비밀번호가 없고 창에서 로그인하지 않았습니다" if not pw
+                                else "자동 로그인이 막혔고(캡차·2단계 인증) 창에서 로그인을 마치지 않았습니다")
+                        logger.error(f"❌ [Orchestrator] '{account_id}' 네이버 로그인 실패 — {_why}. "
+                                     f"계정 관리에서 '기기 인증'을 한 번 해 두면 다음부터 로그인 없이 바로 시작합니다.")
+                        return {"account_id": account_id, "cafe_id": cafe_id, "keyword": keyword,
+                                "success": False, "error": f"네이버 로그인 실패({_why}) — 계정 관리에서 기기 인증 필요"}
+                    self.session_manager.mark_registered(account_id)
                     await self.session_manager.save_session(context, account_id)
                 
                 

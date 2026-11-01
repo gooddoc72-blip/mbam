@@ -214,7 +214,9 @@ class NaverAuthenticator:
             # 클립보드 붙여넣기가 가장 덜 잡히지만, pyperclip 이 없는 환경(설치본 등)에서도
             # 로그인 자체는 되어야 한다. 예전에는 여기서 ImportError 가 나면 바깥 except 로
             # 빠져 '수동 로그인 대기'까지 못 가고 브라우저가 즉시 닫혔다.
-            await self._fill_credentials(page, account_id, account_pw)
+            # 'abc@naver.com' 으로 저장된 계정도 로그인 칸에는 아이디(abc)만 넣어야 한다.
+            login_id = account_id.split("@")[0] if (account_id or "").lower().endswith("@naver.com") else account_id
+            await self._fill_credentials(page, login_id, account_pw)
 
             # "로그인 상태 유지" 체크 → 세션 수명 연장.
             # ⚠ 이게 안 되면 며칠 만에 세션이 만료돼, 기기인증을 해둔 계정도 카페에서
