@@ -609,6 +609,83 @@ class CafeService:
             print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False
 
+    async def insert_video(self, frame, video_path: str, title: str = "", max_wait: int = 600) -> bool:
+        """카페 SE3 본문 맨 끝에 동영상을 올린다.
+        흐름: 동영상 버튼 → '동영상 추가'(파일 선택) → '업로드 완료' 대기 → 제목(필수) 입력 → '완료'
+        → 본문에 동영상 컴포넌트가 생겼는지 확인."""
+        name = os.path.basename(video_path or "")
+        if not video_path or not os.path.exists(video_path):
+            if logger: logger.warning(f"[CafeService] 동영상 파일이 없습니다: {video_path}")
+            return False
+        page = StealthExecutor._get_page_obj(frame)
+        popup = frame.locator(".se-popup-video-upload")
+        try:
+            size_mb = os.path.getsize(video_path) / 1024 / 1024
+            if logger: logger.info(f"[CafeService] 🎬 동영상 업로드 시작: {name} ({size_mb:.1f}MB)")
+            # 커서를 본문 맨 끝으로(동영상은 글 하단에 삽입)
+            try:
+                await frame.locator(self.selectors["body"]).first.evaluate("""el => {
+                    el.focus();
+                    const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+                    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+                }""")
+            except Exception:
+                pass
+            before = await frame.locator(".se-component.se-video").count()
+            await frame.locator("button.se-video-toolbar-button, button[data-name='video']").first.click(timeout=6000)
+            await popup.wait_for(timeout=10000)
+            await asyncio.sleep(1)
+            async with page.expect_file_chooser(timeout=10000) as fc:
+                await popup.locator("button.nvu_local, button.nvu_btn_local").first.click()
+            await (await fc.value).set_files(video_path)
+
+            # 업로드 완료 대기 (용량에 따라 수 분) — 30초마다 진행 로그
+            done = False
+            waited = 0
+            while waited < max_wait:
+                await asyncio.sleep(2)
+                waited += 2
+                try:
+                    st = (await popup.locator("button.nvu_btn_select").first.inner_text()).replace("\n", " ")
+                except Exception:
+                    st = ""
+                if "업로드 완료" in st:
+                    done = True
+                    break
+                if "실패" in st or "오류" in st:
+                    raise RuntimeError(f"네이버 동영상 업로드 실패: {st}")
+                if waited % 30 == 0 and logger:
+                    logger.info(f"[CafeService] 🎬 동영상 업로드 중... {waited}초 ({st[:40]})")
+            if not done:
+                raise RuntimeError(f"{max_wait}초 안에 업로드가 끝나지 않았습니다")
+
+            # 제목(필수, 최대 40자) — 비어 있으면 '완료' 버튼이 눌리지 않는다.
+            t = (title or os.path.splitext(name)[0]).strip()[:40] or "동영상"
+            title_inp = popup.locator("input.nvu_inp").first
+            await title_inp.click()
+            await title_inp.fill(t)
+            await asyncio.sleep(1)
+            await popup.locator("button.nvu_btn_submit").first.click(timeout=5000)
+
+            # 본문에 동영상이 들어갔는지 확인
+            for _ in range(60):
+                if await frame.locator(".se-component.se-video").count() > before:
+                    await asyncio.sleep(1.5)
+                    if logger: logger.info(f"[CafeService] ✅ 동영상 삽입 완료: {name}")
+                    return True
+                await asyncio.sleep(0.5)
+            raise RuntimeError("완료를 눌렀지만 본문에 동영상이 나타나지 않았습니다")
+        except Exception as e:
+            if logger: logger.error(f"[CafeService] 동영상 삽입 실패({name}): {e}")
+            try:
+                await popup.locator("button.nvu_btn_close").first.click(timeout=2000)
+                await asyncio.sleep(1)
+                # 닫기 확인 창이 뜨면 확인
+                await frame.locator(".se-popup-alert button.se-popup-button-confirm").first.click(timeout=2000)
+            except Exception:
+                pass
+            return False
+
     @staticmethod
     def _looks_like_address(q: str) -> bool:
         """'충북 제천시 청풍면 청풍호로 1682' 같은 주소인지(장소 검색은 주소로는 결과가 안 나온다)."""

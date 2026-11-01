@@ -1792,6 +1792,16 @@ class WorkflowOrchestrator:
                             include_source_link=include_source_link)
                     cafe_content = self._strip_markdown(cafe_content)
 
+                    # 동영상 자리: '[동영상]' 또는 '동영상' 한 단어만 있는 줄(지도 뒤 마지막 등)
+                    # → 글에서는 지우고, 지도 다음(글 맨 아래)에 사진 폴더의 동영상을 올린다.
+                    _VIDEO_RE = r'\[\s*동영상[^\]\n]{0,10}\]|^[ \t]*[(（]?\s*동영상\s*[)）]?[ \t]*$'
+                    _n_video = len(_re_map.findall(_VIDEO_RE, cafe_content or "", flags=_re_map.M))
+                    if _n_video:
+                        cafe_content = _re_map.sub(_VIDEO_RE, "", cafe_content, flags=_re_map.M)
+                        cafe_content = _re_map.sub(r"\n{3,}", "\n\n", cafe_content).strip()
+                        logger.info(f"[Orchestrator] 🎬 원고에 동영상 자리 {_n_video}개 — 글 맨 아래(지도 다음)에 넣습니다.")
+                    _videos = []
+
                     # 4. 이미지 세척 / 대체
                     washed_images = []
                     _img_folder = image_folder_path
@@ -1803,6 +1813,8 @@ class WorkflowOrchestrator:
                                                for t in _re_map.split(r'(\d+)', os.path.basename(fp))]
                         files = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
                                  if fp.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))]
+                        _videos = [fp for fp in sorted(_glob.glob(os.path.join(_img_folder, "*")), key=_natural)
+                                   if fp.lower().endswith((".mp4", ".mov", ".m4v", ".avi", ".wmv", ".mkv"))]
                         # 업로드 원고는 본문의 [이미지] 자리 수만큼만 가져온다.
                         # 폴더에 사진이 더 많으면 남는 사진이 글 끝에 몰려 붙어버린다.
                         _want = None
@@ -1924,6 +1936,16 @@ class WorkflowOrchestrator:
                             logger.error(f"[Orchestrator] 카페 지도 삽입 중 오류(무시): {_e}")
                     elif insert_map:
                         logger.warning("[Orchestrator] 지도 첨부가 켜져 있지만 장소명이 비어 있어 지도를 넣지 않았습니다.")
+
+                    # 9.6 동영상 — 지도 다음, 글 맨 아래
+                    if _n_video:
+                        if _videos:
+                            if len(_videos) < _n_video:
+                                logger.warning(f"[Orchestrator] 동영상 자리 {_n_video}개인데 폴더에는 {len(_videos)}개뿐 — 있는 만큼만 넣습니다.")
+                            for _vp in _videos[:_n_video]:
+                                await self.cafe.insert_video(editor_frame, _vp, title=(post_title or keyword or ""))
+                        else:
+                            logger.warning("[Orchestrator] 원고에 '동영상' 자리가 있지만 사진 폴더에 동영상 파일(.mp4·.mov 등)이 없어 넣지 않았습니다.")
 
                     # 10. 등록
                     if auto_submit:
