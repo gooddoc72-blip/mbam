@@ -498,9 +498,9 @@ export default function PostTab({ s }) {
                       🗺️ 본문 하단에 네이버 지도(장소) 첨부
                     </label>
                     {cafeInsertMap && (
-                      <input type="text" value={cafeMapQuery} onChange={e => setCafeMapQuery(e.target.value)} placeholder="삽입할 장소명 또는 주소 (예: 부산 하모회 000점)" style={{ width: "100%", marginTop: "0.5rem", padding: "0.5rem 0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.85rem" }} />
+                      <input type="text" value={cafeMapQuery} onChange={e => setCafeMapQuery(e.target.value)} placeholder="가게 이름 (예: 청풍황금떡갈비) — 주소만으로는 검색되지 않습니다" style={{ width: "100%", marginTop: "0.5rem", padding: "0.5rem 0.7rem", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "0.85rem" }} />
                     )}
-                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 작성한 글 맨 아래에 네이버 검색 결과 첫 장소가 지도로 삽입됩니다. (장소명이 정확할수록 정확히 잡힙니다)</p>
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 네이버 지도 장소 검색은 <b>가게 이름</b>으로 찾습니다. 주소를 넣으면 키워드·제목의 가게 이름으로 다시 찾아 그 주소와 일치하는 장소를 넣습니다.</p>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", fontWeight: "bold", color: "#64748b" }}>
                       🧼 사진 자동 세탁
                       <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.83rem", fontWeight: "normal" }}>

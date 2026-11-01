@@ -532,17 +532,34 @@ class CafeService:
             print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False
 
-    async def insert_place_map(self, frame, query: str) -> bool:
+    @staticmethod
+    def _looks_like_address(q: str) -> bool:
+        """'충북 제천시 청풍면 청풍호로 1682' 같은 주소인지(장소 검색은 주소로는 결과가 안 나온다)."""
+        import re
+        return bool(re.search(r'(로|길|번길|동|리)\s*\d', q) or re.search(r'(시|군|구)\s', q) and re.search(r'\d', q))
+
+    async def insert_place_map(self, frame, query: str, alternates=None) -> bool:
         """카페 SE3(스마트에디터) 본문에 네이버 장소(지도)를 삽입한다. query=장소명/주소.
         카페 글쓰기 에디터도 블로그와 동일한 SE3라 셀렉터가 같다:
         se-map-toolbar-button / react-autosuggest__input / se-place-search-button /
         se-place-map-search-result-item / se-place-add-button / se-popup-button-confirm.
-        (블로그 insert_place_map 과 동일 흐름 — 카페용 body 셀렉터만 사용)"""
+        네이버 장소 검색은 주소로는 결과가 0건이라, 결과가 없으면 alternates(가게 이름 후보)로 다시 찾고
+        query 가 주소였다면 결과 중 그 주소와 맞는 장소를 고른다."""
+        import re
         if not query or not query.strip():
             return False
         query = query.strip()
+        is_addr = self._looks_like_address(query)
+        cands = []
+        for q in [query] + list(alternates or []):
+            q = (q or "").strip()
+            if q and q not in cands:
+                cands.append(q)
+        # 주소 비교용: 공백 제거 + 도로명·번지 꼬리(예: '청풍호로1682')
+        addr_key = re.sub(r'\s+', '', query) if is_addr else ""
+        addr_tail = re.sub(r'\s+', '', " ".join(query.split()[-2:])) if is_addr else ""
         try:
-            if logger: logger.info(f"[CafeService] 🗺️ 장소(지도) 삽입 시도: {query}")
+            if logger: logger.info(f"[CafeService] 🗺️ 장소(지도) 삽입 시도: {query}" + (f" (후보 {len(cands)}개)" if len(cands) > 1 else ""))
             # 커서를 본문 맨 끝으로(지도는 글 하단에 삽입)
             try:
                 await frame.locator(self.selectors["body"]).first.evaluate("""el => {
@@ -555,31 +572,57 @@ class CafeService:
             # 1. 장소 버튼
             await frame.locator(".se-map-toolbar-button").first.click(timeout=6000)
             await asyncio.sleep(2)
-            # 2. 검색 입력
             inp = frame.locator("input.react-autosuggest__input").first
             await inp.wait_for(timeout=8000)
-            await inp.click()
-            await inp.fill(query)
-            await asyncio.sleep(1.2)
-            # 3. 검색 실행 (autosuggest 드롭다운 닫고 검색)
+
+            chosen = None
+            for q in cands:
+                # 2. 검색 입력
+                await inp.click()
+                await inp.fill("")
+                await inp.fill(q)
+                await asyncio.sleep(1.2)
+                # 3. 검색 실행 (autosuggest 드롭다운 닫고 검색)
+                try:
+                    await inp.press("Escape")
+                except Exception:
+                    pass
+                await asyncio.sleep(0.3)
+                try:
+                    await frame.locator("button.se-place-search-button").first.click(timeout=3000)
+                except Exception:
+                    await inp.press("Enter")
+                items = frame.locator("li.se-place-map-search-result-item")
+                try:
+                    await items.first.wait_for(timeout=7000)
+                except Exception:
+                    if logger: logger.info(f"[CafeService] 장소 검색 결과 없음: '{q}'" + (" (주소로는 장소가 검색되지 않습니다)" if self._looks_like_address(q) else ""))
+                    continue
+                await asyncio.sleep(1.0)
+                n = await items.count()
+                if addr_key:
+                    # 주소를 입력했다면 그 주소가 붙은 결과만 인정(엉뚱한 동명 가게 방지)
+                    for i in range(min(n, 10)):
+                        t = re.sub(r'\s+', '', await items.nth(i).inner_text())
+                        if addr_key in t or (addr_tail and addr_tail in t):
+                            chosen = items.nth(i)
+                            break
+                    if chosen is None:
+                        if logger: logger.info(f"[CafeService] '{q}' 검색 결과 {n}건 중 주소가 일치하는 장소 없음")
+                        continue
+                else:
+                    chosen = items.first
+                if logger: logger.info(f"[CafeService] 장소 검색 '{q}' → 선택: {(await chosen.inner_text()).strip()[:60]!r}")
+                break
+            if chosen is None:
+                raise RuntimeError(f"장소를 찾지 못했습니다(시도: {', '.join(cands)}). 주소 대신 가게 이름을 입력해 보세요.")
+
+            # 4. '추가' (hover 후 클릭, 안 되면 force)
             try:
-                await inp.press("Escape")
+                await chosen.hover()
             except Exception:
                 pass
-            await asyncio.sleep(0.3)
-            try:
-                await frame.locator("button.se-place-search-button").first.click(timeout=3000)
-            except Exception:
-                await inp.press("Enter")
-            # 4. 첫 결과 대기 → '추가' (hover 후 클릭, 안 되면 force)
-            first_item = frame.locator("li.se-place-map-search-result-item").first
-            await first_item.wait_for(timeout=12000)
-            await asyncio.sleep(1.0)
-            try:
-                await first_item.hover()
-            except Exception:
-                pass
-            add_btn = first_item.locator("button.se-place-add-button").first
+            add_btn = chosen.locator("button.se-place-add-button").first
             try:
                 await add_btn.click(timeout=4000)
             except Exception:

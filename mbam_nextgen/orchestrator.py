@@ -1882,7 +1882,19 @@ class WorkflowOrchestrator:
                     _map_q = (map_query or "").strip()
                     if insert_map and _map_q:
                         try:
-                            await self.cafe.insert_place_map(editor_frame, _map_q)
+                            # 장소 검색은 주소로는 안 잡히므로 키워드·제목에서 뽑은 가게 이름 후보도 넘긴다.
+                            _generic = {"맛집", "추천", "후기", "내돈내산", "가볼만한곳", "리뷰", "방문", "방문기",
+                                        "솔직", "솔직후기", "데이트", "점심", "저녁", "근처", "핫플", "메뉴", "가격"}
+                            _alts = []
+                            for _src in (keyword, title):
+                                _toks = [t for t in _re_map.sub(r'[^\w\s]', ' ', _src or '').split()
+                                         if t not in _generic][:4]
+                                if not _toks:
+                                    continue
+                                for _cand in (" ".join(_toks), " ".join(_toks[1:]), "".join(_toks[1:])):
+                                    if _cand and _cand not in _alts and _cand != _map_q:
+                                        _alts.append(_cand)
+                            await self.cafe.insert_place_map(editor_frame, _map_q, alternates=_alts[:5])
                         except Exception as _e:
                             logger.error(f"[Orchestrator] 카페 지도 삽입 중 오류(무시): {_e}")
                     elif insert_map:
