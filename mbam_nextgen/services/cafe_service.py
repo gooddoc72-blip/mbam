@@ -403,9 +403,20 @@ class CafeService:
         for i, k in zip(free_slots, sorted(items[i][1] for i in free_slots)):
             items[i] = ("img", k, False)
 
+        # 사진 위치 계획을 글쓰기 전에 남긴다 — 어떤 문장 뒤에 몇 번 사진이 들어가는지
+        if logger:
+            _plan, _last = [], "(글 시작)"
+            for it in items:
+                if it[0] == "text":
+                    _last = it[1].replace("\n", " ")
+                else:
+                    _plan.append(f"사진{it[1] + 1}←'…{_last[-15:]}'")
+            logger.info(f"[CafeService] 📋 사진 위치 계획({len(_plan)}장): " + " | ".join(_plan))
+
         # 4) 순서대로 입력
         pending_text = ""
         inserted = 0
+        _img_before = await _img_count()
         if logger: logger.info(f"[CafeService] 본문 타이핑/이미지 삽입 시작 (이미지 {n_imgs}장, 문단 {sum(1 for it in items if it[0] == 'text')}개)")
         for kind, val, *_ in items:
             if kind == "text":
@@ -437,6 +448,14 @@ class CafeService:
                     await _safe_upload(img_path)
                 used[k] = True
 
+        # 계획한 사진이 실제로 다 들어갔는지 확인
+        _img_after = await _img_count()
+        if logger and _img_before >= 0 and _img_after >= 0:
+            _got = _img_after - _img_before
+            if _got < inserted:
+                logger.warning(f"[CafeService] ⚠️ 사진 {inserted}장을 넣었는데 본문에는 {_got}장만 보입니다 — 글에서 확인해 주세요")
+            else:
+                logger.info(f"[CafeService] 📋 사진 확인: 본문에 {_got}장 들어감 (계획 {inserted}장)")
         if logger: logger.info("[CafeService] ✅ 카페 원고 타이핑(이미지 교차) 완료")
         print("✅ [CafeService] 카페 원고 타이핑(이미지 교차) 완료")
 

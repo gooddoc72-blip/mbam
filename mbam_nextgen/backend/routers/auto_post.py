@@ -656,6 +656,18 @@ async def registered_accounts(current_user: dict = Depends(get_current_user)):
     return {"registered": sorted(ids)}
 
 
+# 내 PC 에이전트에서 실행 중인 작업의 중지 요청(서버에는 실행 중인 작업이 없다).
+# 에이전트가 작업 중 3초마다 /api/agent/cancel-check 로 확인해 스스로 멈춘다.
+agent_cancel_requests = set()
+
+
+def request_agent_cancel(task_id: str) -> dict:
+    agent_cancel_requests.add(task_id)
+    entry = task_status_store.setdefault(task_id, {"status": "running", "logs": []})
+    entry["logs"].append("🛑 중지 요청을 내 PC 에이전트에 보냈습니다. 몇 초 안에 멈추고 브라우저를 닫습니다.")
+    return {"success": True, "message": "내 PC 에이전트에 중지 요청을 보냈습니다. 몇 초 안에 멈춥니다."}
+
+
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
     if task_id in active_tasks:
@@ -665,7 +677,8 @@ async def cancel_task(task_id: str):
         entry["status"] = "failed"
         entry["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
         return {"success": True, "message": "작업이 중단되었습니다."}
-    return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
+    # 서버에 없으면 에이전트에서 도는 작업 — 에이전트에 중지 요청을 넘긴다.
+    return request_agent_cancel(task_id)
 
 async def _build_post_images_cloud(req: AutoPostRequest, results: list, keyword: str, scraped_folder: str):
     """[쇼핑파트너스/상품 블로그] 발행용 이미지를 '클라우드에서' 모두 확보해 한 폴더로 합친다.

@@ -247,16 +247,25 @@ async def _handle_auto_post(payload: dict, log=None) -> dict:
     # 실행 중 쌓이는 로그를 1초마다 웹(클라우드)으로 중계해 '실시간 모니터링 로그'에 보이게 한다.
     runner = asyncio.create_task(run_automation_task(tid, req))
     sent = 0
-    while True:
-        done = runner.done()
-        lines = task_status_store.get(tid, {}).get("logs", [])
-        if log:
-            for line in lines[sent:]:
-                log(line)
-        sent = len(lines)
-        if done:
-            break
-        await asyncio.sleep(1)
+    try:
+        while True:
+            done = runner.done()
+            lines = task_status_store.get(tid, {}).get("logs", [])
+            if log:
+                for line in lines[sent:]:
+                    log(line)
+            sent = len(lines)
+            if done:
+                break
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        # 웹에서 '작업 강제 중지' → 실제 발행 작업(브라우저)까지 멈춘다.
+        runner.cancel()
+        try:
+            await runner
+        except BaseException:
+            pass
+        raise
     await runner
     st = task_status_store.get(tid, {})
     if st.get("status") == "failed":
@@ -767,9 +776,30 @@ class AgentClient:
             try:
                 # log 파라미터를 받는 핸들러(카페 댓글 등)에는 실시간 로그 콜백을 넘김
                 if "log" in inspect.signature(handler).parameters:
-                    result = await handler(payload, log=live_log)
+                    work = asyncio.create_task(handler(payload, log=live_log))
                 else:
-                    result = await handler(payload)
+                    work = asyncio.create_task(handler(payload))
+                # 웹의 '작업 강제 중지' 요청을 3초마다 확인 — 있으면 작업을 취소한다.
+                cancelled = False
+                while not work.done():
+                    await asyncio.wait({work}, timeout=3)
+                    if work.done() or not task_id:
+                        continue
+                    try:
+                        r = await client.get(f"{self.cfg['cloud_url']}/api/agent/cancel-check/{task_id}",
+                                             headers=self._headers(), timeout=10)
+                        if r.status_code == 200 and (r.json() or {}).get("cancel"):
+                            print(f"[agent] 🛑 웹에서 중지 요청 — 작업 취소: {job_type} ({job_id})")
+                            cancelled = True
+                            work.cancel()
+                    except Exception:
+                        pass
+                try:
+                    result = await work
+                except asyncio.CancelledError:
+                    if not cancelled:
+                        raise
+                    raise RuntimeError("사용자가 작업을 강제 중지했습니다.")
                 body.update({"status": "done", "result": result})
                 print(f"[agent] 작업 완료: {job_type} ({job_id})")
             except Exception as e:

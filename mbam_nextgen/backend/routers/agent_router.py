@@ -105,6 +105,15 @@ class TaskLog(BaseModel):
     status: Optional[str] = None   # "running" | "completed" | "failed"
 
 
+@router.get("/cancel-check/{task_id}", summary="로컬 에이전트: 웹에서 '작업 강제 중지'를 눌렀는지 확인")
+async def cancel_check(task_id: str, current_user: dict = Depends(get_current_user)):
+    from mbam_nextgen.backend.routers.auto_post import agent_cancel_requests
+    if task_id in agent_cancel_requests:
+        agent_cancel_requests.discard(task_id)
+        return {"cancel": True}
+    return {"cancel": False}
+
+
 @router.post("/task-log", summary="로컬 에이전트: 실행 로그·상태를 클라우드로 중계")
 async def task_log(body: TaskLog, current_user: dict = Depends(get_current_user)):
     """에이전트가 위임받은 작업(카페 댓글 등)의 진행 로그·최종 상태를 task_status_store 에 반영.

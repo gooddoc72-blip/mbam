@@ -1835,6 +1835,7 @@ class WorkflowOrchestrator:
                     cafe_content, _mk_info = normalize_photo_markers(cafe_content)
                     _strict = honors_markers(_mk_info)
                     _mk_total = _mk_info["numbered"] + _mk_info["plain"]
+                    from mbam_nextgen.services.photo_markers import analyze_photo_plan
                     if _strict:
                         has_photo_map = True
                         logger.info(f"[Orchestrator] 📌 원고 사진 표시 {_mk_total}개(번호 {_mk_info['numbered']}개) — 표시대로 넣습니다."
@@ -1903,6 +1904,11 @@ class WorkflowOrchestrator:
                     else:
                         logger.info("[Orchestrator] 카드뉴스 생성 꺼짐 — 이미지 없이 텍스트만 발행합니다.")
                     
+                    # 원고 분석: 사진 표시 점검(인식 못 한 표시·빠진 번호)을 글쓰기 전에 알린다
+                    if _strict or _mk_total:
+                        for _w in analyze_photo_plan(cafe_content, _mk_info, len(washed_images)):
+                            logger.warning(f"[Orchestrator] ⚠️ 원고 사진 점검: {_w}")
+
                     # 5. 글쓰기 진입
                     await self.cafe.auto_enter_editor(page)
                     editor_frame = await self.cafe.wait_for_editor(context, page)

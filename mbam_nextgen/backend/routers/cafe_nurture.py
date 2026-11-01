@@ -913,7 +913,9 @@ async def cancel_task(task_id: str):
         task_status_store[task_id]["status"] = "failed"
         task_status_store[task_id]["logs"].append("🛑 사용자에 의해 작업이 강제 중단되었습니다.")
         return {"success": True, "message": "작업이 중단되었습니다."}
-    return {"success": False, "message": "실행 중인 작업을 찾을 수 없습니다."}
+    # 서버에 없으면 내 PC 에이전트에서 도는 작업 — 에이전트에 중지 요청을 넘긴다.
+    from mbam_nextgen.backend.routers.auto_post import request_agent_cancel
+    return request_agent_cancel(task_id)
 
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
