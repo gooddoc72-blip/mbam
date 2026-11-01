@@ -488,8 +488,38 @@ class CafeService:
     async def submit_post(self, frame):
         """작성된 원고를 최종 등록"""
         print("[CafeService] 🚀 즉시 발행 시도 중...")
+        self.last_post_url = ""
         try:
             page = StealthExecutor._get_page_obj(frame)
+            # 등록 뒤 뜨는 브라우저 경고창(alert) 문구를 모아 실패 원인으로 남긴다.
+            dialogs = []
+
+            def _on_dialog(d):
+                dialogs.append(d.message)
+                asyncio.ensure_future(d.accept())
+            try:
+                page.on("dialog", _on_dialog)
+            except Exception:
+                pass
+
+            async def _popup_texts():
+                """화면에 떠 있는 안내/경고 레이어 문구(권한 없음·필수 항목 누락 등)."""
+                out = []
+                for root_obj in (frame, page):
+                    try:
+                        out += await root_obj.evaluate(r"""() => {
+                            const sel = '[role=dialog],[role=alertdialog],[class*=popup],[class*=Popup],[class*=layer],[class*=Layer],[class*=modal],[class*=Modal],[class*=alert],[class*=toast]';
+                            const res = [];
+                            document.querySelectorAll(sel).forEach(el => {
+                                const r = el.getBoundingClientRect();
+                                const t = (el.innerText || '').trim().replace(/\s+/g, ' ');
+                                if (r.width > 0 && r.height > 0 && t && t.length < 200 && !res.includes(t)) res.push(t);
+                            });
+                            return res.slice(0, 5);
+                        }""")
+                    except Exception:
+                        pass
+                return [t for i, t in enumerate(out) if t not in out[:i]]
 
             # 진단: 등록 버튼 후보를 로그에 덤프 (셀렉터 확정용, 비파괴)
             if logger:
@@ -534,8 +564,11 @@ class CafeService:
                 print("⚠️ [CafeService] '등록' 버튼을 찾지 못했습니다.")
                 return False
 
-            # 등록 후 확인/최종 등록 팝업이 뜨면 한 번 더 처리
+            # 등록 후 확인/최종 등록 팝업이 뜨면 한 번 더 처리 (그 전에 안내 문구를 남긴다)
             await asyncio.sleep(2)
+            popups = await _popup_texts()
+            if popups and logger:
+                logger.info(f"[CafeService] 등록 후 안내 창: {popups}")
             for root in (frame, page):
                 try:
                     if await _click_exact(root, ["등록", "확인"]):
@@ -543,9 +576,35 @@ class CafeService:
                         break
                 except Exception:
                     continue
-            await asyncio.sleep(3)
-            print("[CafeService] ✅ 발행 처리 완료")
-            return True
+
+            # 실제로 글이 올라갔는지 확인 — 등록되면 글 주소(/articles/번호)로 이동한다.
+            def _article_url():
+                urls = [page.url or ""]
+                try:
+                    urls += [f.url or "" for f in page.frames]
+                except Exception:
+                    pass
+                for u in urls:
+                    if re.search(r'/articles/\d+|articleid=\d+', u, re.I) and "write" not in u.lower():
+                        return u
+                return ""
+            for _ in range(30):
+                url = _article_url()
+                if url:
+                    self.last_post_url = url
+                    if logger: logger.info(f"[CafeService] ✅ 발행 확인: {url}")
+                    print(f"[CafeService] ✅ 발행 처리 완료: {url}")
+                    return True
+                await asyncio.sleep(0.5)
+            cur = page.url or ""
+            if "write" not in cur.lower():
+                # 글쓰기 화면은 벗어났지만 글 주소 형식이 다른 경우 — 성공으로 보되 주소는 비운다.
+                if logger: logger.info(f"[CafeService] ✅ 발행 처리 완료(글쓰기 화면 벗어남): {cur}")
+                return True
+            reason = (dialogs + popups + await _popup_texts())
+            if logger: logger.error(f"[CafeService] ❌ 등록되지 않았습니다 — 글쓰기 화면에 그대로 있음. 안내: {reason or '없음'}")
+            print(f"[CafeService] ❌ 등록 실패 — 안내: {reason}")
+            return False
         except Exception as e:
             print(f"[CafeService] ⚠️ 등록 중 오류: {e}")
             return False

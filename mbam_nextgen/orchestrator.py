@@ -1931,7 +1931,8 @@ class WorkflowOrchestrator:
                     else:
                         logger.info("🏁 [Orchestrator] 수동 등록 모드: 직접 [등록] 버튼을 눌러주세요.")
                         submit_result = True
-                    logger.info("\n✅ [Orchestrator] 카페 태스크 완료.")
+                    logger.info("\n✅ [Orchestrator] 카페 태스크 완료." if submit_result
+                                else "\n❌ [Orchestrator] 카페 글이 등록되지 않았습니다(위 안내 확인).")
                     self.db.log_cafe(account_id=account_id, cafe_id=cafe_id, keyword=keyword, status="성공" if submit_result else "실패", post_title=(post_title or ""))
 
                     # 발행된 글 URL 캡처(best-effort) — 등록 성공 시 보통 작성 글로 리다이렉트됨
@@ -1939,7 +1940,9 @@ class WorkflowOrchestrator:
                     try:
                         await asyncio.sleep(1.5)
                         cur = page.url or ""
-                        if submit_result and "cafe.naver.com" in cur and "write" not in cur.lower() and "articlewrite" not in cur.lower():
+                        if submit_result and getattr(self.cafe, "last_post_url", ""):
+                            result_url = self.cafe.last_post_url
+                        elif submit_result and "cafe.naver.com" in cur and "write" not in cur.lower() and "articlewrite" not in cur.lower():
                             result_url = cur
                     except Exception:
                         pass

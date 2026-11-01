@@ -473,7 +473,9 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     else:
                         log("⚠️ 발행 글 URL을 확보하지 못해 순위추적 자동등록을 건너뜁니다(수동 등록 필요).")
             else:
-                log(f"⚠️ 카페 워크플로우 실패: {result.get('error')}")
+                log(f"❌ 카페 글이 등록되지 않았습니다: {result.get('error') or '등록 버튼을 눌렀지만 글쓰기 화면에 그대로 있습니다(게시판 권한·필수 항목·안내 창 확인)'}")
+                task_status_store[task_id]["status"] = "failed"
+                return
 
         task_status_store[task_id]["status"] = "completed"
         
