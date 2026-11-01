@@ -721,6 +721,46 @@ class CafeService:
         import re
         return bool(re.search(r'(로|길|번길|동|리)\s*\d', q) or re.search(r'(시|군|구)\s', q) and re.search(r'\d', q))
 
+    @staticmethod
+    def _address_keys(q: str) -> list:
+        """주소에서 비교용 열쇠를 뽑는다(공백 없이): 도로명+건물번호, 지번(동·리+번지)."""
+        import re
+        s = re.sub(r'\s+', ' ', q or '')
+        keys = []
+        for m in re.finditer(r'([가-힣A-Za-z0-9]+(?:로|길))\s*(\d+(?:-\d+)?)', s):
+            keys.append(m.group(1) + m.group(2))
+        for m in re.finditer(r'([가-힣]+(?:동|리|가))\s*(?:산\s*)?(\d+(?:-\d+)?)', s):
+            keys.append(m.group(1) + m.group(2))
+        return list(dict.fromkeys(keys))
+
+    @staticmethod
+    def place_name_candidates(map_q: str, sources, generic=()) -> list:
+        """주소만 입력됐을 때 장소 검색에 쓸 가게 이름 후보(키워드·제목에서 뽑음).
+        'A B C' / 'B C' / 'BC' 묶음 + 3글자 이상 단어 하나씩 + '도시 단어'."""
+        import re
+        city = ""
+        m = re.search(r'([가-힣]{2,})(?:시|군)(?=\s|$)', map_q or "")
+        if m:
+            city = m.group(1)
+        out = []
+
+        def _add(c):
+            c = (c or "").strip()
+            if c and c != map_q and c not in out:
+                out.append(c)
+        for src in sources:
+            toks = [t for t in re.sub(r'[^\w\s]', ' ', src or '').split() if t not in generic][:4]
+            if not toks:
+                continue
+            for c in (" ".join(toks), " ".join(toks[1:]), "".join(toks[1:])):
+                _add(c)
+            for t in toks:
+                if len(t) >= 3 and not t.endswith("맛집"):
+                    _add(t)
+                    if city and city not in t:
+                        _add(f"{city} {t}")
+        return out
+
     async def insert_place_map(self, frame, query: str, alternates=None) -> bool:
         """카페 SE3(스마트에디터) 본문에 네이버 장소(지도)를 삽입한다. query=장소명/주소.
         카페 글쓰기 에디터도 블로그와 동일한 SE3라 셀렉터가 같다:
@@ -738,9 +778,9 @@ class CafeService:
             q = (q or "").strip()
             if q and q not in cands:
                 cands.append(q)
-        # 주소 비교용: 공백 제거 + 도로명·번지 꼬리(예: '청풍호로1682')
-        addr_key = re.sub(r'\s+', '', query) if is_addr else ""
-        addr_tail = re.sub(r'\s+', '', " ".join(query.split()[-2:])) if is_addr else ""
+        # 주소 비교용 열쇠: 도로명+건물번호('도민길3-52', '구미중앙로19길4') / 지번('빛가람동123-4').
+        # 검색 결과 주소에는 '101호'·'1층' 같은 상세주소가 없거나 다르게 붙어 있어 비교에서 뺀다.
+        addr_keys = (self._address_keys(query) or [re.sub(r'\s+', '', query)]) if is_addr else []
         try:
             if logger: logger.info(f"[CafeService] 🗺️ 장소(지도) 삽입 시도: {query}" + (f" (후보 {len(cands)}개)" if len(cands) > 1 else ""))
             # 커서를 본문 맨 끝으로(지도는 글 하단에 삽입)
@@ -783,15 +823,19 @@ class CafeService:
                     continue
                 await asyncio.sleep(1.0)
                 n = await items.count()
-                if addr_key:
+                if addr_keys:
                     # 주소를 입력했다면 그 주소가 붙은 결과만 인정(엉뚱한 동명 가게 방지)
+                    seen = []
                     for i in range(min(n, 10)):
-                        t = re.sub(r'\s+', '', await items.nth(i).inner_text())
-                        if addr_key in t or (addr_tail and addr_tail in t):
+                        raw_t = await items.nth(i).inner_text()
+                        t = re.sub(r'\s+', '', raw_t)
+                        seen.append(" ".join(raw_t.split())[:40])
+                        if any(k in t for k in addr_keys):
                             chosen = items.nth(i)
                             break
                     if chosen is None:
-                        if logger: logger.info(f"[CafeService] '{q}' 검색 결과 {n}건 중 주소가 일치하는 장소 없음")
+                        if logger: logger.info(f"[CafeService] '{q}' 검색 결과 {n}건 중 주소({', '.join(addr_keys)})가 일치하는 장소 없음"
+                                               + (f" — 예: {' / '.join(seen[:3])}" if seen else ""))
                         continue
                 else:
                     chosen = items.first

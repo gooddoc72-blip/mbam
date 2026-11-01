@@ -1874,7 +1874,7 @@ class WorkflowOrchestrator:
                                 if len(files) < _want:
                                     logger.warning(f"[Orchestrator] 사진 자리 {_want}개인데 폴더에는 {len(files)}장뿐 — 있는 만큼만 넣습니다.")
                                 files = files[:_want]
-                        if files:
+                        if files and self.armor.strength != "none":
                             logger.info(f"[Orchestrator] 🧼 사진 {len(files)}장 세탁 중... (사진이 많으면 1~2분 걸립니다)")
                         for idx_f, fp in enumerate(files):
                             wimg = self.armor.wash_image(fp, f"washed_cafe_up_{account_id}_{idx_f}.jpg")
@@ -1975,16 +1975,9 @@ class WorkflowOrchestrator:
                             # 장소 검색은 주소로는 안 잡히므로 키워드·제목에서 뽑은 가게 이름 후보도 넘긴다.
                             _generic = {"맛집", "추천", "후기", "내돈내산", "가볼만한곳", "리뷰", "방문", "방문기",
                                         "솔직", "솔직후기", "데이트", "점심", "저녁", "근처", "핫플", "메뉴", "가격"}
-                            _alts = []
-                            for _src in (keyword, title):
-                                _toks = [t for t in _re_map.sub(r'[^\w\s]', ' ', _src or '').split()
-                                         if t not in _generic][:4]
-                                if not _toks:
-                                    continue
-                                for _cand in (" ".join(_toks), " ".join(_toks[1:]), "".join(_toks[1:])):
-                                    if _cand and _cand not in _alts and _cand != _map_q:
-                                        _alts.append(_cand)
-                            await self.cafe.insert_place_map(editor_frame, _map_q, alternates=_alts[:5])
+                            # 제목을 먼저 — 키워드 칸에는 이전 글의 가게 이름이 남아 있을 수 있다.
+                            _alts = self.cafe.place_name_candidates(_map_q, (post_title, title, keyword), _generic)
+                            await self.cafe.insert_place_map(editor_frame, _map_q, alternates=_alts[:8])
                         except Exception as _e:
                             logger.error(f"[Orchestrator] 카페 지도 삽입 중 오류(무시): {_e}")
                     elif insert_map:

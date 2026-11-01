@@ -1371,6 +1371,7 @@ function BlogPostingContent() {
              </label>
              {washImages && (
                <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.35rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.85rem" }}>
+                 <option value="none">세탁 선택 안 함 — 원본 그대로</option>
                  <option value="light">세탁 약 — 촬영정보만 교체</option>
                  <option value="standard">세탁 표준 — 미세 회전·자르기 (권장)</option>
                  <option value="strong">세탁 강 — 색감·크기까지 변경</option>

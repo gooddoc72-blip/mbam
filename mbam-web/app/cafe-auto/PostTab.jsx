@@ -506,12 +506,15 @@ export default function PostTab({ s }) {
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", fontWeight: "bold", color: "#64748b" }}>
                       🧼 사진 자동 세탁
                       <select value={washStrength} onChange={e => changeWashStrength(e.target.value)} style={{ padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.83rem", fontWeight: "normal" }}>
+                        <option value="none">선택 안 함 — 원본 그대로</option>
                         <option value="light">약 — 촬영정보만 교체</option>
                         <option value="standard">표준 — 미세 회전·자르기 (권장)</option>
                         <option value="strong">강 — 색감·크기까지 변경</option>
                       </select>
                     </div>
-                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>* 발행하는 사진은 항상 세탁됩니다. 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다.</p>
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.76rem", color: "#94a3b8" }}>{washStrength === "none"
+                      ? "* 사진을 세탁하지 않고 원본 파일 그대로 올립니다. 같은 사진을 여러 계정·글에 쓰면 중복 사진으로 보일 수 있습니다."
+                      : "* 이전에 올린 사진과 겹치면 자동으로 한 단계 더 강하게 세탁합니다."}</p>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.6rem", paddingTop: "0.6rem", borderTop: "1px dashed #e2e8f0", fontSize: "0.88rem", fontWeight: "bold", color: "#64748b" }}>
                       📸 사진 배치
                       <select value={photoLayout} onChange={e => changePhotoLayout(e.target.value)} style={{ padding: "0.3rem 0.5rem", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "0.83rem", fontWeight: "normal" }}>

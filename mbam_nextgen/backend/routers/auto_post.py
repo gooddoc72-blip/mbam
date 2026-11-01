@@ -163,7 +163,7 @@ class AutoPostRequest(BaseModel):
     accounts: Optional[List[dict]] = None
     interval_mins: Optional[int] = 5
     wash_images: Optional[bool] = True    # 발행 사진 자동 세탁(기본 켬, 끌 수 있음)
-    wash_strength: Optional[str] = "standard"  # light | standard | strong
+    wash_strength: Optional[str] = "standard"  # none(세탁 안 함) | light | standard | strong
     image_folder_path: Optional[str] = None
     
     # Pre-generated contents

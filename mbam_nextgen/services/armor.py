@@ -12,8 +12,9 @@ import piexif
 #   light    : 촬영정보(EXIF) 교체 + 재압축만. 화질 변화가 거의 없지만 pHash 는 원본과 같다.
 #   standard : 미세 회전 + 가장자리 5~8% 크롭 + 미세 보정 (pHash 를 실제로 바꾸는 기본값)
 #   strong   : standard + 밝기·대비·채도 ±3~4% + 크기 92~98% — 같은 사진을 여러 계정에 쓸 때
-WASH_STRENGTHS = ("light", "standard", "strong")
-WASH_LABELS = {"light": "약", "standard": "표준", "strong": "강"}
+#   none     : 세탁 안 함 — 원본 파일을 그대로 올린다(중복 재세탁도 하지 않음)
+WASH_STRENGTHS = ("none", "light", "standard", "strong")
+WASH_LABELS = {"none": "세탁 안 함", "light": "약", "standard": "표준", "strong": "강"}
 
 
 def normalize_strength(value) -> str:
@@ -120,6 +121,8 @@ class ImageArmor:
         s = self.stats
         if not s["count"]:
             return ""
+        if self.strength == "none":
+            return f"사진 {s['count']}장 원본 그대로 사용(세탁 안 함)"
         msg = f"사진 {s['count']}장 세탁 완료({WASH_LABELS.get(self.strength, '표준')})"
         if s["rewashed"]:
             msg += f" — 이전에 올린 사진과 겹친 {s['rewashed']}장은 더 강하게 다시 세탁"
@@ -185,6 +188,12 @@ class ImageArmor:
 
     def wash_image(self, input_path: str, output_filename: str, strength: str = None) -> str:
         level = normalize_strength(strength or self.strength)
+        if level == "none":
+            # 세탁 안 함 — 원본 그대로(파일을 고치지도, 중복 기록을 남기지도 않는다)
+            if not os.path.exists(input_path):
+                raise RuntimeError(f"사진 파일이 없습니다: {input_path}")
+            self.stats["count"] += 1
+            return input_path
         # 이전 업로드와 같은 그림으로 나오면 한 단계씩 강하게 다시 세탁(최대 3번)
         ladder = {"light": ["light", "standard", "strong"],
                   "standard": ["standard", "strong", "strong"],
