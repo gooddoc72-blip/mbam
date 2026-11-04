@@ -1,7 +1,7 @@
 # MBAM 설치파일(.exe) 빌드 가이드
 
 PC 1대당 인증코드로 동작하는 **설치형 MBAM** 을 만드는 절차입니다.
-결과물: `installer/output/MBAM_Setup_1.0.0.exe` (더블클릭 한 번으로 설치)
+결과물: `installer/output/마케팅연구소 풀버전/MBAM_Setup_1.0.0.exe` (더블클릭 한 번으로 설치)
 
 ---
 
@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File build_payload.ps1 -LicenseServer "http:
 ```powershell
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" mbam.iss
 ```
-→ `installer/output/MBAM_Setup_1.0.0.exe` 완성. 이 파일 하나만 배포하면 됩니다.
+→ `installer/output/마케팅연구소 풀버전/MBAM_Setup_1.0.0.exe` 완성. 이 파일 하나만 배포하면 됩니다.
 
 ---
 

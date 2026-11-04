@@ -71,7 +71,7 @@ cd "F:\02 마케팅 프로그램\01 마케팅 연구소\installer"
 # 1) 페이로드 (동봉 Python + Node + Chromium + 블로그 전용 프론트 빌드)
 powershell -ExecutionPolicy Bypass -File build_blog_payload.ps1 -Version 1.0.0
 
-# 2) 설치파일 컴파일 → output\BlogMarketing_Setup_1.0.0.exe
+# 2) 설치파일 컴파일 → output\블로그 마케팅 (설치형)\BlogMarketing_Setup_1.0.0.exe
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" blog.iss
 ```
 

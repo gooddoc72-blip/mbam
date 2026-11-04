@@ -45,7 +45,7 @@ powershell -ExecutionPolicy Bypass -File build_agent_payload.ps1
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" agent.iss
 ```
 
-→ `installer/output/MBAM_Agent_Setup_1.0.0.exe` 완성. 이 파일 하나만 배포하면 됩니다.
+→ `installer/output/마케팅연구소 (웹) 에이전트/MBAM_Agent_Setup_1.0.0.exe` 완성. 이 파일 하나만 배포하면 됩니다.
 
 ---
 

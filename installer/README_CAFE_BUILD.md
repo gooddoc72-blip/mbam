@@ -63,7 +63,7 @@ cd "F:\02 마케팅 프로그램\01 마케팅 연구소\installer"
 # 1) 페이로드 (동봉 Python + Node + Chromium + 카페 전용 프론트 빌드)
 powershell -ExecutionPolicy Bypass -File build_cafe_payload.ps1
 
-# 2) 설치파일 컴파일 → output\CafeMarketing_Setup_1.0.0.exe
+# 2) 설치파일 컴파일 → output\카페 마케팅 (설치형)\CafeMarketing_Setup_1.0.0.exe
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" cafe.iss
 ```
 
