@@ -521,6 +521,49 @@ class ProxyServer(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class BillingSubscription(Base):
+    """웹 회원 정기결제(토스페이먼츠 자동결제) — 회원 1명당 1행.
+
+    billing_key 는 카드 대신 쓰는 결제 권한이라 비밀번호처럼 다룬다(API 응답에 절대 싣지 않음).
+    status: active(갱신 중) | canceled(해지 예약 — 기간 끝까지 사용) | past_due(결제 실패 재시도 중)
+            | ended(기간 종료 — 플랜 해제됨)
+    """
+    __tablename__ = "billing_subscriptions"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, unique=True, index=True)   # advertisers.id
+    email = Column(String, index=True)                   # advertisers.email (토큰 sub)
+    plan_id = Column(String)                             # plans.json id — 다음 결제부터 적용
+    amount = Column(Integer)                             # 다음 결제 금액(원)
+    customer_key = Column(String)
+    billing_key = Column(String, nullable=True)
+    card_company = Column(String, nullable=True)         # 표시용
+    card_number = Column(String, nullable=True)          # 표시용(토스가 준 마스킹 번호)
+    status = Column(String, default="active")
+    current_period_end = Column(DateTime, nullable=True)  # 이 시각까지 유료 플랜 유지
+    next_billing_at = Column(DateTime, nullable=True)     # 다음 결제 시도 시각
+    fail_count = Column(Integer, default=0)
+    last_error = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BillingPayment(Base):
+    """결제 1건 기록(성공·실패 모두) — 영수증·환불 대응용."""
+    __tablename__ = "billing_payments"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    order_id = Column(String, unique=True, index=True)
+    plan_id = Column(String)
+    amount = Column(Integer)
+    status = Column(String)                    # DONE | FAILED
+    payment_key = Column(String, nullable=True)
+    receipt_url = Column(String, nullable=True)
+    message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_db():
     db = SessionLocal()
     try:

@@ -29,6 +29,13 @@ def check_quota(current_user: dict = Depends(get_current_user), db: Session = De
     if not user:
         raise HTTPException(status_code=401, detail="사용자 정보를 찾을 수 없습니다.")
         
+    # 정기결제가 끝난(해지·결제 실패) 회원 — 횟수 소진 문구보다 원인을 정확히 알려준다
+    if user.plan_type == "expired":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="유료 이용 기간이 끝났습니다. [결제 및 플랜 관리]에서 요금제를 다시 선택해 주세요."
+        )
+
     # 2. 횟수 제한 체크 (None 값으로 인한 TypeError 방지, max_usage None은 무제한 취급)
     usage = user.usage_count or 0
     if user.max_usage is not None and usage >= user.max_usage:

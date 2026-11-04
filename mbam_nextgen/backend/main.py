@@ -189,6 +189,7 @@ async def lifespan(app: FastAPI):
     blogspot_daily = None
     cafe_daily = None
     tistory_daily = None
+    billing_sched = None
     if scheduler_on:
         scheduler_service.start()
     else:
@@ -217,7 +218,13 @@ async def lifespan(app: FastAPI):
         from mbam_nextgen.services.tistory_daily_scheduler import tistory_daily_scheduler
         tistory_daily = tistory_daily_scheduler
         tistory_daily.start()
+        # 웹 회원 정기결제 — 토스 키가 없으면 주기마다 아무것도 안 하고 넘어간다.
+        from mbam_nextgen.services.billing_scheduler import billing_scheduler
+        billing_sched = billing_scheduler
+        billing_sched.start()
     yield
+    if billing_sched:
+        billing_sched.shutdown()
     if scheduler_on:
         scheduler_service.shutdown()
     if cloud_batch:
@@ -294,6 +301,10 @@ if _enabled("shopping"):
     app.include_router(shopping_router.router, dependencies=[Depends(get_current_user)])
 if _enabled("admin"):
     app.include_router(admin_router.router)
+if _enabled("billing"):
+    # 웹 회원 정기결제 — 설치형(카페·블로그 전용판)은 기기 승인 기간으로 관리하므로 마운트 안 함
+    from mbam_nextgen.backend.routers import billing_router
+    app.include_router(billing_router.router, prefix="/api/billing", tags=["Billing"])
 if _enabled("blogspot"):
     app.include_router(blogspot_router.router, dependencies=[Depends(setup_ai_context)])
 if _enabled("tistory"):

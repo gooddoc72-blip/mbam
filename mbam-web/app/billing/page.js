@@ -7,23 +7,84 @@ export default function BillingPage() {
   const [userInfo, setUserInfo] = useState(null);
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [billingCfg, setBillingCfg] = useState({ enabled: false });
+  const [billing, setBilling] = useState({ subscription: null, payments: [] });
+  const [busy, setBusy] = useState(false);
+
+  const loadBilling = () =>
+    fetchWithAuth('/api/billing/me').then(res => res.ok ? res.json() : null)
+      .then(data => data && setBilling(data)).catch(() => {});
 
   useEffect(() => {
     Promise.all([
       fetchWithAuth('/api/auth/me').then(res => res.ok ? res.json() : null),
-      fetch('/api/admin/plans').then(res => res.ok ? res.json() : [])
+      fetch('/api/admin/plans').then(res => res.ok ? res.json() : []),
+      fetchWithAuth('/api/billing/config').then(res => res.ok ? res.json() : { enabled: false }),
     ])
-    .then(([userData, plansData]) => {
+    .then(([userData, plansData, cfg]) => {
       setUserInfo(userData);
       setPlans(plansData);
+      setBillingCfg(cfg || { enabled: false });
     })
     .catch(err => console.error(err))
     .finally(() => setLoading(false));
+    loadBilling();
   }, []);
 
-  const handleUpgrade = (planName) => {
-    alert(`[${planName}] 플랜 결제 모듈 연동 준비 중입니다. 관리자에게 문의해주세요.`);
+  const sub = billing.subscription;
+  const subLive = sub && ["active", "past_due", "canceled"].includes(sub.status);
+
+  // 토스페이먼츠 SDK(v2) — 결제 버튼을 누를 때 한 번만 불러온다
+  const loadToss = () => new Promise((resolve, reject) => {
+    if (window.TossPayments) return resolve(window.TossPayments);
+    const s = document.createElement("script");
+    s.src = "https://js.tosspayments.com/v2/standard";
+    s.onload = () => resolve(window.TossPayments);
+    s.onerror = () => reject(new Error("결제 모듈을 불러오지 못했습니다."));
+    document.head.appendChild(s);
+  });
+
+  const handleUpgrade = async (plan) => {
+    if (!billingCfg.enabled) {
+      alert(`[${plan.name}] 플랜은 관리자에게 문의해 주세요.`);
+      return;
+    }
+    if (subLive && sub.status !== "past_due" && !confirm(
+      `${plan.name} 요금제로 변경할까요?\n카드를 다시 등록하면 다음 결제일부터 ₩${plan.price.toLocaleString()} 이 결제됩니다.`)) return;
+    try {
+      setBusy(true);
+      const TossPayments = await loadToss();
+      const payment = TossPayments(billingCfg.client_key).payment({ customerKey: billingCfg.customer_key });
+      // 카드 등록창 → 성공 시 /billing/success 로 돌아와 서버가 첫 결제를 진행한다
+      await payment.requestBillingAuth({
+        method: "CARD",
+        successUrl: `${window.location.origin}/billing/success?plan=${encodeURIComponent(plan.id)}`,
+        failUrl: `${window.location.origin}/billing/fail`,
+        customerEmail: billingCfg.email,
+        customerName: billingCfg.name || billingCfg.email,
+      });
+    } catch (e) {
+      // 사용자가 창을 닫은 경우(USER_CANCEL)는 조용히 넘긴다
+      if (e?.code !== "USER_CANCEL") alert(e?.message || "결제창을 열지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const callBilling = async (path) => {
+    setBusy(true);
+    try {
+      const res = await fetchWithAuth(`/api/billing/${path}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      alert(data.message || data.detail || (res.ok ? "처리되었습니다." : "처리하지 못했습니다."));
+      await loadBilling();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmtDate = (iso) => iso ? new Date(iso.endsWith("Z") ? iso : iso + "Z").toLocaleDateString() : "-";
+  const STATUS_KR = { active: "자동결제 중", canceled: "해지 예약", past_due: "결제 실패 · 재시도 중", ended: "종료" };
 
   if (loading) return <div style={{ padding: "2rem", textAlign: "center", color: "#64748b" }}>정보를 불러오는 중입니다...</div>;
   if (!userInfo) return <div style={{ padding: "2rem", textAlign: "center", color: "#ef4444" }}>사용자 정보를 불러올 수 없습니다.</div>;
@@ -49,7 +110,9 @@ export default function BillingPage() {
               background: userInfo.plan_type === 'trial' ? "#fef3c7" : "#dcfce3",
               color: userInfo.plan_type === 'trial' ? "#d97706" : "#16a34a"
             }}>
-              {userInfo.plan_type === 'trial' ? '무료 체험판 (Trial)' : `유료 플랜 (${userInfo.plan_type})`}
+              {userInfo.plan_type === 'trial' ? '무료 체험판 (Trial)'
+                : userInfo.plan_type === 'expired' ? '이용 기간 종료'
+                : `유료 플랜 (${userInfo.plan_type})`}
             </span>
           </div>
           <p style={{ color: "#64748b", fontSize: "0.95rem", marginBottom: "1.5rem" }}>
@@ -78,12 +141,72 @@ export default function BillingPage() {
         
         <div style={{ flex: "0 0 auto", minWidth: "250px", background: "#f8fafc", padding: "1.5rem", borderRadius: "16px", border: "1px solid #f1f5f9", textAlign: "center" }}>
           <CreditCard size={32} color="#94a3b8" style={{ margin: "0 auto 0.8rem auto" }} />
-          <p style={{ fontSize: "0.9rem", color: "#64748b", marginBottom: "1rem" }}>현재 등록된 결제 수단이 없습니다.</p>
-          <button style={{ padding: "0.6rem 1.5rem", background: "#0f172a", color: "white", fontSize: "0.9rem", fontWeight: "700", borderRadius: "8px", border: "none", cursor: "pointer", boxShadow: "0 4px 6px rgba(0,0,0,0.1)" }}>
-            결제 수단 등록
-          </button>
+          {subLive ? (
+            <>
+              <p style={{ fontSize: "0.95rem", fontWeight: "700", margin: "0 0 0.3rem 0" }}>
+                {sub.card_company || "카드"} {sub.card_number || ""}
+              </p>
+              <p style={{ fontSize: "0.85rem", color: sub.status === "active" ? "#16a34a" : "#d97706", fontWeight: "700", margin: "0 0 0.3rem 0" }}>
+                {STATUS_KR[sub.status]}
+              </p>
+              <p style={{ fontSize: "0.85rem", color: "#64748b", margin: "0 0 1rem 0" }}>
+                {sub.status === "canceled"
+                  ? `${fmtDate(sub.current_period_end)} 까지 이용`
+                  : `다음 결제일 ${fmtDate(sub.next_billing_at)} · ₩${(sub.amount || 0).toLocaleString()}`}
+              </p>
+              {sub.status === "past_due" && sub.last_error && (
+                <p style={{ fontSize: "0.8rem", color: "#ef4444", margin: "0 0 1rem 0" }}>{sub.last_error}</p>
+              )}
+              {sub.status === "canceled" ? (
+                <button disabled={busy} onClick={() => callBilling("resume")}
+                  style={{ padding: "0.6rem 1.5rem", background: "#16a34a", color: "white", fontSize: "0.9rem", fontWeight: "700", borderRadius: "8px", border: "none", cursor: "pointer" }}>
+                  구독 계속하기
+                </button>
+              ) : (
+                <button disabled={busy} onClick={() => confirm("구독을 해지할까요?\n남은 기간까지는 계속 이용할 수 있습니다.") && callBilling("cancel")}
+                  style={{ padding: "0.6rem 1.5rem", background: "white", color: "#ef4444", fontSize: "0.9rem", fontWeight: "700", borderRadius: "8px", border: "1px solid #fecaca", cursor: "pointer" }}>
+                  구독 해지
+                </button>
+              )}
+            </>
+          ) : (
+            <p style={{ fontSize: "0.9rem", color: "#64748b", margin: 0, whiteSpace: "pre-line" }}>
+              {billingCfg.enabled ? "아래에서 요금제를 고르면\n카드 등록 후 매월 자동결제됩니다." : "현재 등록된 결제 수단이 없습니다."}
+            </p>
+          )}
         </div>
       </div>
+
+      {billing.payments.length > 0 && (
+        <div style={{ background: "white", padding: "1.5rem 2rem", borderRadius: "24px", border: "1px solid #e2e8f0", marginBottom: "3rem" }}>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: "700", margin: "0 0 1rem 0" }}>결제 내역</h2>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+              <thead>
+                <tr style={{ color: "#64748b", textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ padding: "0.5rem" }}>일자</th><th style={{ padding: "0.5rem" }}>요금제</th>
+                  <th style={{ padding: "0.5rem" }}>금액</th><th style={{ padding: "0.5rem" }}>결과</th><th style={{ padding: "0.5rem" }}>영수증</th>
+                </tr>
+              </thead>
+              <tbody>
+                {billing.payments.map(p => (
+                  <tr key={p.order_id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "0.5rem" }}>{fmtDate(p.created_at)}</td>
+                    <td style={{ padding: "0.5rem" }}>{p.plan_id}</td>
+                    <td style={{ padding: "0.5rem" }}>₩{(p.amount || 0).toLocaleString()}</td>
+                    <td style={{ padding: "0.5rem", color: p.status === "DONE" ? "#16a34a" : "#ef4444" }} title={p.message || ""}>
+                      {p.status === "DONE" ? "결제 완료" : "실패"}
+                    </td>
+                    <td style={{ padding: "0.5rem" }}>
+                      {p.receipt_url ? <a href={p.receipt_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>보기</a> : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 요금제 선택 */}
       <h2 style={{ fontSize: "1.6rem", fontWeight: "700", textAlign: "center", marginBottom: "2rem" }}>플랜 업그레이드</h2>
@@ -135,12 +258,18 @@ export default function BillingPage() {
                 ))}
               </ul>
               
-              <button 
-                onClick={() => handleUpgrade(plan.name)}
-                style={{ width: "100%", padding: "1rem", borderRadius: "12px", fontWeight: "700", color: "white", background: colorTheme.btnBg, border: "none", cursor: "pointer", fontSize: "1rem", boxShadow: "0 4px 6px rgba(0,0,0,0.1)" }}
-              >
-                {plan.name} 선택하기
-              </button>
+              {(() => {
+                const current = subLive && sub.status !== "canceled" && sub.plan_id === plan.id;
+                return (
+                  <button
+                    onClick={() => handleUpgrade(plan)}
+                    disabled={busy || current}
+                    style={{ width: "100%", padding: "1rem", borderRadius: "12px", fontWeight: "700", color: "white", background: current ? "#94a3b8" : colorTheme.btnBg, border: "none", cursor: current ? "default" : "pointer", fontSize: "1rem", boxShadow: "0 4px 6px rgba(0,0,0,0.1)" }}
+                  >
+                    {current ? "이용 중" : subLive ? `${plan.name}로 변경` : `${plan.name} 선택하기`}
+                  </button>
+                );
+              })()}
             </div>
           )
         })}
