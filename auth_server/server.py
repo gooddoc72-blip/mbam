@@ -18,6 +18,7 @@ import os
 import secrets
 import string
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import HTMLResponse, FileResponse
@@ -97,6 +98,8 @@ class ProductDevice(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     approved_at = Column(DateTime, nullable=True)
     last_seen = Column(DateTime, nullable=True)
+    # 구독 만료일. None=무기한(기존 고객은 전부 무기한으로 시작). 지나면 /verify 가 expired.
+    expires_at = Column(DateTime, nullable=True)
     __table_args__ = (UniqueConstraint("hwid", "product", name="uq_product_device"),)
 
 
@@ -131,6 +134,19 @@ class AccountBackup(Base):
 
 Base.metadata.create_all(bind=engine)
 
+
+def _add_missing_columns():
+    """create_all 은 이미 있는 테이블에 칼럼을 추가하지 않는다 — 운영 DB 에 직접 넣는다.
+    새 칼럼은 전부 NULL 허용이라 기존 행은 NULL(=무기한)로 남는다."""
+    from sqlalchemy import inspect, text
+    have = {c["name"] for c in inspect(engine).get_columns("product_devices")}
+    with engine.begin() as conn:
+        if "expires_at" not in have:
+            conn.execute(text("ALTER TABLE product_devices ADD COLUMN expires_at DATETIME"))
+
+
+_add_missing_columns()
+
 app = FastAPI(title="MBAM License Server")
 
 
@@ -146,6 +162,17 @@ def require_admin(x_admin_token: str = Header(None)):
     if not x_admin_token or not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
         raise HTTPException(status_code=403, detail="관리자 인증 실패")
     return True
+
+
+def _iso(dt) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+def _days_left(exp) -> Optional[int]:
+    """만료까지 남은 일수(오늘 만료=0, 지났으면 음수). 무기한이면 None."""
+    if not exp:
+        return None
+    return (exp - datetime.utcnow()).days
 
 
 def _is_expired(lic: License) -> bool:
@@ -268,10 +295,18 @@ def verify_device(req: DeviceVerify, db: Session = Depends(get_db)):
     if not dev:
         return {"authorized": False, "message": "등록되지 않은 기기입니다.", "status": "unregistered"}
     if dev.status == "approved":
-        if isinstance(dev, ProductDevice):
-            dev.last_seen = datetime.utcnow()
-            db.commit()
-        return {"authorized": True, "message": "인증 성공", "status": "approved"}
+        if not isinstance(dev, ProductDevice):
+            return {"authorized": True, "message": "인증 성공", "status": "approved"}
+        dev.last_seen = datetime.utcnow()
+        db.commit()
+        exp = _iso(dev.expires_at)
+        if dev.expires_at and dev.expires_at < datetime.utcnow():
+            # 구 클라이언트(1.1.7 이하)는 모르는 status 를 '미등록'으로 보고 승인 요청 화면을
+            # 띄운다 — 고객이 재요청하면 관리자 도구에 '승인 대기'로 올라와 연장 신청이 된다.
+            return {"authorized": False, "status": "expired", "expires_at": exp,
+                    "message": f"사용 기간이 만료되었습니다. (만료일 {exp[:10]})"}
+        return {"authorized": True, "message": "인증 성공", "status": "approved",
+                "expires_at": exp, "days_left": _days_left(dev.expires_at)}
     elif dev.status == "pending":
         return {"authorized": False, "message": "승인 대기 중입니다.", "status": "pending"}
     else:
@@ -378,6 +413,19 @@ class DeviceApproveRequest(BaseModel):
     status: str # approved, blocked, pending
     # 어느 제품의 기기인지. 비어 있으면 기존 devices 테이블(크롤러 등).
     product: str = ""
+    # 승인 시 사용 기간. None=만료일 그대로, 0=무기한, N=N일 연장(남은 기간에 더함)
+    days: Optional[int] = None
+
+
+def _extend(dev: "ProductDevice", days: int):
+    """days=0 이면 무기한. 아직 기간이 남았으면 남은 기간 뒤에 이어 붙인다(조기 연장 손해 없음)."""
+    if days <= 0:
+        dev.expires_at = None
+        return
+    now = datetime.utcnow()
+    base = dev.expires_at if (dev.expires_at and dev.expires_at > now) else now
+    dev.expires_at = base + timedelta(days=days)
+
 
 @app.post("/admin/device/status")
 def admin_device_status(req: DeviceApproveRequest, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
@@ -387,8 +435,28 @@ def admin_device_status(req: DeviceApproveRequest, _: bool = Depends(require_adm
     dev.status = req.status
     if isinstance(dev, ProductDevice) and req.status == "approved":
         dev.approved_at = datetime.utcnow()
+        if req.days is not None:
+            _extend(dev, req.days)
     db.commit()
-    return {"success": True, "message": f"기기 상태가 {req.status}로 변경되었습니다."}
+    return {"success": True, "message": f"기기 상태가 {req.status}로 변경되었습니다.",
+            "expires_at": _iso(getattr(dev, "expires_at", None))}
+
+
+class DeviceExtendRequest(BaseModel):
+    hwid: str
+    product: str
+    days: int          # 0=무기한
+
+
+@app.post("/admin/device/extend")
+def admin_device_extend(req: DeviceExtendRequest, _: bool = Depends(require_admin), db: Session = Depends(get_db)):
+    """구독 연장 — 상태는 그대로 두고 만료일만 바꾼다(차단된 기기는 차단 유지)."""
+    dev = _find_device(db, req.hwid, req.product)
+    if not isinstance(dev, ProductDevice):
+        raise HTTPException(status_code=404, detail="제품 기기를 찾을 수 없습니다.")
+    _extend(dev, req.days)
+    db.commit()
+    return {"success": True, "expires_at": _iso(dev.expires_at)}
 
 @app.get("/admin/devices")
 def admin_devices_list(_: bool = Depends(require_admin), db: Session = Depends(get_db)):
@@ -414,6 +482,8 @@ def admin_devices_list(_: bool = Depends(require_admin), db: Session = Depends(g
             "status": d.status,
             "created_at": d.created_at.isoformat() if d.created_at else None,
             "last_seen": d.last_seen.isoformat() if d.last_seen else None,
+            "expires_at": _iso(d.expires_at),
+            "days_left": _days_left(d.expires_at),
         })
     return out
 

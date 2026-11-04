@@ -49,8 +49,10 @@ def run_device_auth_gate(product: str = "cafe", app_title: str = "카페 마케�
 
     pad = {"padx": 26}
 
+    expired = pre.status == "expired"
     tk.Label(root, text=app_title, font=ko(15, "bold"), fg="#16a34a").pack(pady=(20, 2))
-    tk.Label(root, text="이 PC 를 사용하려면 관리자 승인이 필요합니다.",
+    tk.Label(root, text=("사용 기간이 끝났습니다. 연장 후 다시 사용할 수 있습니다." if expired
+                         else "이 PC 를 사용하려면 관리자 승인이 필요합니다."),
              font=ko(9), fg="#555").pack(pady=(0, 12))
 
     # ── 기기번호 (복사 가능하도록 Entry 로) ──
@@ -85,7 +87,7 @@ def run_device_auth_gate(product: str = "cafe", app_title: str = "카페 마케�
     btn_row = tk.Frame(root)
     btn_row.pack(pady=14)
 
-    btn_request = ttk.Button(btn_row, text="승인 요청하기")
+    btn_request = ttk.Button(btn_row, text="연장 요청하기" if expired else "승인 요청하기")
     btn_recheck = ttk.Button(btn_row, text="다시 확인")
 
     def set_busy(busy: bool):
@@ -109,8 +111,8 @@ def run_device_auth_gate(product: str = "cafe", app_title: str = "카페 마케�
                 set_busy(False)
                 if ok:
                     status.config(
-                        text="승인 요청이 접수되었습니다.\n"
-                             "관리자 승인 후 [다시 확인] 을 누르거나 프로그램을 다시 실행하세요.",
+                        text=("연장 요청이 접수되었습니다.\n" if expired else "승인 요청이 접수되었습니다.\n")
+                             + "관리자 승인 후 [다시 확인] 을 누르거나 프로그램을 다시 실행하세요.",
                         fg="#27ae60")
                 else:
                     status.config(text=msg, fg="#c0392b")

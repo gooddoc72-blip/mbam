@@ -34,10 +34,27 @@ from .hwid import get_hwid, machine_name
 OFFLINE_GRACE_DAYS = 7
 
 
+def _parse_utc(iso):
+    """서버가 주는 만료일(UTC, 타임존 없음) → aware datetime. 없거나 깨졌으면 None."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso)
+    except Exception:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _expired_message(iso) -> str:
+    when = f" (만료일 {iso[:10]})" if iso else ""
+    return (f"사용 기간이 만료되었습니다{when}.\n"
+            "연장하려면 아래 [연장 요청하기] 를 누른 뒤 관리자에게 결제·연장을 문의하세요.")
+
+
 class DeviceResult:
     """
     ok        : 실행 허용 여부
-    status    : unregistered | pending | approved | blocked | offline | error
+    status    : unregistered | pending | approved | blocked | expired | offline | error
     message   : 사용자에게 보여줄 안내 문구
     can_request: [승인 요청] 버튼을 띄워도 되는 상태인지
     """
@@ -102,9 +119,14 @@ class DeviceAuthClient:
                 "hwid": self.hwid,
                 "product": self.product,
                 "last_verified": datetime.now(timezone.utc).isoformat(),
+                # 오프라인 유예 중에도 구독 만료일은 지킨다(None=무기한)
+                "expires_at": res.get("expires_at"),
             })
             return DeviceResult(True, "approved", res.get("message", "인증 성공"))
 
+        if status == "expired":
+            return DeviceResult(False, "expired", _expired_message(res.get("expires_at")),
+                                can_request=True)
         if status == "pending":
             return DeviceResult(False, "pending",
                                 "관리자 승인을 기다리는 중입니다.\n승인되면 다시 실행해 주세요.")
@@ -142,6 +164,9 @@ class DeviceAuthClient:
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
         except Exception:
             return DeviceResult(False, "error", "인증 정보를 읽을 수 없습니다.")
+        exp = _parse_utc(cached.get("expires_at"))
+        if exp and exp < datetime.now(timezone.utc):
+            return DeviceResult(False, "expired", _expired_message(cached.get("expires_at")))
         days = (datetime.now(timezone.utc) - last_dt).days
         if days <= OFFLINE_GRACE_DAYS:
             return DeviceResult(True, "offline", f"오프라인 모드 (마지막 확인 {days}일 전)")

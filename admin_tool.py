@@ -21,14 +21,18 @@ def fetch_devices():
         messagebox.showerror("서버 접속 오류", "서버에 연결할 수 없습니다. 서버 상태나 AWS 보안 그룹(포트 8005)을 확인해주세요.")
         return []
 
-def change_status(hwid, new_status, product=""):
+def change_status(hwid, new_status, product="", days=None):
     try:
         headers = {"x-admin-token": ADMIN_TOKEN}
         # product 를 같이 보내야 서버가 올바른 쪽(기존 devices / 제품별 product_devices)을 고친다
         payload = {"hwid": hwid, "status": new_status, "product": product}
+        if days is not None:
+            payload["days"] = days
         response = requests.post(f"{SERVER_URL}/admin/device/status", json=payload, headers=headers, timeout=5)
         if response.status_code == 200:
-            messagebox.showinfo("성공", f"기기 상태가 '{new_status}'(으)로 변경되었습니다.")
+            exp = response.json().get("expires_at")
+            extra = f"\n사용 기간: {_short_date(exp)} 까지" if exp else ("\n사용 기간: 무기한" if days == 0 else "")
+            messagebox.showinfo("성공", f"기기 상태가 '{new_status}'(으)로 변경되었습니다.{extra}")
             refresh_list()
         else:
             messagebox.showerror("오류", "상태 변경에 실패했습니다.")
@@ -60,15 +64,32 @@ def refresh_list():
         product = d.get("product", "") or ""
         product_kr = PRODUCT_NAMES.get(product, product)
 
+        # 구독 기간 — 크롤러(product 없음)는 기간 개념이 없다
+        left = d.get("days_left")
+        if not product:
+            expires, left_kr, tag = "", "", ""
+        elif not d.get("expires_at"):
+            expires, left_kr, tag = "무기한", "", ""
+        else:
+            expires = _short_date(d["expires_at"])
+            if left < 0:
+                left_kr, tag = "만료", "expired"
+                if status == "approved":
+                    status_kr = "기간 만료"
+            else:
+                left_kr, tag = f"{left}일", ("soon" if left <= 7 else "")
+
         tree.insert("", "end", values=(
             product_kr,
             d.get("name", "이름 없음"),
             d.get("hwid", "")[:15] + "...",
             status_kr,
+            expires,
+            left_kr,
             created_at,
             d.get("hwid", ""),
             product,
-        ))
+        ), tags=(tag,) if tag else ())
 
 
 def _selected_device():
@@ -77,7 +98,7 @@ def _selected_device():
     if not selected:
         return None, None
     vals = tree.item(selected[0])["values"]
-    return vals[5], (vals[6] if len(vals) > 6 else "")
+    return str(vals[7]), (str(vals[8]) if len(vals) > 8 and vals[8] != "" else "")
 
 
 def on_approve():
@@ -85,7 +106,28 @@ def on_approve():
     if not hwid:
         messagebox.showwarning("선택", "승인할 기기를 선택해주세요.")
         return
-    change_status(hwid, "approved", product)
+    # 카페·블로그는 고른 기간으로 승인(남은 기간이 있으면 그 뒤에 이어 붙음). 크롤러는 기간 없음.
+    change_status(hwid, "approved", product, DEVICE_PERIODS[device_period.get()] if product else None)
+
+
+def on_extend():
+    hwid, product = _selected_device()
+    if not hwid:
+        messagebox.showwarning("선택", "연장할 기기를 선택해주세요.")
+        return
+    if not product:
+        messagebox.showwarning("연장", "크롤러 기기는 사용 기간이 없습니다.")
+        return
+    label = device_period.get()
+    if not messagebox.askyesno("기간 연장", f"선택한 기기의 사용 기간을 [{label}] 처리할까요?\n"
+                               "남은 기간이 있으면 그 뒤에 이어 붙습니다."):
+        return
+    res = _code_api("POST", "/admin/device/extend",
+                    {"hwid": hwid, "product": product, "days": DEVICE_PERIODS[label]})
+    if res is not None:
+        refresh_list()
+        exp = res.get("expires_at")
+        messagebox.showinfo("완료", f"사용 기간: {_short_date(exp) + ' 까지' if exp else '무기한'}")
 
 
 def on_block():
@@ -102,6 +144,8 @@ def on_block():
 
 # 콤보박스 표시값 → 서버에 보낼 valid_days (0 = 무기한)
 PERIODS = {"1개월 (30일)": 30, "3개월 (90일)": 90, "6개월 (180일)": 180, "1년 (365일)": 365, "무기한": 0}
+# 기기 승인·연장 기간 — 기본은 무기한(기존 운영과 동일), 구독 고객만 기간을 고른다
+DEVICE_PERIODS = {"무기한": 0, "+1개월 (30일)": 30, "+3개월 (90일)": 90, "+6개월 (180일)": 180, "+1년 (365일)": 365}
 
 
 def _code_api(method, path, body=None):
@@ -222,7 +266,7 @@ def on_reset():
 
 root = tk.Tk()
 root.title("마케팅연구소 관리자 도구 (기기 승인 · 인증코드)")
-root.geometry("860x520")
+root.geometry("940x520")
 
 notebook = ttk.Notebook(root)
 notebook.pack(fill="both", expand=True, padx=6, pady=6)
@@ -237,27 +281,41 @@ top_frame.pack(fill="x")
 btn_refresh = tk.Button(top_frame, text="목록 새로고침", command=refresh_list, bg="#3b82f6", fg="white")
 btn_refresh.pack(side="left", padx=5)
 
-btn_approve = tk.Button(top_frame, text="✅ 선택 기기 승인", command=on_approve, bg="#10b981", fg="white")
-btn_approve.pack(side="right", padx=5)
-
 btn_block = tk.Button(top_frame, text="❌ 선택 기기 차단", command=on_block, bg="#ef4444", fg="white")
 btn_block.pack(side="right", padx=5)
 
-columns = ("product", "name", "hwid_short", "status", "created_at", "hwid_full", "product_code")
+btn_extend = tk.Button(top_frame, text="⏩ 기간 연장", command=on_extend, bg="#f59e0b", fg="white")
+btn_extend.pack(side="right", padx=5)
+
+btn_approve = tk.Button(top_frame, text="✅ 선택 기기 승인", command=on_approve, bg="#10b981", fg="white")
+btn_approve.pack(side="right", padx=5)
+
+device_period = ttk.Combobox(top_frame, values=list(DEVICE_PERIODS), state="readonly", width=14)
+device_period.set("무기한")
+device_period.pack(side="right", padx=5)
+tk.Label(top_frame, text="사용 기간").pack(side="right")
+
+columns = ("product", "name", "hwid_short", "status", "expires", "days_left", "created_at", "hwid_full", "product_code")
 tree = ttk.Treeview(device_tab, columns=columns, show="headings", selectmode="browse")
 tree.heading("product", text="제품")
 tree.heading("name", text="신청자 이름/소속")
 tree.heading("hwid_short", text="기기 번호(요약)")
 tree.heading("status", text="현재 상태")
+tree.heading("expires", text="만료일")
+tree.heading("days_left", text="남은 기간")
 tree.heading("created_at", text="신청 일시")
 
-tree.column("product", width=100)
-tree.column("name", width=150)
-tree.column("hwid_short", width=150)
-tree.column("status", width=90)
-tree.column("created_at", width=140)
+tree.column("product", width=90)
+tree.column("name", width=140)
+tree.column("hwid_short", width=130)
+tree.column("status", width=80)
+tree.column("expires", width=85)
+tree.column("days_left", width=65)
+tree.column("created_at", width=135)
 tree.column("hwid_full", width=0, stretch=tk.NO)      # 숨김 컬럼
 tree.column("product_code", width=0, stretch=tk.NO)   # 숨김 컬럼(서버 전송용 원본 값)
+tree.tag_configure("expired", background="#fee2e2")   # 만료 — 빨강
+tree.tag_configure("soon", background="#fef3c7")      # 7일 이내 만료 — 노랑
 
 tree.pack(fill="both", expand=True, padx=10, pady=10)
 
