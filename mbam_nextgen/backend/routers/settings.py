@@ -391,6 +391,8 @@ async def wash_upload_endpoint(
     use_flip: bool = Form(False),             # 좌우반전
     use_hue: bool = Form(False),              # 색조 미세이동
     use_resample: bool = Form(False),         # 리사이즈 재샘플링
+    # 저장 형식 — jpeg(기본) | webp. WebP 는 같은 화질에서 용량이 25~35% 작다.
+    output_format: str = Form("jpeg"),
 ):
     try:
         from mbam_nextgen.services.armor import ImageArmor
@@ -398,6 +400,8 @@ async def wash_upload_endpoint(
         pass # Handle inside
 
     results = []
+    fmt = "webp" if (output_format or "").strip().lower() == "webp" else "jpeg"
+    ext, mime = (".webp", "image/webp") if fmt == "webp" else (".jpg", "image/jpeg")
 
     # ⚠ 속도의 핵심 — 세탁 '전에' 한 번만 줄인다.
     #   휴대폰 사진은 보통 4000x3000(1200만 화소)이라 회전·블러·밝기보정이 전부 그 픽셀 수만큼 돈다.
@@ -522,21 +526,26 @@ async def wash_upload_endpoint(
         buf = io.BytesIO()
         # ⚠ exif=None 을 넘기면 안 된다 — PIL 이 그대로 len() 을 불러 TypeError 로 터진다.
         #   EXIF 를 끄거나 ImageArmor 를 못 불러온 경우가 여기 해당한다. 아예 넘기지 않는다.
-        save_kwargs = {"format": "JPEG", "quality": random.randint(82, 88)}
+        if fmt == "webp":
+            # WebP 도 EXIF 를 담을 수 있다. 품질은 JPEG 와 같은 범위로 장마다 다르게(파일 해시 분산).
+            # method=4 — 6(최고 압축)은 장당 수 초씩 걸려 대량 생성에서 너무 느리다.
+            save_kwargs = {"format": "WEBP", "quality": random.randint(82, 88), "method": 4}
+        else:
+            save_kwargs = {"format": "JPEG", "quality": random.randint(82, 88)}
         if exif_bytes:
             save_kwargs["exif"] = exif_bytes
         img.save(buf, **save_kwargs)
         img_bytes = buf.getvalue()
         base64_str = base64.b64encode(img_bytes).decode('utf-8')
-        
+
         orig_name = orig_dict["filename"]
         base_name = os.path.splitext(orig_name)[0]
-        washed_filename = f"washed_{base_name}_{uuid.uuid4().hex[:6]}.jpg"
-        
+        washed_filename = f"washed_{base_name}_{uuid.uuid4().hex[:6]}{ext}"
+
         results.append({
             "original_filename": orig_name,
             "washed_filename": washed_filename,
-            "base64_data": f"data:image/jpeg;base64,{base64_str}"
+            "base64_data": f"data:{mime};base64,{base64_str}"
         })
 
     return {

@@ -35,6 +35,8 @@ export default function ImageWashPage() {
   const [useFlip, setUseFlip] = useState(false);
   const [useHue, setUseHue] = useState(false);
   const [useResample, setUseResample] = useState(false);
+  // 저장 형식 — jpeg(기본) | webp. 보관함 저장은 발행 호환을 위해 항상 JPG 로 바뀐다.
+  const [outputFormat, setOutputFormat] = useState("jpeg");
 
   // 이미지 보관함 (세탁 후 저장 → 발행 재사용)
   const [library, setLibrary] = useState([]);
@@ -127,6 +129,7 @@ export default function ImageWashPage() {
     formData.append("use_flip", useFlip);
     formData.append("use_hue", useHue);
     formData.append("use_resample", useResample);
+    formData.append("output_format", outputFormat);
 
     try {
       const res = await fetchWithAuth("/api/image-wash/upload", {
@@ -352,6 +355,28 @@ export default function ImageWashPage() {
             </div>
           ))}
 
+          {/* 저장 형식 — 세탁 결과를 어떤 파일로 내려받을지 */}
+          <div style={{ padding: "1.2rem", backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "1rem", fontWeight: "bold", color: "#334155", whiteSpace: "nowrap" }}>저장 형식</span>
+              {[
+                { value: "jpeg", label: "JPG" },
+                { value: "webp", label: "WebP" },
+              ].map(o => (
+                <label key={o.value} style={{ display: "flex", alignItems: "center", gap: "0.35rem", cursor: "pointer", fontSize: "0.95rem", color: "#334155" }}>
+                  <input type="radio" name="output-format" value={o.value} checked={outputFormat === o.value}
+                         onChange={() => setOutputFormat(o.value)} style={{ cursor: "pointer" }} />
+                  {o.label}
+                </label>
+              ))}
+            </div>
+            <div style={{ marginTop: "0.4rem", fontSize: "0.85rem", color: "#94a3b8", lineHeight: 1.5 }}>
+              {outputFormat === "webp"
+                ? "WebP 는 같은 화질에서 용량이 25~35% 작습니다. 보관함에 저장하면 발행 호환을 위해 JPG 로 바뀝니다."
+                : "가장 널리 쓰이는 형식입니다. 블로그·카페 어디에나 그대로 올릴 수 있습니다."}
+            </div>
+          </div>
+
         </div>
 
         {/* Right Panel: Preview & Info */}
@@ -435,6 +460,7 @@ export default function ImageWashPage() {
                   <div style={{ marginTop: "0.25rem", color: "#94a3b8" }}>
                     처리 크기: {keepOriginalSize ? "원본 그대로(느림)" : "긴 변 1600px"}
                   </div>
+                  <div style={{ color: "#94a3b8" }}>저장 형식: {outputFormat === "webp" ? "WebP" : "JPG"}</div>
                   {useExif && <div style={{ color: "#3b82f6" }}>EXIF 날짜 ±10일 랜덤 삽입</div>}
                 </div>
               );
