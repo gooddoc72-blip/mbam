@@ -77,6 +77,22 @@ class DeviceSession(Base):
     user_id = Column(String, index=True) # ID of Advertiser, Agency, or Distributor
     hwid = Column(String, index=True)
     last_login = Column(DateTime, default=datetime.utcnow)
+    pc_name = Column(String, nullable=True)  # 에이전트가 보낸 컴퓨터 이름(관리자 표시용)
+
+
+class DeviceRequest(Base):
+    """승인되지 않은 PC 의 에이전트 로그인 → 관리자 승인 요청.
+    승인되면 DeviceSession(=승인된 PC) 으로 옮기고 이 행은 삭제. 거절은 rejected 로 남겨 재요청을 막는다."""
+    __tablename__ = "device_requests"
+
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, index=True)
+    user_email = Column(String, nullable=True)
+    hwid = Column(String, index=True)
+    pc_name = Column(String, nullable=True)
+    status = Column(String, default="pending")  # pending | rejected
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
 
 class NaverAccount(Base):
     __tablename__ = "naver_accounts"

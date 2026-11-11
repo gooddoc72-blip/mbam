@@ -157,6 +157,7 @@ try:
         "ALTER TABLE blog_schedules ADD COLUMN last_run_title VARCHAR",
         "ALTER TABLE cafe_schedules ADD COLUMN last_run_date VARCHAR",
         "ALTER TABLE cafe_rank_items ADD COLUMN title VARCHAR",
+        "ALTER TABLE device_sessions ADD COLUMN pc_name VARCHAR",
     ]
     for _mig in _column_migrations:
         try:

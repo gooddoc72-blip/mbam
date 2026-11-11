@@ -20,9 +20,17 @@ router = APIRouter(prefix="/api/agent", tags=["Local Agent"])
 
 @router.get("/next-job", summary="로컬 에이전트: 내 작업 선점")
 async def next_job(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db),
-                   agent_id: Optional[str] = None, interactive: Optional[bool] = None):
+                   agent_id: Optional[str] = None, interactive: Optional[bool] = None,
+                   dc: Optional[int] = None):
     """interactive=1 → 즉시성 작업(폴더 선택 등)만 / =0 → 배경 작업만 / 미지정 → 전체(구버전 호환).
     에이전트가 즉시성 작업은 빠른 레인(1초), 배경은 기본 레인(3초)으로 나눠 폴링한다."""
+    # dc=1: 새 에이전트 — 관리자가 이 PC 승인을 해제했으면 401 → 에이전트가 재로그인(→승인 대기).
+    # (구버전 에이전트는 401 재로그인 실패 시 대기 없이 재시도하므로 dc 플래그가 있을 때만 검사)
+    if dc and agent_id:
+        from .auth_router import pc_still_approved
+        if not pc_still_approved(db, current_user, agent_id):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="이 PC 의 사용 승인이 해제되었습니다.")
     user_id = current_user.get("sub")
     job = jobsvc.claim_next_job(db, user_id, agent_id=agent_id, only_interactive=interactive)
     if not job:

@@ -10,6 +10,7 @@ from ..database import get_db, Advertiser, Agency, Distributor
 from datetime import timedelta, datetime
 from ..cipher_utils import get_decrypted_env
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,38 +23,115 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/
 class LoginRequest(BaseModel):
     email: str
     password: str
-    hwid: str = None  # 하드웨어 고유 식별자 (없을 경우 웹 브라우저 임시 접속으로 간주)
+    hwid: Optional[str] = None  # 하드웨어 고유 식별자 (없을 경우 웹 브라우저 임시 접속으로 간주)
+    device_name: Optional[str] = None  # 에이전트가 보내는 컴퓨터 이름(관리자 승인 화면 표시용)
 
-def check_hwid_limit(db: Session, user_id: str, hwid: str):
-    if not hwid:
-        return
-        
+MAX_PC_DEVICES = 2
+WEB_HWID_PREFIX = "web-hwid-"  # 웹 브라우저가 만드는 임시 ID — 기기(PC)로 세지 않는다
+# 에이전트가 이 접두어로 '승인 대기/거절'을 알아본다 — 문구를 바꿔도 접두어는 유지할 것
+PENDING_PREFIX = "[PC 승인 대기]"
+REJECTED_PREFIX = "[PC 승인 거절]"
+
+
+def is_pc_hwid(hwid: str) -> bool:
+    """에이전트(내 PC 프로그램)가 보낸 PC 고유값인지. 브라우저 임시 ID 는 False."""
+    return bool(hwid) and not hwid.startswith(WEB_HWID_PREFIX)
+
+
+def _notify_device_request(email: str, pc_name: str):
+    """새 PC 승인 요청을 관리자 텔레그램으로 알림(설정돼 있을 때만, 실패 무시)."""
+    try:
+        import asyncio
+        from mbam_nextgen.services.telegram_service import TelegramService
+        tg = TelegramService()
+        if not tg.base_url or not tg.chat_id:
+            return
+        from html import escape
+        asyncio.get_running_loop().create_task(tg.send_message(
+            f"🖥 PC 승인 요청\n회원: {escape(email or '-')}\nPC: {escape(pc_name or '-')}\n"
+            "관리자 페이지에서 승인/거절하세요."))
+    except Exception:
+        pass
+
+
+_PC_OK_CACHE = {}  # (sub, hwid) -> 확인 시각 — 에이전트 폴링(1~3초)마다 DB 를 치지 않도록 60초 캐시
+
+
+def pc_still_approved(db: Session, current_user: dict, hwid: str) -> bool:
+    """에이전트 토큰이 살아 있어도 관리자가 PC 승인을 해제했으면 False → 401 로 재로그인 유도."""
+    import time
+    if current_user.get("role") == "admin" or not is_pc_hwid(hwid):
+        return True
+    sub = current_user.get("sub")
+    key = (sub, hwid)
+    now = time.time()
+    if now - _PC_OK_CACHE.get(key, 0) < 60:
+        return True
     from ..database import DeviceSession
-    devices = db.query(DeviceSession).filter(DeviceSession.user_id == user_id).all()
-    hwids = [d.hwid for d in devices]
-    
-    if hwid not in hwids:
-        if len(hwids) >= 2:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, 
-                detail="최대 허용 기기 수(2대)를 초과했습니다. 기존 기기에서 접속하거나 관리자에게 기기 초기화를 요청하세요."
-            )
-        else:
-            try:
-                new_device = DeviceSession(user_id=user_id, hwid=hwid)
-                db.add(new_device)
-                db.commit()
-            except IntegrityError:
-                db.rollback()
-                # If race condition happens, the device was inserted by another thread, which is fine
+    role = current_user.get("role")
+    if role == "advertiser":
+        u = db.query(Advertiser).filter(Advertiser.email == sub).first()
+    elif role == "agency":
+        u = db.query(Agency).filter(Agency.login_id == sub).first()
+    elif role == "distributor":
+        u = db.query(Distributor).filter(Distributor.login_id == sub).first()
     else:
-        device = db.query(DeviceSession).filter(DeviceSession.user_id == user_id, DeviceSession.hwid == hwid).first()
-        if device:
-            try:
-                device.last_login = datetime.utcnow()
-                db.commit()
-            except IntegrityError:
-                db.rollback()
+        return True
+    if not u:
+        return False
+    ok = (db.query(DeviceSession)
+          .filter(DeviceSession.user_id == u.id, DeviceSession.hwid == hwid).first()) is not None
+    if ok:
+        _PC_OK_CACHE[key] = now
+    else:
+        _PC_OK_CACHE.pop(key, None)
+    return ok
+
+
+def check_hwid_limit(db: Session, user_id: str, hwid: str, device_name: str = None, user_email: str = None):
+    """기기 = PC. 고객당 PC 2대, 모든 PC 는 관리자 승인 후 사용.
+    - 웹 브라우저 로그인은 PC 로 세지 않고 통과.
+    - 승인된 PC(DeviceSession) → 통과.
+    - 미승인 PC → 승인 요청(DeviceRequest) 생성 후 403 '[PC 승인 대기]'. 에이전트는 주기적으로 재시도.
+    """
+    if not is_pc_hwid(hwid):
+        return
+
+    from ..database import DeviceSession, DeviceRequest
+    device = (db.query(DeviceSession)
+              .filter(DeviceSession.user_id == user_id, DeviceSession.hwid == hwid).first())
+    if device:
+        try:
+            device.last_login = datetime.utcnow()
+            if device_name and not device.pc_name:
+                device.pc_name = device_name[:100]
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        return
+
+    req = (db.query(DeviceRequest)
+           .filter(DeviceRequest.user_id == user_id, DeviceRequest.hwid == hwid).first())
+    if req and req.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{REJECTED_PREFIX} 이 PC 사용 요청이 거절되었습니다. 관리자에게 문의하세요.")
+    if not req:
+        try:
+            db.add(DeviceRequest(user_id=user_id, user_email=user_email, hwid=hwid,
+                                 pc_name=(device_name or "")[:100] or None))
+            db.commit()
+            _notify_device_request(user_email, device_name)
+        except IntegrityError:
+            db.rollback()
+    elif device_name and not req.pc_name:
+        req.pc_name = device_name[:100]
+        db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"{PENDING_PREFIX} 이 PC 사용 승인을 관리자에게 요청했습니다. "
+               f"승인되면 자동으로 시작되며, 시작되지 않으면 에이전트를 다시 실행해 주세요. "
+               f"(계정당 PC {MAX_PC_DEVICES}대)")
 
 # 설치형(단독 PC 설치 · 기기 승인으로 관리) 제품 코드. 여기 없는 값이면 /local-session 은 404.
 _STANDALONE_PRODUCTS = {"cafe", "blog"}
@@ -125,7 +203,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     # 1. Check Advertiser (email based)
     advertiser = db.query(Advertiser).filter(Advertiser.email == request.email).first()
     if advertiser and verify_password(request.password, advertiser.password):
-        check_hwid_limit(db, advertiser.id, request.hwid)
+        check_hwid_limit(db, advertiser.id, request.hwid, request.device_name, advertiser.email)
         access_token = create_access_token(
             data={"sub": advertiser.email, "role": "advertiser", "provider": "local"},
             expires_delta=timedelta(days=7)
@@ -137,7 +215,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     # 2. Check Agency (login_id based)
     agency = db.query(Agency).filter(Agency.login_id == request.email).first()
     if agency and verify_password(request.password, agency.password):
-        check_hwid_limit(db, agency.id, request.hwid)
+        check_hwid_limit(db, agency.id, request.hwid, request.device_name, agency.login_id)
         access_token = create_access_token(
             data={"sub": agency.login_id, "role": "agency", "provider": "local"},
             expires_delta=timedelta(days=7)
@@ -149,7 +227,7 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     # 3. Check Distributor (login_id based)
     distributor = db.query(Distributor).filter(Distributor.login_id == request.email).first()
     if distributor and verify_password(request.password, distributor.password):
-        check_hwid_limit(db, distributor.id, request.hwid)
+        check_hwid_limit(db, distributor.id, request.hwid, request.device_name, distributor.login_id)
         access_token = create_access_token(
             data={"sub": distributor.login_id, "role": "distributor", "provider": "local"},
             expires_delta=timedelta(days=7)

@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Users, Search, Settings, Key, AlertCircle, Save } from "lucide-react";
+import { PcApprovalPanel, UserDevicesModal } from "./PcApproval";
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [editingUser, setEditingUser] = useState(null);
+  const [devicesUser, setDevicesUser] = useState(null); // 승인된 PC 목록 모달
 
   // API Key States
   const [keys, setKeys] = useState({ customer_id: "", access_license: "", secret_key: "" });
@@ -212,7 +214,7 @@ export default function AdminDashboard() {
   };
 
   const handleResetDevices = async (userId) => {
-    if (!confirm("해당 회원의 모든 기기(PC) 등록 정보를 초기화하시겠습니까?\\n(초기화 후 새로운 기기 2대에서 접속이 가능해집니다.)")) return;
+    if (!confirm("해당 회원의 PC 등록 정보(승인된 PC·거절 기록)를 모두 초기화하시겠습니까?\n(초기화 후 새 PC 에서 에이전트로 로그인하면 승인 요청이 다시 들어옵니다.)")) return;
     try {
       const token = localStorage.getItem("mbam_token");
       const res = await fetch(`/api/admin/users/${userId}/reset-devices`, {
@@ -220,7 +222,7 @@ export default function AdminDashboard() {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
-        alert("기기 정보가 성공적으로 초기화되었습니다.");
+        alert("PC 등록이 초기화되었습니다.");
         fetchUsersAndPlans(); // Refresh device count
       } else {
         const errorData = await res.json();
@@ -257,6 +259,11 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      <PcApprovalPanel onChanged={() => fetchUsersAndPlans()} />
+      {devicesUser && (
+        <UserDevicesModal user={devicesUser} onClose={() => setDevicesUser(null)} onChanged={() => fetchUsersAndPlans()} />
+      )}
 
       {/* 요금제 설정 패널 */}
       <div style={{ background: "white", borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden", marginBottom: "2rem" }}>
@@ -582,7 +589,7 @@ export default function AdminDashboard() {
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>플랜</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>라이선스(AI)</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>사용량 / 쿼터</th>
-                <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>기기 등록</th>
+                <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>PC 등록</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600" }}>만료일</th>
                 <th style={{ padding: "1rem 1.5rem", fontWeight: "600", textAlign: "right" }}>관리</th>
               </tr>
@@ -620,8 +627,11 @@ export default function AdminDashboard() {
                   <td style={{ padding: "1rem 1.5rem", color: "#475569", fontSize: "0.9rem" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                         <span style={{ color: (user.device_count || 0) >= 2 ? "#ef4444" : "#475569", fontWeight: "600" }}>
-                            {user.device_count || 0} / 2 대
+                            {user.device_count || 0} / 2 PC
                         </span>
+                        <button onClick={() => setDevicesUser(user)} style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem", background: "#eff6ff", color: "#1d4ed8", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                            보기
+                        </button>
                         {(user.device_count || 0) > 0 && (
                             <button onClick={() => handleResetDevices(user.id)} style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem", background: "#fee2e2", color: "#b91c1c", border: "none", borderRadius: "4px", cursor: "pointer" }}>
                                 초기화

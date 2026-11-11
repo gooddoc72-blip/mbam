@@ -70,6 +70,14 @@ def _load_config() -> dict:
     return cfg
 
 
+PENDING_PREFIX = "[PC 승인 대기]"   # 서버(auth_router)와 같은 접두어
+PC_RETRY_SEC = 30                  # 승인 대기 중 재확인 간격
+
+
+def _device_name() -> str:
+    return (platform.node() or "")[:100]
+
+
 def _agent_id() -> str:
     """이 PC 식별자. 라이선스 HWID가 있으면 재사용, 없으면 호스트명."""
     try:
@@ -833,14 +841,21 @@ class AgentClient:
         self._active = 0        # 실행 중인 작업 수
         self._inflight = 0      # 응답을 기다리는 next-job 요청 수
         self._updating = False  # True 면 새 작업을 받지 않는다(업데이트 적용 직전)
+        self.pending = False    # 관리자 PC 승인 대기 중
 
     async def login(self, client: httpx.AsyncClient) -> bool:
         try:
             r = await client.post(
                 f"{self.cfg['cloud_url']}/api/auth/login",
-                json={"email": self.cfg["email"], "password": self.cfg["password"], "hwid": self.agent_id},
+                json={"email": self.cfg["email"], "password": self.cfg["password"],
+                      "hwid": self.agent_id, "device_name": _device_name()},
                 timeout=20,
             )
+            self.pending = False
+            if r.status_code == 403 and PENDING_PREFIX in r.text:
+                self.pending = True
+                print(f"[agent] PC 승인 대기 중 (agent_id={self.agent_id}) — {PC_RETRY_SEC}초 뒤 재확인")
+                return False
             if r.status_code == 200:
                 self.token = r.json().get("access_token")
                 _AGENT_AUTH["cloud_url"] = self.cfg["cloud_url"]
@@ -860,7 +875,7 @@ class AgentClient:
             while not self.token:
                 if await self.login(client):
                     break
-                await asyncio.sleep(5)
+                await asyncio.sleep(PC_RETRY_SEC if self.pending else 5)
             _confirm_update()
 
             fast_sec = self.cfg.get("fast_poll_sec", 1)
@@ -930,7 +945,8 @@ class AgentClient:
                 try:
                     r = await client.get(
                         f"{self.cfg['cloud_url']}/api/agent/next-job",
-                        params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0"},
+                        params={"agent_id": self.agent_id, "interactive": "1" if interactive else "0",
+                                "dc": "1"},
                         headers={"Authorization": f"Bearer {sent_token}"}, timeout=30,
                     )
                 finally:
@@ -942,6 +958,9 @@ class AgentClient:
                             print(f"[agent:{lane}] 토큰 만료 → 재로그인")
                             self.token = None
                             await self.login(client)
+                    if not self.token:
+                        # 재로그인 실패(승인 해제·대기 등) — 서버를 연타하지 않도록 쉬었다가 재시도
+                        await asyncio.sleep(PC_RETRY_SEC if self.pending else 5)
                     continue
                 job = (r.json() or {}).get("job")
                 if not job:
@@ -1038,13 +1057,20 @@ class AgentClient:
 
 
 def _try_login(cloud_url: str, email: str, password: str):
-    """동기 로그인 검증. 반환: (ok, msg) — ok True=성공 / False=계정 오류 / None=서버 연결 불가."""
+    """동기 로그인 검증. 반환: (ok, msg) — ok True=성공 / False=계정 오류 / None=서버 연결 불가
+    / "pending"=계정은 맞지만 이 PC 가 관리자 승인 대기."""
     try:
         r = httpx.post(f"{(cloud_url or '').rstrip('/')}/api/auth/login",
-                       json={"email": email, "password": password, "hwid": _agent_id()},
+                       json={"email": email, "password": password, "hwid": _agent_id(),
+                             "device_name": _device_name()},
                        timeout=15)
         if r.status_code == 200:
             return True, ""
+        if r.status_code == 403 and PENDING_PREFIX in r.text:
+            try:
+                return "pending", (r.json() or {}).get("detail") or ""
+            except Exception:
+                return "pending", ""
         # 404·5xx 는 계정 오류가 아니라 서버가 내려간 것(배포 중단 등) — 로그인 창을 띄우지 않고
         # 에이전트가 백그라운드에서 재시도하게 둔다.
         if r.status_code == 404 or r.status_code >= 500:
@@ -1112,9 +1138,10 @@ def _prompt_login(cfg: dict) -> dict:
         if ok is False:
             status.config(text=msg, fg="#dc2626")
             return
-        # ok is None(서버 연결 불가)이면 일단 저장 — 에이전트가 이후 자동 재시도
+        # ok is None(서버 연결 불가)·"pending"(PC 승인 대기)이면 일단 저장 — 에이전트가 이후 자동 재시도
         result["email"], result["password"], result["cloud_url"] = email, pw, url
-        result["verified"] = bool(ok)
+        result["verified"] = ok is True
+        result["pending"] = ok == "pending"
         root.destroy()
 
     tk.Button(root, text="로그인 · 저장", command=_save, bg="#2563eb", fg="white",
@@ -1131,6 +1158,19 @@ def _prompt_login(cfg: dict) -> dict:
                           f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[agent] 설정 저장 실패: {e}")
+        if result.get("pending"):
+            try:
+                import tkinter as tk
+                import tkinter.messagebox as mb
+                _r = tk.Tk(); _r.withdraw()
+                mb.showinfo("마케팅연구소 에이전트 - PC 승인 대기",
+                            "로그인 정보가 저장되었습니다.\n\n"
+                            "이 PC 는 아직 관리자 승인 전입니다. 관리자에게 승인 요청이 전달되었고,\n"
+                            "승인되면 에이전트가 자동으로 시작됩니다. (다시 로그인할 필요 없음)\n\n"
+                            f"이 PC 이름: {_device_name() or '-'}")
+                _r.destroy()
+            except Exception:
+                pass
         if result.get("verified"):
             try:
                 import tkinter as tk
