@@ -1,4 +1,5 @@
 "use client";
+import { HAS_HOSPITAL_BLOG, HAS_SHOPPING_BLOG } from "../utils/product";
 import { fetchWithAuth, pollAgentJob } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
@@ -188,6 +189,9 @@ function BlogPostingContent() {
   const [directImages, setDirectImages] = useState("");
   const [insertMap, setInsertMap] = useState(false);   // 네이버 장소(지도) 삽입
   const [mapQuery, setMapQuery] = useState("");         // 삽입할 장소명/주소
+  const [useImageLink, setUseImageLink] = useState(false);     // 사진에 하이퍼링크 걸기
+  const [imageLink, setImageLink] = useState("");              // 사진 클릭 시 이동할 주소
+  const [imageLinkScope, setImageLinkScope] = useState("all"); // "all" | "first"
 
   // 이미지 보관함에서 가져오기 (기본 전체 선택 + 골라담기)
   const [showLibPicker, setShowLibPicker] = useState(false);
@@ -828,6 +832,8 @@ function BlogPostingContent() {
         image_folder_path: imageFolderPath || null,
         insert_map: insertMap,
         map_query: mapQuery,
+        image_link: useImageLink && imageLink.trim() ? imageLink.trim() : null,
+        image_link_scope: imageLinkScope,
         images: imageUploadMode === "direct" ? directImages.split("\n").filter(p => p.trim()) : [],
         post_mode: "manual_text", // We always send generated contents as manual_text now
         generated_contents: generatedContents.map((gc, idx) => {
@@ -946,8 +952,9 @@ function BlogPostingContent() {
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", marginBottom: "-1rem" }}>
         {[
           { href: "/blog-posting", label: "✍️ 블로그 발행 (수동·예약)" },
-          { href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" },
-          { href: "/hospital-blog", label: "🏥 병원 블로그" },
+          // 설치형에 없는 화면은 탭도 숨긴다(누르면 404). 병원 블로그는 블로그 프로판에만 있다.
+          ...(HAS_SHOPPING_BLOG ? [{ href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" }] : []),
+          ...(HAS_HOSPITAL_BLOG ? [{ href: "/hospital-blog", label: "🏥 병원 블로그" }] : []),
           { href: "/blog-schedule", label: "🗓️ 매일 자동 포스팅" },
         ].map(t => {
           const active = pathname === t.href;
@@ -1440,6 +1447,24 @@ function BlogPostingContent() {
               <div style={{ marginTop: "0.7rem" }}>
                 <input type="text" value={mapQuery} onChange={e => setMapQuery(e.target.value)} placeholder="삽입할 장소명 또는 주소 (예: 스타벅스 서면전포역점)" style={{ width: "100%", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                 <p style={{ margin: "0.4rem 0 0", fontSize: "0.82rem", color: "#3b82f6" }}>* 발행 시 에디터에서 해당 장소를 검색해 <b>첫 번째 결과</b>의 지도를 글 맨 아래에 자동 삽입합니다. (매장 위치 안내·지역 SEO에 유용)</p>
+              </div>
+            )}
+          </div>
+
+          {/* 사진 하이퍼링크 */}
+          <div style={{ marginTop: "1rem", padding: "1rem", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useImageLink ? "#15803d" : "#334155" }}>
+              <input type="checkbox" checked={useImageLink} onChange={e => setUseImageLink(e.target.checked)} style={{ transform: "scale(1.2)" }} />
+              🔗 사진에 링크 걸기 (사진을 누르면 이 주소로 이동)
+            </label>
+            {useImageLink && (
+              <div style={{ marginTop: "0.7rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <input type="text" value={imageLink} onChange={e => setImageLink(e.target.value)} placeholder="이동할 주소 (예: https://booking.naver.com/... 또는 홈페이지 주소)" style={{ flex: "1 1 320px", minWidth: 0, padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
+                <select value={imageLinkScope} onChange={e => setImageLinkScope(e.target.value)} style={{ padding: "0.8rem", border: "1px solid #cbd5e1" }}>
+                  <option value="all">모든 사진</option>
+                  <option value="first">첫 사진만</option>
+                </select>
+                <p style={{ margin: "0.2rem 0 0", width: "100%", fontSize: "0.82rem", color: "#16a34a" }}>* 발행할 때 사진마다 링크를 넣습니다. 예약·홈페이지·스마트스토어 주소를 넣으세요. 외부 링크가 많으면 노출에 불리할 수 있어 <b>첫 사진만</b>도 고를 수 있습니다.</p>
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
-import { IS_BLOG_EDITION } from "../utils/product";
+import { IS_BLOG_EDITION, IS_BLOG_PRO } from "../utils/product";
 import { useState, useEffect } from "react";
 import { Save, Key, AlertCircle } from "lucide-react";
 
@@ -36,11 +36,44 @@ export default function SettingsPage() {
     const [postSaving, setPostSaving] = useState("");
     const [postMessage, setPostMessage] = useState(null);
 
+    // 블로그 '내 AI 지시문' (블로그 전용판) — 공통 + 홍보 유형별
+    const [blogPrompts, setBlogPrompts] = useState({});   // { blog_extra: {label, prompt}, ... }
+    const [blogSaving, setBlogSaving] = useState("");
+    const [blogMessage, setBlogMessage] = useState(null);
+
     useEffect(() => {
         fetchAiKeys();
-        fetchCmtPrompt();
-        fetchPostPrompts();
+        if (IS_BLOG_EDITION) {
+            fetchBlogPrompts();
+        } else {
+            fetchCmtPrompt();
+            fetchPostPrompts();
+        }
     }, []);
+
+    const fetchBlogPrompts = async () => {
+        try {
+            const res = await fetchWithAuth("/api/auto_post/blog-prompt");
+            if (res.ok) {
+                const d = await res.json();
+                setBlogPrompts(d.items || {});
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    const saveBlogPrompt = async (key) => {
+        setBlogSaving(key); setBlogMessage(null);
+        try {
+            const res = await fetchWithAuth("/api/auto_post/blog-prompt", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key, prompt: blogPrompts[key]?.prompt || "" }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok) setBlogMessage({ type: "success", text: d.message || "저장되었습니다." });
+            else setBlogMessage({ type: "error", text: d.detail || `실패 (HTTP ${res.status})` });
+        } catch (e) { setBlogMessage({ type: "error", text: "서버와 연결할 수 없습니다: " + e.message }); }
+        setBlogSaving("");
+    };
 
     const fetchPostPrompts = async () => {
         try {
@@ -298,6 +331,55 @@ export default function SettingsPage() {
                 ))}
             </div>
             </>)}
+
+            {/* 블로그 '내 AI 지시문' — 블로그 전용판 전용 */}
+            {IS_BLOG_EDITION && (
+            <div style={{
+                background: "white", borderRadius: "16px", padding: "2rem",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
+                border: "1px solid rgba(226, 232, 240, 0.8)"
+            }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem", paddingBottom: "1rem", borderBottom: "1px solid #e2e8f0" }}>
+                    <Key size={24} color="#7c3aed" />
+                    <h2 style={{ fontSize: "1.2rem", fontWeight: "600", color: "#334155", margin: 0 }}>내 AI 지시문 (블로그 원고)</h2>
+                </div>
+
+                <p style={{ color: "#64748b", fontSize: "0.95rem", marginBottom: "1rem", lineHeight: 1.7 }}>
+                    AI 가 블로그 원고를 쓸 때 기본 규칙 뒤에 <b>추가 지시</b>로 붙습니다. 말투·분량·꼭 넣을 문구·마무리 인사·금지 표현 등을 적어 주세요.
+                    <b> 모든 글 공통</b>은 항상 적용되고, 유형별 지시는 발행 화면에서 그 홍보 유형을 골랐을 때만 붙습니다. 비워 두면 기본 규칙만 씁니다.
+                </p>
+
+                {blogMessage && (
+                    <div style={{
+                        padding: "0.9rem 1rem", marginBottom: "1rem", borderRadius: "8px",
+                        background: blogMessage.type === "success" ? "#f0fdf4" : "#fef2f2",
+                        color: blogMessage.type === "success" ? "#166534" : "#991b1b",
+                        border: `1px solid ${blogMessage.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                        display: "flex", alignItems: "center", gap: "0.5rem"
+                    }}>
+                        <AlertCircle size={18} />{blogMessage.text}
+                    </div>
+                )}
+
+                {Object.entries(blogPrompts).filter(([key]) => key !== "blog_extra_hospital" || IS_BLOG_PRO).map(([key, item]) => (
+                    <div key={key} style={{ marginBottom: "1.5rem" }}>
+                        <label style={{ display: "block", fontWeight: 600, color: "#475569", marginBottom: "0.5rem", fontSize: "0.95rem" }}>
+                            {item.label}
+                        </label>
+                        <textarea value={item.prompt || ""} rows={key === "blog_extra" ? 6 : 4}
+                            placeholder={key === "blog_extra"
+                                ? "예) 존댓말로 쓰고 문단은 3~4줄로 짧게. 글 마지막에 '○○점 예약은 네이버 예약에서 가능합니다' 문구를 넣어 주세요. '최고', '무조건' 같은 단정 표현은 쓰지 마세요."
+                                : "예) 가격·주차·영업시간 정보를 꼭 포함해 주세요."}
+                            onChange={e => setBlogPrompts(p => ({ ...p, [key]: { ...p[key], prompt: e.target.value } }))}
+                            style={{ width: "100%", padding: "0.9rem", border: "1px solid #cbd5e1", borderRadius: "8px", boxSizing: "border-box", fontSize: "0.9rem", lineHeight: 1.7, fontFamily: "inherit", resize: "vertical" }} />
+                        <button onClick={() => saveBlogPrompt(key)} disabled={blogSaving === key}
+                            style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.7rem", padding: "0.7rem 1.4rem", background: blogSaving === key ? "#94a3b8" : "#7c3aed", color: "white", border: "none", borderRadius: "8px", fontWeight: 600, cursor: blogSaving === key ? "wait" : "pointer" }}>
+                            <Save size={18} />{blogSaving === key ? "저장 중..." : "저장"}
+                        </button>
+                    </div>
+                ))}
+            </div>
+            )}
 
             {/* 계정 동기화 — 여러 PC 에서 같은 네이버 계정 목록 쓰기 */}
             <div style={{

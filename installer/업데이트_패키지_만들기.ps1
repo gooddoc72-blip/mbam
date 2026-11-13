@@ -15,6 +15,8 @@
 #    블로그 전용판이면 -Product blog 를 붙인다(페이로드도 build_blog_payload.ps1 로 만든 것).
 #         powershell -File build_blog_payload.ps1 -SkipRuntime -Version 1.0.1
 #         powershell -File 업데이트_패키지_만들기.ps1 -Product blog -Version 1.0.1
+#    블로그 프로판(병원 포함)은 -Product blog_pro, 페이로드는 build_blog_payload.ps1 -Tier pro 로 만든 것.
+#    ⚠ 기본판·프로판은 같은 payload_blog 폴더를 쓰므로 하나씩 차례로 빌드→패키지해야 한다.
 #    3) 나오는 두 파일을 서버에 올린다 (배포 안내는 실행 끝에 출력된다)
 #
 #  ⚠ -Version 은 반드시 페이로드를 만들 때 준 값과 같아야 한다.
@@ -23,7 +25,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$Version,
   [string]$Notes = "",
-  [ValidateSet("cafe", "blog", "mbam")]
+  [ValidateSet("cafe", "blog", "blog_pro", "mbam")]
   [string]$Product = "cafe"
 )
 
@@ -33,11 +35,13 @@ $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PayloadName = switch ($Product) {
   "cafe"  { "payload_cafe" }
   "blog"  { "payload_blog" }
+  "blog_pro" { "payload_blog" }   # 기본판과 같은 폴더 — version.json 의 product 로 등급을 확인한다
   default { "payload" }
 }
 $BuildScript = switch ($Product) {
   "cafe"  { "build_cafe_payload.ps1" }
   "blog"  { "build_blog_payload.ps1" }
+  "blog_pro" { "build_blog_payload.ps1 -Tier pro" }
   default { "build_payload.ps1" }
 }
 $Payload = Join-Path $Here $PayloadName
@@ -50,7 +54,13 @@ $verFile = Join-Path $Payload "version.json"
 if (-not (Test-Path $verFile)) {
   throw "$PayloadName\version.json 이 없습니다. $BuildScript -Version $Version 으로 다시 만드세요."
 }
-$payloadVer = (Get-Content $verFile -Raw | ConvertFrom-Json).version
+$verJson    = Get-Content $verFile -Raw | ConvertFrom-Json
+$payloadVer = $verJson.version
+# 블로그 기본/프로는 같은 페이로드 폴더를 쓰므로, 지금 들어 있는 게 어느 등급인지 확인한다.
+# (기본판 페이로드를 blog_pro 채널에 올리면 프로 고객의 병원 블로그가 사라진다)
+if ($Product -like "blog*" -and $verJson.product -and $verJson.product -ne $Product) {
+  throw "등급 불일치 — 페이로드=$($verJson.product), 요청=$Product`n  $BuildScript 로 페이로드를 다시 만드세요."
+}
 if ($payloadVer -ne $Version) {
   throw "버전 불일치 — 페이로드=$payloadVer, 요청=$Version`n  $BuildScript -SkipRuntime -Version $Version 으로 페이로드를 다시 만드세요."
 }

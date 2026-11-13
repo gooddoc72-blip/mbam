@@ -295,11 +295,92 @@ class BlogService:
         except Exception:
             pass
 
+    @staticmethod
+    def normalize_link(url: str) -> str:
+        """사진 링크 주소 정리 — 공백 제거, 스킴이 없으면 https:// 를 붙인다. 쓸 수 없는 값이면 ''."""
+        u = (url or "").strip()
+        if not u or any(c in u for c in " \t\r\n<>\"'"):
+            return ""
+        if re.match(r"^(javascript|data|vbscript|file):", u, re.I):
+            return ""
+        if "://" in u and not re.match(r"^https?://", u, re.I):
+            return ""
+        if not re.match(r"^https?://", u, re.I):
+            u = "https://" + u
+        return u
+
+    async def link_last_image(self, frame, url: str) -> bool:
+        """방금 넣은(마지막) 사진에 하이퍼링크를 건다.
+
+        SE ONE 에서 사진을 선택하면 속성 툴바에 '링크'(data-name="text-link") 버튼이 생긴다.
+        → 버튼 클릭 → 링크 입력칸에 주소 입력 → 적용. 실패해도 발행은 계속돼야 하므로
+        예외를 밖으로 던지지 않고 성공 여부만 돌려준다.
+        ⚠ Escape 키는 쓰지 않는다 — SE3 에서 '작성 취소/나가기'를 유발한 전례가 있다.
+        """
+        import asyncio
+        try:
+            comp = frame.locator(".se-component.se-image").last
+            if await comp.count() == 0:
+                return False
+            target = comp.locator(".se-image-resource, img").first
+            await target.click(timeout=3000)
+            await asyncio.sleep(0.7)
+
+            async def _first_visible(sel):
+                loc = frame.locator(sel)
+                for i in range(await loc.count()):
+                    el = loc.nth(i)
+                    try:
+                        if await el.is_visible():
+                            return el
+                    except Exception:
+                        pass
+                return None
+
+            btn = await _first_visible('button[data-name="text-link"], button.se-link-toolbar-button')
+            if not btn:
+                logger.warning("[BlogService] 사진 링크: 링크 버튼을 찾지 못했습니다")
+                return False
+            await btn.click(timeout=2000)
+            await asyncio.sleep(0.6)
+
+            inp = await _first_visible(
+                '.se-custom-layer-link-input, input[class*="link-input"], '
+                '.se-custom-layer input[type="text"], [class*="custom-layer"] input')
+            if not inp:
+                logger.warning("[BlogService] 사진 링크: 링크 입력칸을 찾지 못했습니다")
+                return False
+            await inp.click(timeout=2000)
+            await inp.fill(url)
+            await asyncio.sleep(0.3)
+            apply = await _first_visible(
+                '.se-custom-layer-link-apply-button, [class*="custom-layer"] button[class*="apply"], '
+                '[class*="custom-layer"] button[class*="confirm"]')
+            if apply:
+                await apply.click(timeout=2000)
+            else:
+                await inp.press("Enter")
+            await asyncio.sleep(0.8)
+
+            # 적용 확인 — 사진 컴포넌트 안에 주소가 들어갔는지 본다
+            html = await comp.evaluate("el => el.outerHTML")
+            bare = url.split("://", 1)[-1].rstrip("/")
+            ok = bare in (html or "")
+            if not ok:
+                logger.warning("[BlogService] 사진 링크: 입력은 했지만 사진에 링크가 확인되지 않습니다")
+            return ok
+        except Exception as e:
+            logger.warning(f"[BlogService] 사진 링크 실패(무시하고 계속): {e}")
+            return False
+
     async def write_post(self, frame, title: str, content: str, images: list = None, speed_mode: str = "normal", speed_multiplier: float = 1.0,
-                         strict_markers: bool = False):
+                         strict_markers: bool = False, image_link: str = None, image_link_scope: str = "all"):
         """원고 타이핑 (스텔스 적용, 속도 조절 가능, 중간 이미지 삽입 지원)
-        strict_markers=True: 원고의 사진 표시([이미지:N])대로만 넣고 남는 사진은 붙이지 않는다."""
+        strict_markers=True: 원고의 사진 표시([이미지:N])대로만 넣고 남는 사진은 붙이지 않는다.
+        image_link: 사진에 걸 링크 주소. image_link_scope="all"(모든 사진) | "first"(첫 사진만)."""
         import os, asyncio, re
+        image_link = self.normalize_link(image_link)
+        link_stat = {"tried": 0, "ok": 0}
 
         # 본문 줄바꿈/단락 가공 (블로그·카페 공용 로직)
         content = StealthExecutor.format_body(content)
@@ -369,6 +450,11 @@ class BlogService:
                         break
                     await asyncio.sleep(0.5)
             await asyncio.sleep(1.5)
+            # 사진 하이퍼링크 — 모든 사진 또는 첫 사진에만
+            if image_link and (image_link_scope != "first" or link_stat["tried"] == 0):
+                link_stat["tried"] += 1
+                if await self.link_last_image(frame, image_link):
+                    link_stat["ok"] += 1
             # 포커스를 문서 맨 끝으로 이동
             await frame.locator(self.selectors["body"]).first.evaluate("""el => {
                 const selection = window.getSelection();
@@ -413,6 +499,11 @@ class BlogService:
         _img_after = await _img_count()
         if _img_before >= 0 and _img_after >= 0 and _img_after - _img_before < inserted:
             logger.warning(f"[BlogService] ⚠️ 사진 {inserted}장을 넣었는데 본문에는 {_img_after - _img_before}장만 보입니다 — 글에서 확인해 주세요")
+
+        if image_link and link_stat["tried"]:
+            logger.info(f"[BlogService] 사진 링크 {link_stat['ok']}/{link_stat['tried']}장 적용 → {image_link}")
+            if link_stat["ok"] < link_stat["tried"]:
+                logger.warning("[BlogService] ⚠️ 일부 사진에 링크가 걸리지 않았습니다 — 발행된 글에서 확인해 주세요")
 
         print("✅ [BlogService] 원고 타이핑(이미지 교차) 완료")
 

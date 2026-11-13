@@ -28,8 +28,23 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 WEB_DIR = APP_DIR / "mbam-web"
 
-APP_NAME = "블로그 마케팅"
-PRODUCT = "blog"
+def _read_tier() -> str:
+    """설치본 등급 — build_blog_payload.ps1 -Tier 가 version.json 에 적어 둔다. 없으면 기본판."""
+    try:
+        import json
+        with open(APP_DIR / "version.json", "r", encoding="utf-8-sig") as f:
+            t = str(json.load(f).get("tier") or "").strip().lower()
+        return "pro" if t == "pro" else "basic"
+    except Exception:
+        return "basic"
+
+
+TIER = _read_tier()                      # basic | pro(병원 블로그 포함)
+APP_NAME = "블로그 마케팅 프로" if TIER == "pro" else "블로그 마케팅 기본"
+PRODUCT = "blog"                         # 백엔드·프론트 프로파일 (두 등급 공통)
+# 인증·업데이트 채널 코드 — 등급별로 승인을 따로 받는다.
+# 기본판은 기존 코드 'blog' 를 그대로 써서 이미 승인된 PC 가 다시 승인받지 않아도 된다.
+LICENSE_PRODUCT = "blog_pro" if TIER == "pro" else "blog"
 
 # 설정·로그는 사용자 폴더에 둔다. 설치 폴더(Program Files)는 일반 사용자 권한으로
 # 쓸 수 없고, 재설치·업그레이드 때 지워질 수 있기 때문이다.
@@ -174,6 +189,7 @@ def _base_env() -> dict:
     env["PYTHONIOENCODING"] = "utf-8"
     # 블로그 전용판 — 백엔드가 블로그 관련 라우터만 마운트한다.
     env["MBAM_PRODUCT"] = PRODUCT
+    env["MBAM_BLOG_TIER"] = TIER   # 백엔드: 기본판이면 병원 블로그 생성 차단
     # 보안키 주입 — 없으면 백엔드가 JWT_SECRET 없다고 기동을 거부한다.
     env.update(_ensure_secrets())
     # 설치형: 동봉된 Chromium(Playwright) 경로를 알려줌
@@ -200,6 +216,7 @@ def start_backend():
 def start_frontend():
     env = _base_env()
     env["NEXT_PUBLIC_PRODUCT"] = PRODUCT
+    env["NEXT_PUBLIC_BLOG_TIER"] = TIER   # 개발 서버 폴백용 (빌드본은 빌드 때 구워짐)
     # 빌드본은 /api 프록시 대상이 이미 구워져 있지만(routes-manifest),
     # 개발 서버 폴백으로 뜰 때를 위해 런타임에도 넣어둔다.
     env["BACKEND_URL"] = f"http://127.0.0.1:{BACKEND_PORT}"
@@ -361,7 +378,7 @@ def _license_server() -> str:
 def _check_update():
     """새 버전이 있으면 물어보고 바뀜 부분만 교체한다. (구현은 licensing/update_prompt.py 공용)"""
     from licensing.update_prompt import run_update_check
-    run_update_check(APP_DIR, product=PRODUCT, app_name=APP_NAME, server=_license_server())
+    run_update_check(APP_DIR, product=LICENSE_PRODUCT, app_name=APP_NAME, server=_license_server())
 
 
 # ── 로그 읽기 (실패 원인 표시용) ────────────────────────────────────────
@@ -503,7 +520,7 @@ def main():
     #    인증코드 없이 이 PC 의 기기번호로 승인 여부를 확인하고,
     #    미등록이면 관리자에게 승인을 요청하는 창이 뜬다.
     from blog_auth_gate import run_device_auth_gate
-    if not run_device_auth_gate(product=PRODUCT, app_title=APP_NAME):
+    if not run_device_auth_gate(product=LICENSE_PRODUCT, app_title=APP_NAME):
         return
 
     # 1-2) 업데이트 확인 — 반드시 서버를 띄우기 '전' 에 한다.

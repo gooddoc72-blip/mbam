@@ -178,6 +178,8 @@ class AutoPostRequest(BaseModel):
     sub_keywords: Optional[List[str]] = None  # 서브(연관) 키워드 최대 5개 — 본문에 자연스럽게 녹임
     insert_map: Optional[bool] = False        # 블로그 글에 네이버 장소(지도) 삽입
     map_query: Optional[str] = None           # 삽입할 장소명/주소
+    image_link: Optional[str] = None          # 블로그 사진에 걸 하이퍼링크 주소 (비우면 안 건다)
+    image_link_scope: Optional[str] = "all"   # "all"(모든 사진) | "first"(첫 사진만)
     keep_image_markers: Optional[bool] = False  # 업로드 원고: 본문의 [이미지] 자리를 그대로 두고 폴더 사진을 넣는다
     photo_layout: Optional[str] = "content"     # 카페 사진 배치: "content"(AI가 원고 내용에 맞춰) | "sequence"(순서대로)
 
@@ -380,6 +382,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     use_tethering=req.use_tethering,
                     insert_map=req.insert_map,
                     map_query=req.map_query,
+                    image_link=req.image_link,
+                    image_link_scope=req.image_link_scope or "all",
                     photo_layout=(getattr(req, "photo_layout", None) or "content"),
                     log_callback=log
                 )
@@ -406,6 +410,8 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     generate_card_news=req.generate_card_news,
                     insert_map=req.insert_map,
                     map_query=req.map_query,
+                    image_link=req.image_link,
+                    image_link_scope=req.image_link_scope or "all",
                     photo_layout=(getattr(req, "photo_layout", None) or "content"),
                 )
             if result.get("success"):
@@ -493,6 +499,18 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
         task_status_store[task_id]["status"] = "failed"
 
 
+def _require_hospital_allowed(req) -> None:
+    """블로그 기본판(설치형)은 병원 블로그가 없는 등급이다 — 화면을 우회한 직접 호출도 막는다.
+    풀버전(웹)·블로그 프로판은 통과."""
+    import os
+    if (os.getenv("MBAM_PRODUCT", "") or "").strip().lower() != "blog":
+        return
+    if (os.getenv("MBAM_BLOG_TIER", "") or "").strip().lower() == "pro":
+        return
+    if req.promo_type == "hospital" or req.prompt_category == "hospital":
+        raise HTTPException(status_code=403, detail="병원 블로그는 '블로그 마케팅 프로'에서 사용할 수 있습니다.")
+
+
 @router.post("")
 @router.post("/")
 async def trigger_auto_post(req: AutoPostRequest,
@@ -500,6 +518,7 @@ async def trigger_auto_post(req: AutoPostRequest,
                             _q: dict = Depends(consume_generation_quota),
                             db: Session = Depends(get_db)):
     import uuid
+    _require_hospital_allowed(req)
     # 일일 자동화 한도(관리자 설정값) 집행 — 초과 시 403
     enforce_daily_for_request(db, _q, req)
 
@@ -857,6 +876,7 @@ async def generate_multiple_contents(req: AutoPostRequest, _q: dict = Depends(co
     """원고 생성은 30초 이상 걸릴 수 있어 백그라운드 작업으로 처리(프록시 30초 타임아웃 회피).
     프론트는 반환된 task_id 로 /status/{task_id} 폴링 후 result.generated_contents 를 사용한다."""
     import uuid
+    _require_hospital_allowed(req)
     task_id = str(uuid.uuid4())
     task_status_store[task_id] = {"status": "running", "logs": ["원고 생성 중..."]}
 
@@ -891,3 +911,48 @@ async def get_active_tasks():
             title = data.get("logs", ["알 수 없는 작업"])[0] if data.get("logs") else "알 수 없는 작업"
             active.append({"task_id": t_id, "title": title})
     return {"tasks": active}
+
+
+# ── 블로그 '내 AI 지시문' (설치형 블로그 전용판 전용) ─────────────────────────
+# /api/settings 는 관리자 전용이라 설치형 고객(로컬 세션)이 쓸 수 없어 여기 둔다(카페 post-prompt 와 같은 이유).
+# 저장소(read_prompts)는 백엔드 전역이다. 설치형은 백엔드가 고객 PC 에 있어 그 고객 것뿐이지만,
+# 웹(클라우드)에서는 전 고객 공용이 되므로 블로그 전용판이 아니면 막는다.
+def _require_blog_edition():
+    import os
+    if (os.getenv("MBAM_PRODUCT", "") or "").strip().lower() != "blog":
+        raise HTTPException(status_code=404, detail="블로그 전용판에서만 쓸 수 있는 설정입니다.")
+
+
+@router.get("/blog-prompt", summary="블로그 '내 AI 지시문' 조회")
+async def get_blog_extra_prompt(current_user: dict = Depends(get_current_user)):
+    _require_blog_edition()
+    from mbam_nextgen.backend.routers.settings import read_prompts
+    from mbam_nextgen.services.soul import SoulRewriter
+    data = read_prompts() or {}
+    items = {}
+    for key, label in SoulRewriter.BLOG_EXTRA_KEYS.items():
+        v = data.get(key)
+        items[key] = {"label": label, "prompt": v if isinstance(v, str) else ""}
+    return {"items": items}
+
+
+@router.post("/blog-prompt", summary="블로그 '내 AI 지시문' 저장")
+async def save_blog_extra_prompt(body: dict, current_user: dict = Depends(get_current_user)):
+    _require_blog_edition()
+    from mbam_nextgen.backend.routers.settings import read_prompts, write_prompts
+    from mbam_nextgen.services.soul import SoulRewriter
+    key = (body.get("key") or "").strip()
+    if key not in SoulRewriter.BLOG_EXTRA_KEYS:
+        raise HTTPException(status_code=400, detail="알 수 없는 항목입니다.")
+    p = (body.get("prompt") or "").strip()
+    if len(p) > 3000:
+        raise HTTPException(status_code=400, detail="지시문은 3,000자 이내로 적어 주세요.")
+    data = read_prompts() or {}
+    if p:
+        data[key] = p
+    else:
+        data.pop(key, None)
+    write_prompts(data)
+    label = SoulRewriter.BLOG_EXTRA_KEYS[key]
+    return {"success": True,
+            "message": f"'{label}' 지시문을 저장했습니다." if p else f"'{label}' 지시문을 비웠습니다(기본 규칙만 사용)."}

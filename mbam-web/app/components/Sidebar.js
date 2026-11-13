@@ -25,10 +25,11 @@ import {
     Image,
     Folder,
     BookOpen,
-    Globe
+    Globe,
+    Hospital
 } from 'lucide-react';
 import { fetchWithAuth } from "../utils/api";
-import { IS_CAFE_EDITION, IS_BLOG_EDITION, IS_STANDALONE, PRODUCT_NAME, BRAND_COLOR, PRODUCT_TAGLINE } from "../utils/product";
+import { IS_CAFE_EDITION, IS_BLOG_EDITION, IS_BLOG_PRO, IS_STANDALONE, PRODUCT_NAME, BRAND_COLOR, PRODUCT_TAGLINE } from "../utils/product";
 
 const MENU_ITEMS_FULL = [
     { name: "홈", path: "/dashboard", icon: LayoutDashboard },
@@ -138,6 +139,8 @@ const MENU_ITEMS_BLOG = [
             { name: "형태소 분석", path: "/blog-analysis", icon: Search },
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
             { name: "플레이스 블로그", path: "/place-blog", icon: MapPin },
+            // 병원 블로그 — 블로그 프로판에만 (기본판 빌드에는 페이지 자체가 없다)
+            ...(IS_BLOG_PRO ? [{ name: "병원 블로그", path: "/hospital-blog", icon: Hospital }] : []),
             { name: "소통 & 이웃", path: "/communication", icon: HeartHandshake },
             { name: "이미지 세탁소", path: "/image-wash", icon: Image },
             { name: "구글 블로그스팟", path: "/blogspot", icon: FileText },
@@ -264,7 +267,8 @@ export default function Sidebar() {
                     {/* 사이드바 260px - 좌우 여백 48px = 212px 안에 들어가야 한다.
                         이름이 길면 두 줄로 접히므로 nowrap 으로 막아둔다. */}
                     <h1 style={{
-                        fontSize: IS_STANDALONE ? "1.75rem" : "2.1rem",
+                        // 블로그판은 '기본/프로'가 붙어 이름이 길다 → 한 단계 작게
+                        fontSize: IS_BLOG_EDITION ? "1.5rem" : IS_STANDALONE ? "1.75rem" : "2.1rem",
                         fontWeight: "800", color: "#1e293b", margin: 0,
                         letterSpacing: "-0.5px", whiteSpace: "nowrap",
                     }}>

@@ -1,4 +1,5 @@
 "use client";
+import { HAS_HOSPITAL_BLOG, HAS_SHOPPING_BLOG } from "../utils/product";
 import { useState, useEffect } from "react";
 import { fetchWithAuth } from "../utils/api";
 import Link from "next/link";
@@ -231,8 +232,9 @@ export default function BlogSchedulePage() {
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", borderBottom: "2px solid #e2e8f0" }}>
         {[
           { href: "/blog-posting", label: "✍️ 블로그 발행 (수동·예약)" },
-          { href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" },
-          { href: "/hospital-blog", label: "🏥 병원 블로그" },
+          // 설치형에 없는 화면은 탭도 숨긴다(누르면 404). 병원 블로그는 블로그 프로판에만 있다.
+          ...(HAS_SHOPPING_BLOG ? [{ href: "/shopping-partners-blog", label: "🛍 쇼핑파트너스 블로그" }] : []),
+          ...(HAS_HOSPITAL_BLOG ? [{ href: "/hospital-blog", label: "🏥 병원 블로그" }] : []),
           { href: "/blog-schedule", label: "🗓️ 매일 자동 포스팅" },
         ].map(t => {
           const active = pathname === t.href;

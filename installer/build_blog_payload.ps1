@@ -9,11 +9,20 @@
 #
 #  사용:
 #    cd "...\01 마케팅 연구소\installer"
-#    powershell -ExecutionPolicy Bypass -File build_blog_payload.ps1
+#    powershell -ExecutionPolicy Bypass -File build_blog_payload.ps1              (기본판)
+#    powershell -ExecutionPolicy Bypass -File build_blog_payload.ps1 -Tier pro    (프로판 = 병원 블로그 포함)
+#
+#  기본판/프로판 차이
+#    - 프로판만 병원 블로그(/hospital-blog) 화면·메뉴·'병원' 지시문이 들어간다
+#    - 인증 제품 코드: 기본=blog, 프로=blog_pro (승인을 따로 받는다 — 기본판 승인으로는 프로판이 안 열림)
+#    - 설치 폴더·포트·AppId 는 같다 → 프로판을 깔면 기본판이 프로판으로 교체(업그레이드)된다
 #
 #  필요: 인터넷 연결(런타임 다운로드), 빌드 PC 에 Node/npm 설치(프론트 빌드용)
 # ============================================================
 param(
+  # 제품 등급: basic(블로그 마케팅 기본) | pro(블로그 마케팅 프로 — 병원 블로그 포함)
+  [ValidateSet("basic","pro")]
+  [string]$Tier          = "basic",
   [string]$PythonVersion = "3.12.8",
   [string]$PbsTag        = "20241219",   # python-build-standalone 릴리스 태그
   [string]$NodeVersion   = "20.18.1",
@@ -199,6 +208,8 @@ $dropPages = @("dashboard","billing","cafe-auto","cafe-image-wash","content-imag
                "login","signup",        # 설치형은 회원가입·로그인 없이 바로 사용
                "next_api")              # 아무 데서도 부르지 않는 옛 라우트. 백엔드 주소가
                                         # 8000 으로 박혀 있어 이 제품(8020)에는 맞지도 않는다.
+# 프로판은 병원 블로그를 남긴다 (blog-posting 화면을 재export 하므로 별도 의존성 없음)
+if ($Tier -eq "pro") { $dropPages = $dropPages | Where-Object { $_ -ne "hospital-blog" } }
 foreach ($d in $dropPages) {
   $p = Join-Path $WebStage "app\$d"
   if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Host "  - 제외: app\$d" }
@@ -209,6 +220,7 @@ Write-Host "[3/7] 프론트엔드(Next.js) 블로그 빌드..." -ForegroundColor
 # NEXT_PUBLIC_PRODUCT 는 번들에 인라인되고, BACKEND_URL 은 rewrites 로
 # routes-manifest.json 에 구워진다 → 둘 다 반드시 빌드 시점에 설정해야 한다.
 $env:NEXT_PUBLIC_PRODUCT = "blog"
+$env:NEXT_PUBLIC_BLOG_TIER = $Tier   # basic | pro — 메뉴·탭·제품명이 여기서 갈린다
 $env:BACKEND_URL = "http://127.0.0.1:$BackendPort"
 # 이전 산출물을 지우고 빌드 → 성공 여부를 BUILD_ID 존재로 판정한다.
 # ($LASTEXITCODE 는 이 스크립트의 출력을 파일로 리다이렉트하면 npm 의 경고(stderr)를
@@ -348,12 +360,15 @@ Write-Host "[6/7] license_config.json 작성..." -ForegroundColor Yellow
 @{ server = $LicenseServer } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Payload "license_config.json")
 
 # 설치본의 현재 버전 — 런처가 이 값을 서버 최신 버전과 비교해 업데이트 여부를 정한다.
+# product 는 인증·업데이트 채널 코드다 (기본=blog, 프로=blog_pro). 런처가 이 값을 읽는다.
+$productCode = if ($Tier -eq "pro") { "blog_pro" } else { "blog" }
 @{
-  product  = "blog"
+  product  = $productCode
+  tier     = $Tier
   version  = $Version
   built_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
 } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Payload "version.json")
-Write-Host "  version.json = $Version"
+Write-Host "  version.json = $Version ($productCode)"
 
 if (Test-Path (Join-Path $Here "blog.ico")) { Copy-Item (Join-Path $Here "blog.ico") $Payload }
 elseif (Test-Path (Join-Path $Here "mbam.ico")) { Copy-Item (Join-Path $Here "mbam.ico") (Join-Path $Payload "blog.ico") }
@@ -371,10 +386,10 @@ $isccCandidates = @(
     "C:\Program Files\Inno Setup 6\ISCC.exe"
 )
 $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($iscc) { Write-Host "  & `"$iscc`" blog.iss" }
+if ($iscc) { Write-Host "  & `"$iscc`" /DTier=$Tier blog.iss" }
 else {
     Write-Host "  (Inno Setup 6 을 찾지 못했습니다 — https://jrsoftware.org/isdl.php 에서 설치하세요)" -ForegroundColor Red
 }
 Write-Host ""
 Write-Host "※ 인증은 기기 승인 방식입니다(인증코드 없음)." -ForegroundColor Yellow
-Write-Host "   고객이 실행 → [승인 요청] → 관리자_승인도구.exe 에서 '블로그 마케팅' 행을 승인하면 열립니다."
+Write-Host "   고객이 실행 → [승인 요청] → 관리자_승인도구.exe 에서 '$productCode' 제품 행을 승인하면 열립니다."

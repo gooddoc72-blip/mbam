@@ -1269,7 +1269,9 @@ class WorkflowOrchestrator:
                 editor_frame, blog_title, blog_content,
                 images=washed_images,
                 speed_mode=speed_mode, speed_multiplier=speed_multiplier,
-                strict_markers=_bstrict
+                strict_markers=_bstrict,
+                image_link=kwargs.get("image_link"),
+                image_link_scope=kwargs.get("image_link_scope") or "all",
             )
 
             # 6.5 지도(장소) 삽입 — 본문 작성 후 글 하단에 추가

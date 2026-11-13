@@ -1,18 +1,30 @@
 ; ============================================================
 ;  블로그 마케팅 프로그램 - Inno Setup 설치 스크립트 (블로그 자동화 전용판)
 ;  빌드 전 반드시 build_blog_payload.ps1 을 먼저 실행해 payload_blog\ 를 생성하세요.
-;  컴파일: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" blog.iss
+;  컴파일: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" blog.iss              (기본판)
+;          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DTier=pro blog.iss    (프로판 — 병원 블로그 포함)
+;  ⚠ 페이로드도 같은 등급으로 빌드해야 한다: build_blog_payload.ps1 -Tier pro
+;  기본판·프로판은 AppId·설치폴더가 같다 → 프로판을 설치하면 기본판이 프로판으로 교체된다.
 ;
 ;  풀버전(mbam.iss)·카페 전용판(cafe.iss)과 AppId·설치폴더·시작메뉴·포트가 모두 달라서
 ;  한 PC 에 셋 다 설치돼 있어도 서로를 덮어쓰거나 충돌하지 않습니다.
 ;  실행 시 크롤링 프로그램과 같은 '기기 승인' 인증을 거칩니다(인증코드 없음).
 ; ============================================================
 
-#define MyAppName "블로그 마케팅"
+#ifndef Tier
+  #define Tier "basic"
+#endif
+#if Tier == "pro"
+  #define MyAppName "블로그 마케팅 프로"
+  #define OutName "BlogMarketingPro_Setup_"
+#else
+  #define MyAppName "블로그 마케팅 기본"
+  #define OutName "BlogMarketing_Setup_"
+#endif
 ; ⚠ build_blog_payload.ps1 의 -Version 과 반드시 같아야 한다.
 ;   이 값이 version.json 으로 설치본에 들어가고, 런처가 서버의 최신 버전과 비교한다.
 ;   어긋나면 방금 설치한 고객에게도 업데이트 안내가 뜬다.
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "마케팅연구소"
 ; 런처는 동봉된 pythonw.exe 로 blog_launcher.py 를 실행 (별도 exe 빌드 불필요)
 #define LauncherExe "runtime\python\pythonw.exe"
@@ -32,10 +44,10 @@ AppPublisher={#MyAppPublisher}
 ;   'sqlite3.OperationalError: unable to open database file' 로 죽는다.
 ;   그래서 카페 전용판(cafe.iss)과 같이 사용자 폴더에 설치한다.
 DefaultDirName={localappdata}\Programs\MBAM-Blog
-DefaultGroupName=블로그 마케팅
+DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output\블로그 마케팅 (설치형)
-OutputBaseFilename=BlogMarketing_Setup_{#MyAppVersion}
+OutputBaseFilename={#OutName}{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

@@ -235,6 +235,16 @@ class SoulRewriter:
         except Exception:
             _cafe_extra = ""
 
+        # 블로그 전용판(설치형): 고객이 설정 화면에서 저장한 '내 AI 지시문'(공통 + 홍보 유형별)을 붙인다.
+        # 설치형은 백엔드가 고객 PC 에 있어 저장값이 그 고객 것뿐이다. 웹(클라우드)은 저장소가
+        # 전 고객 공용이라 적용하지 않는다. 글감·매일 자동발행처럼 prompt_category 가 따로 있는
+        # 작업에도 공통 지시는 붙는다.
+        try:
+            if (os.getenv("MBAM_PRODUCT", "") or "").strip().lower() == "blog":
+                _cafe_extra += self.get_blog_extra_prompt(promo_type)
+        except Exception:
+            pass
+
         if custom_prompt.strip():
             if _cafe_extra:
                 custom_prompt += _cafe_extra
@@ -718,6 +728,38 @@ class SoulRewriter:
                 v = v.get("claude_prompt") or v.get("gemini_prompt") or ""
             v = (v or "").strip()
             return f"\n[추가 지시]\n{v}\n" if v else ""
+        except Exception:
+            return ""
+
+    # 블로그 '내 AI 지시문' 저장 키 — 공통 1개 + 홍보 유형별(상품/앱·서비스/맛집/서비스업/병원)
+    BLOG_EXTRA_KEYS = {
+        "blog_extra": "모든 글 공통",
+        "blog_extra_product": "상품후기",
+        "blog_extra_app": "앱/서비스",
+        "blog_extra_place": "맛집후기",
+        "blog_extra_service": "서비스업",
+        "blog_extra_hospital": "병원",
+    }
+
+    @staticmethod
+    def get_blog_extra_prompt(promo_type: str = None) -> str:
+        """블로그 '내 AI 지시문'을 읽어 [추가 지시] 블록으로 돌려준다. 실패하면 ''(기본 동작 유지).
+        기본 규칙(제목 형식·[이미지] 태그·해시태그)은 그대로 두고 그 뒤에 덧붙이기만 한다."""
+        try:
+            from mbam_nextgen.backend.routers.settings import read_prompts
+            data = read_prompts() or {}
+            parts = []
+            common = (data.get("blog_extra") or "")
+            if isinstance(common, str) and common.strip():
+                parts.append(common.strip())
+            if promo_type:
+                v = data.get(f"blog_extra_{promo_type}") or ""
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+            if not parts:
+                return ""
+            return ("\n[추가 지시 — 아래 내용을 반드시 반영하되, 제목 형식·[이미지] 태그·해시태그 규칙은 유지]\n"
+                    + "\n".join(parts) + "\n")
         except Exception:
             return ""
 
