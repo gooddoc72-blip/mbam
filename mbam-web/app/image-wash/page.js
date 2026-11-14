@@ -7,6 +7,7 @@ import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
 import { Plus, Check, Download, Info } from "lucide-react";
+import { IS_CAFE_EDITION } from "../utils/product";
 
 export default function ImageWashPage() {
   const [files, setFiles] = useState([]);
@@ -42,6 +43,9 @@ export default function ImageWashPage() {
   const [library, setLibrary] = useState([]);
   const [libMeta, setLibMeta] = useState({ max_files: 30, ttl_days: 14 });
   const [savingLib, setSavingLib] = useState(false);
+  // '미리보기 생성'으로 만든 1장 — 선택한 원본 이름과 함께 둔다(다른 사진을 고르면 숨김)
+  const [previewResult, setPreviewResult] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const loadLibrary = async () => {
     try {
@@ -112,24 +116,9 @@ export default function ImageWashPage() {
 
     setLoading(true);
     setResults([]);
+    setPreviewResult(null);
 
-    const formData = new FormData();
-    files.forEach(f => {
-      formData.append("files", f.file);
-    });
-    formData.append("count", count);
-    formData.append("use_border", useBorder);
-    formData.append("use_noise", useNoise);
-    formData.append("use_watermark", useWatermark);
-    formData.append("use_rotation", useRotation);
-    formData.append("keep_original_size", keepOriginalSize);
-    formData.append("use_crop", useCrop);
-    formData.append("use_bright_contrast", useBrightContrast);
-    formData.append("use_exif", useExif);
-    formData.append("use_flip", useFlip);
-    formData.append("use_hue", useHue);
-    formData.append("use_resample", useResample);
-    formData.append("output_format", outputFormat);
+    const formData = buildFormData(files, count);
 
     try {
       const res = await fetchWithAuth("/api/image-wash/upload", {
@@ -155,6 +144,51 @@ export default function ImageWashPage() {
     }
   };
 
+  // 미리보기 생성 — 지금 고른 사진 한 장만 현재 설정으로 1장 세탁해 '처리 결과'에 보여준다.
+  // 결과 목록(다운로드·보관함 대상)은 건드리지 않는다.
+  const handlePreview = async () => {
+    const target = files[selectedFileIndex];
+    if (!target) { alert("왼쪽에서 원본 이미지를 먼저 추가·선택해주세요."); return; }
+    setPreviewLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/image-wash/upload", {
+        method: "POST",
+        body: buildFormData([target], 1),
+      });
+      if (!res.ok) { alert(`서버 에러: ${res.status}`); return; }
+      const data = await res.json();
+      const first = data.success && (data.results || [])[0];
+      if (first) setPreviewResult({ name: target.name, data: first.base64_data });
+      else alert("미리보기 실패: " + (data.message || "결과가 없습니다"));
+    } catch (e) {
+      alert("오류 발생: " + e.message);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // 세탁 요청 본문 — 일괄 생성과 미리보기가 같은 설정을 쓰도록 한곳에서 만든다.
+  function buildFormData(fileList, n) {
+    const formData = new FormData();
+    fileList.forEach(f => {
+      formData.append("files", f.file);
+    });
+    formData.append("count", n);
+    formData.append("use_border", useBorder);
+    formData.append("use_noise", useNoise);
+    formData.append("use_watermark", useWatermark);
+    formData.append("use_rotation", useRotation);
+    formData.append("keep_original_size", keepOriginalSize);
+    formData.append("use_crop", useCrop);
+    formData.append("use_bright_contrast", useBrightContrast);
+    formData.append("use_exif", useExif);
+    formData.append("use_flip", useFlip);
+    formData.append("use_hue", useHue);
+    formData.append("use_resample", useResample);
+    formData.append("output_format", outputFormat);
+    return formData;
+  }
+
   const handleDownloadAll = () => {
     if (results.length === 0) return;
     const zip = new JSZip();
@@ -176,12 +210,20 @@ export default function ImageWashPage() {
   };
 
   const selectedOriginal = files[selectedFileIndex];
-  const relatedResult = results.find(r => r.original_filename === selectedOriginal?.name) || results[0];
+  const batchResult = results.find(r => r.original_filename === selectedOriginal?.name) || results[0];
+  // 이 사진으로 방금 만든 미리보기가 있으면 그것을 먼저 보여준다
+  const relatedResult = (previewResult && selectedOriginal && previewResult.name === selectedOriginal.name)
+    ? { base64_data: previewResult.data }
+    : batchResult;
 
   return (
     <div style={{ padding: "2rem", backgroundColor: "#f8fafc", minHeight: "100vh" }}>
-      <h1 style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#1e293b", marginBottom: "0.5rem" }}>이미지 일괄 편집기</h1>
-      <p style={{ color: "#64748b", marginBottom: "2rem" }}>수동: 최대 10개 이미지 (각 5MB 이하) / 자동: 블로그 캠페인 수량만큼 일괄 생성</p>
+      <h1 style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#1e293b", marginBottom: "0.5rem" }}>{IS_CAFE_EDITION ? "이미지 세탁소" : "이미지 일괄 편집기"}</h1>
+      <p style={{ color: "#64748b", marginBottom: "2rem" }}>
+        {IS_CAFE_EDITION
+          ? "원본 사진을 넣으면 카페 글에 쓸 수 있도록 서로 다른 사진으로 세탁합니다. (최대 10개 이미지, 각 5MB 이하)"
+          : "수동: 최대 10개 이미지 (각 5MB 이하) / 자동: 블로그 캠페인 수량만큼 일괄 생성"}
+      </p>
 
       <div className="iw-row" style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start", flexWrap: "wrap" }}>
         
@@ -241,7 +283,7 @@ export default function ImageWashPage() {
           <div style={{ backgroundColor: "#f8faff", border: "1px solid #dbeafe", borderRadius: "8px", padding: "1.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
               <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#1e3a8a", margin: 0, whiteSpace: "nowrap" }}>자동 대량 생성</h2>
-              <span style={{ backgroundColor: "#dbeafe", color: "#2563eb", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.8rem", whiteSpace: "nowrap" }}>블로그 캠페인용</span>
+              {!IS_CAFE_EDITION && <span style={{ backgroundColor: "#dbeafe", color: "#2563eb", padding: "0.2rem 0.5rem", borderRadius: "4px", fontSize: "0.8rem", whiteSpace: "nowrap" }}>블로그 캠페인용</span>}
             </div>
             <p style={{ fontSize: "0.9rem", color: "#475569", marginBottom: "1.5rem", lineHeight: 1.5 }}>
               원본 이미지를 순환하며 N장을 생성합니다. 아래 <b>세탁 방식 선택</b>에서 고른 처리가 장마다 조금씩 다른 강도로 적용되어, 결과물끼리도 서로 달라집니다.
@@ -385,7 +427,11 @@ export default function ImageWashPage() {
           <div style={{ backgroundColor: "white", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1.5rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
               <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", margin: 0, color: "#1e293b", whiteSpace: "nowrap" }}>미리보기</h3>
-              <button style={{ padding: "0.4rem 0.8rem", backgroundColor: "#3b82f6", color: "white", border: "none", borderRadius: "4px", fontSize: "0.85rem", cursor: "pointer", whiteSpace: "nowrap" }}>미리보기 생성</button>
+              <button onClick={handlePreview} disabled={previewLoading || loading || !selectedOriginal}
+                title="선택한 사진 한 장을 지금 설정으로 세탁해 결과를 미리 봅니다"
+                style={{ padding: "0.4rem 0.8rem", backgroundColor: (previewLoading || loading || !selectedOriginal) ? "#94a3b8" : "#3b82f6", color: "white", border: "none", borderRadius: "4px", fontSize: "0.85rem", cursor: previewLoading ? "wait" : (!selectedOriginal ? "not-allowed" : "pointer"), whiteSpace: "nowrap" }}>
+                {previewLoading ? "만드는 중..." : "미리보기 생성"}
+              </button>
             </div>
 
             {selectedOriginal ? (

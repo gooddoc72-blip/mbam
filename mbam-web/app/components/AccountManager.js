@@ -1,6 +1,10 @@
 "use client";
 import { fetchWithAuth } from "../utils/api";
 import { useState, useEffect } from "react";
+import { IS_CAFE_EDITION } from "../utils/product";
+
+// 카페 전용판에는 블로그 화면이 없다 — '블로그 주소' 입력·열을 감추고, 엑셀은 A열 아이디 · B열 비밀번호로 받는다.
+const SHOW_BLOG_ADDR = !IS_CAFE_EDITION;
 
 // 네이버 계정 관리 (설정 페이지에 인라인으로 바로 노출)
 export default function AccountManager() {
@@ -54,8 +58,16 @@ export default function AccountManager() {
     try {
       const { parseSpreadsheet } = await import("../utils/spreadsheet");
       const rows = await parseSpreadsheet(file);
-      const body = rows.map((r) => ({ nid: (r[0] || "").trim(), blog: normBlog(r[1] || ""), pw: (r[2] || "").trim() })).filter((x) => x.nid);
-      if (!body.length) return notify("error", "등록할 행이 없습니다. (A열: 아이디, B열: 블로그 주소, C열(선택): 비밀번호)");
+      // 카페판: A 아이디 · B 비밀번호. 예전 3열 파일(A 아이디 · B 블로그 · C 비밀번호)도 그대로 읽는다.
+      const toRow = (r) => {
+        const nid = (r[0] || "").trim();
+        if (SHOW_BLOG_ADDR || (r[2] || "").trim()) return { nid, blog: normBlog(r[1] || ""), pw: (r[2] || "").trim() };
+        return { nid, blog: "", pw: (r[1] || "").trim() };
+      };
+      const body = rows.map(toRow).filter((x) => x.nid);
+      if (!body.length) return notify("error", SHOW_BLOG_ADDR
+        ? "등록할 행이 없습니다. (A열: 아이디, B열: 블로그 주소, C열(선택): 비밀번호)"
+        : "등록할 행이 없습니다. (A열: 아이디, B열(선택): 비밀번호)");
       let ok = 0, fail = 0, pwSet = 0;
       for (const x of body) {
         try {
@@ -69,7 +81,7 @@ export default function AccountManager() {
         } catch (e) { fail++; }
       }
       load();
-      notify(ok ? "success" : "error", `블로그 매핑 ${ok}건 등록${pwSet ? ` · 비번 ${pwSet}개 저장` : ""}${fail ? ` · 실패 ${fail}건` : ""}`);
+      notify(ok ? "success" : "error", `${SHOW_BLOG_ADDR ? "블로그 매핑" : "계정"} ${ok}건 등록${pwSet ? ` · 비번 ${pwSet}개 저장` : ""}${fail ? ` · 실패 ${fail}건` : ""}`);
     } catch (e) { notify("error", "엑셀 처리 오류: " + e.message); }
   };
 
@@ -77,8 +89,9 @@ export default function AccountManager() {
 
   const saveEdit = async (id) => {
     try {
-      const body = { blog_addr: editForm.blog_addr };
+      const body = SHOW_BLOG_ADDR ? { blog_addr: editForm.blog_addr } : {};
       if (editForm.naver_pw) body.naver_pw = editForm.naver_pw;
+      if (!SHOW_BLOG_ADDR && !body.naver_pw) { setEditId(null); return; }  // 바꿀 것이 없다
       const res = await fetchWithAuth(`/api/accounts/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -163,22 +176,26 @@ export default function AccountManager() {
       <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1.2rem" }}>
         <input style={{ ...inp, flex: 1, minWidth: "140px" }} placeholder="네이버 아이디" value={form.naver_id} onChange={(e) => setForm({ ...form, naver_id: e.target.value })} />
         <input style={{ ...inp, flex: 1, minWidth: "140px" }} type="password" placeholder="비밀번호(선택)" value={form.naver_pw} onChange={(e) => setForm({ ...form, naver_pw: e.target.value })} />
-        <input style={{ ...inp, flex: 1, minWidth: "160px" }} placeholder="블로그 주소(선택, 예: bonetacasa)" value={form.blog_addr} onChange={(e) => setForm({ ...form, blog_addr: e.target.value })} />
+        {SHOW_BLOG_ADDR && <input style={{ ...inp, flex: 1, minWidth: "160px" }} placeholder="블로그 주소(선택, 예: myblog)" value={form.blog_addr} onChange={(e) => setForm({ ...form, blog_addr: e.target.value })} />}
         <button onClick={addAccount} style={{ padding: "0.6rem 1.2rem", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }}>+ 계정 추가</button>
-        <label style={{ padding: "0.6rem 1.2rem", background: "#0ea5e9", color: "white", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }} title="엑셀/CSV로 일괄 등록 (A열 아이디, B열 블로그 주소, C열 비밀번호)">
+        <label style={{ padding: "0.6rem 1.2rem", background: "#0ea5e9", color: "white", borderRadius: "6px", fontWeight: "bold", cursor: "pointer" }} title={SHOW_BLOG_ADDR ? "엑셀/CSV로 일괄 등록 (A열 아이디, B열 블로그 주소, C열 비밀번호)" : "엑셀/CSV로 일괄 등록 (A열 아이디, B열 비밀번호)"}>
           📄 엑셀 일괄등록
           <input type="file" accept=".xlsx,.csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) importBlogExcel(f); }} />
         </label>
       </div>
-      <p style={{ margin: "-0.6rem 0 1.2rem", fontSize: "0.8rem", color: "#94a3b8" }}>엑셀 형식 — A열: 아이디, B열: 블로그 주소(bonetacasa 또는 https://blog.naver.com/bonetacasa), C열(선택): 비밀번호. 기존 아이디는 값만 갱신됩니다.</p>
+      <p style={{ margin: "-0.6rem 0 1.2rem", fontSize: "0.8rem", color: "#94a3b8" }}>
+        {SHOW_BLOG_ADDR
+          ? "엑셀 형식 — A열: 아이디, B열: 블로그 주소(myblog 또는 https://blog.naver.com/myblog), C열(선택): 비밀번호. 기존 아이디는 값만 갱신됩니다."
+          : "엑셀 형식 — A열: 아이디, B열(선택): 비밀번호. 기존 아이디는 값만 갱신됩니다."}
+      </p>
 
       {/* 목록 */}
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+      <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               <th style={th}>네이버 아이디</th>
-              <th style={th}>블로그 주소</th>
+              {SHOW_BLOG_ADDR && <th style={th}>블로그 주소</th>}
               <th style={th}>등록일</th>
               <th style={th}>인증여부</th>
               <th style={{ ...th, textAlign: "center" }}>관리</th>
@@ -186,17 +203,19 @@ export default function AccountManager() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td style={{ ...td, textAlign: "center", color: "#94a3b8" }} colSpan={5}>불러오는 중...</td></tr>
+              <tr><td style={{ ...td, textAlign: "center", color: "#94a3b8" }} colSpan={SHOW_BLOG_ADDR ? 5 : 4}>불러오는 중...</td></tr>
             ) : accounts.length === 0 ? (
-              <tr><td style={{ ...td, textAlign: "center", color: "#94a3b8" }} colSpan={5}>등록된 계정이 없습니다. 위에서 추가하세요.</td></tr>
+              <tr><td style={{ ...td, textAlign: "center", color: "#94a3b8" }} colSpan={SHOW_BLOG_ADDR ? 5 : 4}>등록된 계정이 없습니다. 위에서 추가하세요.</td></tr>
             ) : accounts.map((a) => (
               <tr key={a.id}>
                 <td style={{ ...td, fontWeight: "bold" }}>{a.naver_id}</td>
+                {SHOW_BLOG_ADDR && (
                 <td style={td}>
                   {editId === a.id ? (
-                    <input style={{ ...inp, width: "150px" }} placeholder="예: bonetacasa" value={editForm.blog_addr} onChange={(e) => setEditForm({ ...editForm, blog_addr: e.target.value })} />
+                    <input style={{ ...inp, width: "150px" }} placeholder="예: myblog" value={editForm.blog_addr} onChange={(e) => setEditForm({ ...editForm, blog_addr: e.target.value })} />
                   ) : (a.blog_addr || <span style={{ color: "#cbd5e1" }}>(아이디와 동일)</span>)}
                 </td>
+                )}
                 <td style={{ ...td, color: "#64748b" }}>{fmtDate(a.created_at)}</td>
                 <td style={td}>
                   {(() => {
@@ -225,6 +244,11 @@ export default function AccountManager() {
                 <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                   {editId === a.id ? (
                     <>
+                      {/* 카페판은 블로그 주소 칸이 없으니 여기서 비밀번호만 바꾼다 */}
+                      {!SHOW_BLOG_ADDR && (
+                        <input type="password" style={{ ...inp, width: "140px", marginRight: "0.35rem" }} placeholder="새 비밀번호"
+                          value={editForm.naver_pw} onChange={(e) => setEditForm({ ...editForm, naver_pw: e.target.value })} />
+                      )}
                       <button onClick={() => saveEdit(a.id)} style={{ padding: "0.35rem 0.7rem", background: "#10b981", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", marginRight: "0.35rem" }}>저장</button>
                       <button onClick={() => setEditId(null)} style={{ padding: "0.35rem 0.7rem", background: "white", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer" }}>취소</button>
                     </>
@@ -242,7 +266,9 @@ export default function AccountManager() {
       </div>
 
       <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#94a3b8" }}>
-        * 블로그/카페 포스팅 화면에서 계정을 추가하면 여기에도 자동 등록됩니다. 블로그 주소는 로그인 아이디와 블로그 URL이 다를 때만 입력하세요(예: 로그인 ch_2101 / 블로그 bonetacasa).
+        {SHOW_BLOG_ADDR
+          ? "* 블로그/카페 포스팅 화면에서 계정을 추가하면 여기에도 자동 등록됩니다. 블로그 주소는 로그인 아이디와 블로그 URL이 다를 때만 입력하세요(예: 로그인 myid / 블로그 myblog)."
+          : "* 카페 포스팅·소통·육성 화면에서 계정을 추가하면 여기에도 자동 등록됩니다."}
       </p>
       <p style={{ marginTop: "0.4rem", fontSize: "0.85rem", color: "#94a3b8" }}>
         * <b>기기인증</b>: 버튼을 누르면 브라우저 창이 떠 저장된 ID/PW로 자동 로그인합니다. 캡챠·2단계 인증이 뜨면 창에서 직접 완료하세요. 1회 인증하면 이후 자동 작업에서 재로그인 없이 사용됩니다(미인증 계정은 새 기기 차단으로 로그인 실패할 수 있음).

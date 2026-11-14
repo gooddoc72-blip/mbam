@@ -11,12 +11,72 @@ from mbam_nextgen.backend.database import SessionLocal, CafeSchedule, NaverAccou
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SchedulerService")
 
+try:
+    from zoneinfo import ZoneInfo
+    _KST = ZoneInfo("Asia/Seoul")
+except Exception:  # tzdata 없는 환경 — 한국 PC 로컬시각으로 대체
+    _KST = None
+
 class SchedulerService:
     def __init__(self):
         # AsyncIOScheduler 사용 (FastAPI와 비동기 통합)
         self.scheduler = AsyncIOScheduler()
         self.db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ranking.db")
-        
+        self._post_rank_running = False
+
+    async def run_daily_post_rank(self):
+        """블로그·카페 글 순위추적 목록을 하루 한 번 이 PC 에서 직접 수집한다(설치형·로컬).
+
+        - 오늘(KST) 이미 수집한 글은 건너뛴다 → 보충 실행·수동 '지금 수집'과 겹쳐도 중복 없음.
+        - 네이버에 한꺼번에 몰리지 않게 글 사이 20~40초 무작위로 쉰다.
+        - 결과 저장은 '지금 수집'과 같은 경로(_persist_cafe_rank)를 쓴다.
+        """
+        if self._post_rank_running:
+            logger.info("[post_rank] 이미 수집 중 — 건너뜀")
+            return
+        self._post_rank_running = True
+        try:
+            import random
+            from mbam_nextgen.backend.database import CafeRankItem
+            from mbam_nextgen.backend.routers.cafe_rank_router import _persist_cafe_rank
+            from mbam_nextgen.services.cafe_rank_service import find_cafe_rank
+            today = datetime.now(_KST).strftime("%Y-%m-%d")
+            db = SessionLocal()
+            try:
+                todo = [(it.id, it.user_id, it.keyword, it.target_url)
+                        for it in db.query(CafeRankItem).all()
+                        if it.last_checked_date != today and it.keyword and it.target_url]
+            finally:
+                db.close()
+            if not todo:
+                logger.info("[post_rank] 오늘 수집할 글 없음")
+                return
+            logger.info(f"[post_rank] 글 순위 자동 수집 시작 — {len(todo)}건")
+            ok = 0
+            for i, (tid, uid, kw, url) in enumerate(todo):
+                if i:
+                    await asyncio.sleep(random.uniform(20, 40))
+                try:
+                    res = await find_cafe_rank(kw, url)
+                except Exception as e:
+                    logger.warning(f"[post_rank] '{kw}' 수집 실패: {e}")
+                    continue
+                db = SessionLocal()
+                try:
+                    _persist_cafe_rank(db, uid, {"keyword": kw, "target_url": url, "tracked_id": tid}, res)
+                    db.commit()
+                    ok += 1
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"[post_rank] '{kw}' 저장 실패: {e}")
+                finally:
+                    db.close()
+            logger.info(f"[post_rank] 글 순위 자동 수집 끝 — {ok}/{len(todo)}건")
+        except Exception as e:
+            logger.error(f"[post_rank] 자동 수집 오류: {e}")
+        finally:
+            self._post_rank_running = False
+
     def get_tracked_places(self):
         """추적 목록 — 웹 '저장' 버튼이 쓰는 메인 DB(PlaceTracked) 기준(유저별).
         과거 설치형이 쓰던 레거시 sqlite(data/ranking.db tracked_places)도 병합해 호환 유지."""
@@ -806,6 +866,21 @@ class SchedulerService:
             except Exception as e:
                 logger.error(f"보충 실행 체크 실패: {e}")
 
+        # 블로그·카페 글 순위추적 — 모든 판에 있는 화면이므로 항상 건다.
+        # 웹(클라우드)은 cloud_batch 가 새벽 5시에 에이전트 잡으로 적재하고, 설치형은 여기서 직접 수집.
+        # 플레이스·쇼핑 일괄분석과 겹치지 않게 5시 30분.
+        self.scheduler.add_job(self.run_daily_post_rank, 'cron', hour=5, minute=30,
+                               id='daily_post_rank', **common)
+        try:
+            now = datetime.now(_KST)
+            if now >= now.replace(hour=5, minute=30, second=0, microsecond=0):
+                # 새벽에 PC 가 꺼져 있었으면 켜는 순간 오늘 몫을 보충(이미 오늘 수집한 글은 건너뜀)
+                self.scheduler.add_job(self.run_daily_post_rank, 'date',
+                                       run_date=datetime.now() + timedelta(seconds=120),
+                                       id='daily_post_rank_catchup', replace_existing=True)
+        except Exception as e:
+            logger.error(f"순위 보충 실행 예약 실패: {e}")
+
         # Load Cafe Nurturing Schedules
         self.load_cafe_schedules()
 
@@ -823,7 +898,7 @@ class SchedulerService:
 
         self.scheduler.start()
         if cafe_only:
-            logger.info("Scheduler started (카페 전용판 — 카페 육성 잡만 등록).")
+            logger.info("Scheduler started (카페 전용판 — 카페 육성·글 순위 잡만 등록).")
         elif blog_only:
             logger.info("Scheduler started (블로그 전용판 — 블로그 자동발행·예약·글감수집·블로그스팟 잡만 등록).")
         else:

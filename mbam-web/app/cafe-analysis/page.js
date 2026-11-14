@@ -3,6 +3,7 @@ import { fetchWithAuth, resolveMaybeAgent } from "../utils/api";
 import { usePersistentState } from "../utils/persistentState";
 import { addHistory } from "../utils/workHistory";
 import WorkHistory from "../components/WorkHistory";
+import { IS_CAFE_EDITION, IS_BLOG_EDITION } from "../utils/product";
 import React, { useState } from 'react';
 import { Search, ChevronRight, Activity, AlertCircle, FileText, CheckCircle2, ShieldAlert, Link2, Users, BarChart3 } from 'lucide-react';
 
@@ -572,8 +573,9 @@ export default function CafeAnalysisPage({ channel = 'cafe' }) {
                             {/* 전체 분석 기반으로 새 글쓰기 */}
                             <div style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', alignItems: 'center', padding: '1rem', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '10px' }}>
                                 <span style={{ fontWeight: 'bold', color: '#0369a1', fontSize: '0.92rem' }}>이 분석을 바탕으로 새 글 작성 →</span>
-                                <button onClick={() => goWrite('blog')} style={{ padding: '0.6rem 1.2rem', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>📝 블로그 글쓰기</button>
-                                <button onClick={() => goWrite('cafe')} style={{ padding: '0.6rem 1.2rem', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>☕ 카페 글쓰기</button>
+                                {/* 설치형은 자기 화면만 들어 있다 — 카페판엔 /blog-posting, 블로그판엔 /cafe-auto 가 없다 */}
+                                {!IS_CAFE_EDITION && <button onClick={() => goWrite('blog')} style={{ padding: '0.6rem 1.2rem', background: '#16a34a', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>📝 블로그 글쓰기</button>}
+                                {!IS_BLOG_EDITION && <button onClick={() => goWrite('cafe')} style={{ padding: '0.6rem 1.2rem', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>☕ 카페 글쓰기</button>}
                             </div>
                             {result.map((item, i) => {
                                 const d = item.data || {};

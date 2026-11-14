@@ -388,7 +388,9 @@ export function useCafeAuto() {
             try { addHistory("cafe-auto", { summary: `원고 생성 ${arr.length}건${targetKeyword ? ' · ' + targetKeyword : ''}` }); } catch (e) {}
             // 첫 원고를 단일 필드에도 채워 호환 유지
             setContent(arr[0].content);
-            setTitle(prev => prev || arr[0].title || "");
+            // 계정 미선택 '미리보기' 원고는 좌측 제목/본문이 그대로 발행되므로, 우측에 보이는 제목과 맞춘다.
+            if (arr.length === 1 && arr[0].account_id === "preview" && arr[0].title) setTitle(arr[0].title);
+            else setTitle(prev => prev || arr[0].title || "");
             setPromptCategory(null); // 이후 '작업 시작'은 검토된 원고를 그대로 발행
             saveCafeDraft({ content: arr[0].content, title: (title || arr[0].title || ""), promptCategory: null, generated: arr });
             alert(`✅ ${arr.length}개 원고 생성 완료! 계정별 본문을 검토·수정한 뒤 발행하세요.`);
@@ -766,6 +768,7 @@ export function useCafeAuto() {
           publish_mode: "instant", cafe_url: m.cafe_url, board_name: m.board_name,
           cafe_action_type: "post", source_data: m.content, use_tethering: useTethering,
           generate_card_news: cafeCardNews, card_count: Number(cafeCardCount) || 3,
+          track_rank: cafeTrackRank,               // 발행 후 통검 순위 추적 자동 등록(직접 발행과 동일)
           insert_map: cafeInsertMap, map_query: cafeMapQuery,  // 본문 하단 네이버 장소(지도) 삽입
           photo_layout: photoLayout, wash_strength: washStrength,              // 사진 세탁 강도
           image_folder_path: imageFolder || null,  // 지정한 이미지 폴더(발행 PC=에이전트 기준). 있으면 카드뉴스 대신 사용
@@ -791,7 +794,7 @@ export function useCafeAuto() {
 
   const handleStartSingle = async () => {
     const chosen = accounts.filter(a => selectedAccounts.includes(a.id));
-    if (chosen.length === 0) return alert("발행할 계정을 선택하세요. (하단 '네이버 아이디 풀'에서 등록·기기 인증 후 위에서 선택)");
+    if (chosen.length === 0) return alert("발행할 계정을 선택하세요. ('카페 소통·육성' 탭의 '네이버 아이디 풀 관리'에서 등록·기기 인증 후 선택)");
     // 발행 대상 = (계정 × 그 계정이 올릴 카페) 조합을 한 줄씩 펼친 것.
     // 계정 하나가 여러 카페에 올릴 수 있으므로 계정 수보다 많을 수 있다.
     const isUpload = sourceMode === "upload";

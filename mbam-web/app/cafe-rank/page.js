@@ -78,8 +78,8 @@ function CafeRankInner() {
     <div style={{ padding: "2rem", boxSizing: "border-box" }}>
       <h1 style={{ fontSize: "1.6rem", color: "#1e293b", marginBottom: "0.4rem" }}>📈 {typeLabel} 글 순위</h1>
       <p style={{ color: "#64748b", margin: "0 0 1.2rem", fontSize: "0.9rem" }}>
-        {typeLabel} 글 URL과 키워드를 등록하면 매일(새벽) 네이버 검색을 확인해
-        <b> 통합검색 순위</b>와 <b>{tabLabel} 순위</b>를 기록합니다. '지금 수집'을 누르면 30초쯤 뒤에 바로 확인할 수 있습니다.
+        {typeLabel} 글 URL과 키워드를 등록하면 매일 새벽 자동으로 네이버 검색을 확인해
+        <b> 통합검색 순위</b>와 <b>{tabLabel} 순위</b>를 기록합니다. 새벽에 PC 가 꺼져 있었으면 켜고 프로그램을 실행한 뒤 자동으로 이어서 수집합니다. '지금 수집'을 누르면 30초쯤 뒤에 바로 확인할 수 있습니다.
         카페 글 주소는 주소창에서 복사한 그대로 넣으면 됩니다.
       </p>
 
@@ -153,11 +153,11 @@ function CafeRankInner() {
                 <td style={{ ...td, fontSize: "0.78rem", color: "#475569" }}>{(it.history || []).map(h => h.tongsearch_rank ?? "-").join(" → ") || "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }} onClick={stop}>
                   {st === "missing" && (
-                    <button onClick={() => window.open(it.target_url, "_blank")} title="블로그 글로 이동해 직접 삭제하세요" style={{ padding: "0.35rem 0.7rem", background: "#dc2626", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>🗑 열어서 삭제</button>
+                    <button onClick={() => window.open(it.target_url, "_blank")} title={`${typeLabel} 글로 이동해 직접 삭제하세요`} style={{ padding: "0.35rem 0.7rem", background: "#dc2626", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>🗑 열어서 삭제</button>
                   )}
                   <button onClick={toggle} style={{ padding: "0.35rem 0.7rem", background: open ? "#334155" : "#0ea5e9", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>{open ? "▲ 접기" : "📊 분석"}</button>
                   <button onClick={() => checkNow(it.id)} style={{ padding: "0.35rem 0.7rem", background: "#7c3aed", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", marginRight: "0.4rem" }}>지금 수집</button>
-                  <button onClick={() => removeItem(it.id)} title="순위 추적 목록에서만 제거(블로그 글은 안 지워짐)" style={{ padding: "0.35rem 0.7rem", background: "#ef4444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>삭제</button>
+                  <button onClick={() => removeItem(it.id)} title={`순위 추적 목록에서만 제거(${typeLabel} 글은 안 지워짐)`} style={{ padding: "0.35rem 0.7rem", background: "#ef4444", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>삭제</button>
                 </td>
               </tr>
               {open && (
@@ -184,7 +184,7 @@ function RankChart({ history, tabLabel }) {
   const ranks = [];
   pts.forEach(p => { if (p.t != null) ranks.push(p.t); if (p.c != null) ranks.push(p.c); });
   if (pts.length === 0 || ranks.length === 0) {
-    return <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>아직 그래프로 그릴 순위 데이터가 없습니다.<br />‘지금 수집’을 며칠 반복하면 변동 추이가 쌓입니다.</div>;
+    return <div style={{ padding: "2rem", textAlign: "center", color: "#94a3b8", fontSize: "0.9rem" }}>아직 그래프로 그릴 순위 데이터가 없습니다.<br />매일 자동 수집(또는 ‘지금 수집’)이 며칠 쌓이면 변동 추이가 보입니다.</div>;
   }
   const maxR = Math.max(...ranks, 5);
   const minR = 1;

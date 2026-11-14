@@ -1058,7 +1058,7 @@ function BlogPostingContent() {
                 <span style={{ width: "20px", fontWeight: "bold", color: "#64748b" }}>{idx+1}.</span>
                 <input type="text" placeholder="네이버 아이디" value={acc.id} onChange={(e) => updateAccount(idx, "id", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 <input type="password" placeholder="비밀번호" value={acc.pw} onChange={(e) => updateAccount(idx, "pw", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
-                <input type="text" placeholder="블로그 주소(선택, 예: bonetacasa)" title="로그인 아이디와 블로그 주소가 다른 경우만 입력 (blog.naver.com/[여기]). 비우면 자동 감지." value={acc.blogAddr || ""} onChange={(e) => updateAccount(idx, "blogAddr", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
+                <input type="text" placeholder="블로그 주소(선택, 예: myblog)" title="로그인 아이디와 블로그 주소가 다른 경우만 입력 (blog.naver.com/[여기]). 비우면 자동 감지." value={acc.blogAddr || ""} onChange={(e) => updateAccount(idx, "blogAddr", e.target.value)} style={{ padding: "0.6rem", border: "1px solid #cbd5e1", flex: 1 }} />
                 {registeredIds.includes(acc.id) ? (
                   <button onClick={() => handleRegisterAccount(acc)} disabled={loading} title="기기 인증 완료됨. 다시 인증하려면 클릭하세요." style={{ padding: "0.6rem", background: "#dcfce7", color: "#166534", border: "1px solid #86efac", cursor: loading ? "not-allowed" : "pointer", whiteSpace: "nowrap", fontWeight: "bold" }}>✅ 인증완료</button>
                 ) : (

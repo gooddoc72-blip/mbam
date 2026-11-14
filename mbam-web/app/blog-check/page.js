@@ -222,7 +222,7 @@ export default function BlogCheckPage() {
           <input
             type="text"
             style={{ flex: "1 1 280px", padding: "0.8rem", borderRadius: "8px", border: "1px solid #cbd5e1", outline: "none" }}
-            placeholder="블로그 ID 또는 URL (예: bonetacasa, blog.naver.com/bonetacasa)"
+            placeholder="블로그 ID 또는 URL (예: myblog, blog.naver.com/myblog)"
             value={idxInput}
             onChange={(e) => setIdxInput(e.target.value)}
             disabled={idxLoading}

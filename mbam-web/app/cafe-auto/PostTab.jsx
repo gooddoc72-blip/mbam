@@ -197,6 +197,23 @@ export default function PostTab({ s }) {
   const upload = sourceMode === "upload";   // 원고 업로드 — AI 생성을 거치지 않는 경로
   const [openMs, setOpenMs] = useState(null);  // 본문을 펼쳐 볼 원고 번호
 
+  // '미리보기' 원고(사진 폴더 생성 · 계정 미선택 생성)는 특정 계정 몫이 아니라 모든 계정이 같이 쓴다.
+  // 발행·저장은 계정 몫 원고가 없으면 좌측 제목/본문을 쓰므로, 우측에서 고친 내용을
+  // 좌측에도 그대로 옮겨 '고친 글 = 올라가는 글'이 되게 한다(반대 방향도 동기화).
+  const isSharedPreview = (g) => !!g && g.account_id === "preview";
+  const editGenerated = (idx, field, value) => {
+    setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, [field]: value } : x));
+    if (isSharedPreview(cafeGenerated[idx])) {
+      if (field === "title") setTitle(value);
+      else if (field === "content") setContent(value);
+    }
+  };
+  const syncPreviewFromLeft = (field, value) => {
+    if (cafeGenerated.some(isSharedPreview)) {
+      setCafeGenerated(prev => prev.map(x => isSharedPreview(x) ? { ...x, [field]: value } : x));
+    }
+  };
+
   return (
             <>
             {/* 블로그 발행과 동일한 2단 레이아웃: 좌측 = 설정(계정→카페→원고→발행), 우측 = 원고 검토·수정 */}
@@ -204,7 +221,7 @@ export default function PostTab({ s }) {
             <div style={{ flex: "1.5 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "0.5rem", color: "#334155" }}>1. 발행 계정 선택</h2>
-                <p style={{ margin: "0 0 0.8rem", fontSize: "0.82rem", color: "#64748b" }}>하단 <b>1. 네이버 아이디 풀</b>에서 등록·기기 인증한 계정 중 발행에 사용할 계정을 고르세요. (인증된 계정은 자동 로그인)</p>
+                <p style={{ margin: "0 0 0.8rem", fontSize: "0.82rem", color: "#64748b" }}><b>카페 소통·육성</b> 탭의 <b>네이버 아이디 풀 관리</b>에서 등록·기기 인증한 계정 중 발행에 사용할 계정을 고르세요. (인증된 계정은 자동 로그인)</p>
                 {/* 계정이 많을 때: 검색 + 전체선택/해제 + 선택 수 */}
                 {accounts.length > 0 && (() => {
                   const filtered = accounts.filter(a => a.naver_id.toLowerCase().includes(accSearch.toLowerCase()));
@@ -231,7 +248,7 @@ export default function PostTab({ s }) {
                       {acc.naver_id}
                     </label>
                   ))}
-                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>하단 '네이버 아이디 풀 관리'에서 계정을 먼저 등록·인증해주세요.</span>}
+                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>'카페 소통·육성' 탭의 '네이버 아이디 풀 관리'에서 계정을 먼저 등록·인증해주세요.</span>}
                 </div>
                 {selectedAccounts.length > 1 && (
                   <p style={{ margin: "0.8rem 0 0", fontSize: "0.82rem", color: "#2563eb" }}>* 계정별로 아래에서 카페·게시판을 따로 지정하고, 원고도 따로 생성·저장하여 일괄 발행할 수 있습니다.</p>
@@ -263,12 +280,14 @@ export default function PostTab({ s }) {
                     <input type="text" placeholder="카페 URL (예: https://cafe.naver.com/xxx)" value={newCafeUrl} onChange={e => setNewCafeUrl(e.target.value)} style={{ padding: "0.5rem", border: "1px solid #cbd5e1", borderRadius: "4px", flex: 1, minWidth: "200px" }} />
                     <button onClick={handleAddCafe} style={{ padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>등록</button>
                   </div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                  {/* 좁은 화면에서 카페 URL 칸이 몇 글자로 짜부라지지 않게 최소 폭을 두고, 넘치면 가로 스크롤 */}
+                  <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", minWidth: upload ? "860px" : "680px", borderCollapse: "collapse", fontSize: "0.9rem" }}>
                     <thead><tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
-                      <th style={{ padding: "0.5rem", textAlign: "left", width: "120px" }}>발행 계정</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left", width: "230px" }}>가입 카페 매핑에서 선택</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>카페 URL</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left", width: "160px" }}>게시판 이름</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", width: "110px" }}>발행 계정</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", width: "170px" }}>가입 카페 매핑에서 선택</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", minWidth: "200px" }}>카페 URL</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", width: "130px" }}>게시판 이름</th>
                       {upload && <th style={{ padding: "0.5rem", textAlign: "left", width: "190px" }}>원고</th>}
                       <th style={{ padding: "0.5rem", textAlign: "center", width: "50px" }}>제외</th>
                     </tr></thead>
@@ -300,7 +319,7 @@ export default function PostTab({ s }) {
                                   {cafes.map((c, ci) => <option key={ci} value={ci}>{(c.cafe_url || "").replace("https://cafe.naver.com/", "")} / {c.board_name}</option>)}
                                 </select>
                               </td>
-                              <td style={{ padding: "0.5rem" }}><input type="text" placeholder={cafeUrl || "카페 URL"} value={t.cafe_url || ""} onChange={e => setAccTarget(id, ti, "cafe_url", e.target.value)} style={{ width: "100%", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} /></td>
+                              <td style={{ padding: "0.5rem" }}><input type="text" placeholder={cafeUrl || "카페 URL"} value={t.cafe_url || ""} title={t.cafe_url || ""} onChange={e => setAccTarget(id, ti, "cafe_url", e.target.value)} style={{ width: "100%", minWidth: "180px", boxSizing: "border-box", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} /></td>
                               <td style={{ padding: "0.5rem" }}><input type="text" placeholder={boardName || "게시판"} value={t.board_name || ""} onChange={e => setAccTarget(id, ti, "board_name", e.target.value)} style={{ width: "100%", padding: "0.4rem", border: "1px solid #cbd5e1", borderRadius: "4px" }} /></td>
                               {/* 이 대상(계정+카페)에 어느 원고를 올릴지 직접 지정 */}
                               {upload && (() => {
@@ -329,6 +348,7 @@ export default function PostTab({ s }) {
                       })}
                     </tbody>
                   </table>
+                  </div>
                   {(() => {
                     const rows = selectedAccounts.reduce((n, id) => n + targetsOf(id).filter(t => (t.cafe_url || "").trim()).length, 0);
                     return rows > selectedAccounts.length ? (
@@ -463,8 +483,8 @@ export default function PostTab({ s }) {
                 )}
 
                 {/* 제목/본문(글감) — 생성된 원고 검토는 우측 패널에서 (블로그 발행과 동일) */}
-                {actionType === "post" && sourceMode !== "image" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => setTitle(e.target.value)} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem", boxSizing: "border-box" }} />}
-                {sourceMode !== "image" && <textarea placeholder="직접 본문 작성 시 (또는 'AI 원고 생성'으로 미리보기 후 검토)" value={content} onChange={e => setContent(e.target.value)} style={{ width: "100%", height: content ? "260px" : "100px", padding: "0.8rem", boxSizing: "border-box" }} />}
+                {actionType === "post" && sourceMode !== "image" && <input type="text" placeholder="직접 제목 작성 시" value={title} onChange={e => { setTitle(e.target.value); syncPreviewFromLeft("title", e.target.value); }} style={{ width: "100%", padding: "0.8rem", marginBottom: "1rem", boxSizing: "border-box" }} />}
+                {sourceMode !== "image" && <textarea placeholder="직접 본문 작성 시 (또는 'AI 원고 생성'으로 미리보기 후 검토)" value={content} onChange={e => { setContent(e.target.value); syncPreviewFromLeft("content", e.target.value); }} style={{ width: "100%", height: content ? "260px" : "100px", padding: "0.8rem", boxSizing: "border-box" }} />}
                 {actionType === "post" && sourceMode === "image" && (
                   <div style={{ marginTop: "0.8rem", padding: "0.8rem", background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: "8px" }}>
                     <div style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#166534", marginBottom: "0.4rem" }}>🖼️ 이미지 + 키워드로 글감 만들기</div>
@@ -533,7 +553,7 @@ export default function PostTab({ s }) {
                 )}
                 {actionType === "post" && !upload && (
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", color: "#64748b" }}>
-                    * 글감수집에서 넘어온 경우, 위 내용은 <b>참고 글감</b>입니다. <b>AI 원고 생성</b>을 눌러 실제 카페 원고를 만든 뒤 검토·수정하고 발행하세요. (생성 없이 발행하면 발행 시점에 자동 작성됩니다)
+                    * {process.env.NEXT_PUBLIC_PRODUCT === "cafe" ? "위에 적은 내용은" : "글감수집에서 넘어온 경우, 위 내용은"} <b>참고 글감</b>입니다. <b>AI 원고 생성</b>을 눌러 실제 카페 원고를 만든 뒤 검토·수정하고 발행하세요. (생성 없이 발행하면 발행 시점에 자동 작성됩니다)
                   </p>
                 )}
                 {content && content.includes("[링크] http") && (
@@ -595,12 +615,14 @@ export default function PostTab({ s }) {
                     <p style={{ margin: 0, fontSize: "0.85rem", color: "#7c3aed", fontWeight: "bold" }}>✨ 계정별로 검토·수정한 뒤 저장·발행하세요.</p>
                     {cafeGenerated.map((g, idx) => (
                       <div key={idx} style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "1rem", background: "#faf5ff" }}>
-                        <div style={{ fontWeight: "bold", color: "#2563eb", marginBottom: "0.5rem" }}>📝 {g.account_id} 계정 원고</div>
+                        <div style={{ fontWeight: "bold", color: "#2563eb", marginBottom: "0.5rem" }}>
+                          {isSharedPreview(g) ? "📝 미리보기 원고 (선택한 모든 계정에 공통으로 발행)" : `📝 ${g.account_id} 계정 원고`}
+                        </div>
                         <input type="text" value={g.title || ""} placeholder="제목"
-                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, title: e.target.value } : x))}
+                          onChange={e => editGenerated(idx, "title", e.target.value)}
                           style={{ width: "100%", padding: "0.6rem", marginBottom: "0.5rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                         <textarea value={g.content || ""}
-                          onChange={e => setCafeGenerated(prev => prev.map((x, i) => i === idx ? { ...x, content: e.target.value } : x))}
+                          onChange={e => editGenerated(idx, "content", e.target.value)}
                           style={{ width: "100%", height: "240px", padding: "0.8rem", border: "1px solid #cbd5e1", boxSizing: "border-box" }} />
                       </div>
                     ))}
@@ -617,19 +639,24 @@ export default function PostTab({ s }) {
                       {batchPosting ? "발행 시작 중..." : "🚀 일괄 작업 시작"}
                     </button>
                   </div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
+                  {/* 우측 칸이 좁아도 URL 이 한 글자씩 세로로 늘어서지 않게: 카페 주소는 짧게 줄여 말줄임, 표는 가로 스크롤 */}
+                  <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", minWidth: "480px", borderCollapse: "collapse", fontSize: "0.88rem" }}>
                     <thead><tr style={{ background: "#f0f9ff", borderBottom: "2px solid #bae6fd" }}>
-                      <th style={{ padding: "0.5rem", textAlign: "left", width: "120px" }}>계정</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>카페 / 게시판</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", width: "90px" }}>계정</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", width: "150px" }}>카페 / 게시판</th>
                       <th style={{ padding: "0.5rem", textAlign: "left" }}>제목</th>
                       <th style={{ padding: "0.5rem", textAlign: "center", width: "110px" }}>관리</th>
                     </tr></thead>
                     <tbody>
                       {savedManuscripts.map(m => (
                         <tr key={m.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                          <td style={{ padding: "0.5rem", fontWeight: "bold" }}>{m.account_id}</td>
-                          <td style={{ padding: "0.5rem", fontSize: "0.8rem", color: "#475569", wordBreak: "break-all" }}>{m.cafe_url || "(공통)"}<br/>{m.board_name}</td>
-                          <td style={{ padding: "0.5rem" }}>{m.title || "(자동)"}</td>
+                          <td style={{ padding: "0.5rem", fontWeight: "bold", overflowWrap: "anywhere" }}>{m.account_id}</td>
+                          <td title={(m.cafe_url || "") + (m.board_name ? " / " + m.board_name : "")} style={{ padding: "0.5rem", fontSize: "0.8rem", color: "#475569", maxWidth: "150px" }}>
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.cafe_url ? m.cafe_url.replace(/^https?:\/\/(m\.)?cafe\.naver\.com\//, "") : "(공통)"}</div>
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.board_name}</div>
+                          </td>
+                          <td style={{ padding: "0.5rem", overflowWrap: "anywhere" }}>{m.title || "(자동)"}</td>
                           <td style={{ padding: "0.5rem", textAlign: "center", whiteSpace: "nowrap" }}>
                             <button onClick={() => setEditMs({ ...m })} style={{ padding: "0.25rem 0.5rem", background: "white", color: "#2563eb", border: "1px solid #2563eb", borderRadius: "4px", cursor: "pointer", marginRight: "0.3rem" }}>수정</button>
                             <button onClick={() => handleDeleteManuscript(m.id)} style={{ padding: "0.25rem 0.5rem", background: "white", color: "#ef4444", border: "1px solid #ef4444", borderRadius: "4px", cursor: "pointer" }}>삭제</button>
@@ -638,6 +665,7 @@ export default function PostTab({ s }) {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                   <p style={{ margin: "0.6rem 0 0", fontSize: "0.8rem", color: "#64748b" }}>* 각 계정의 저장된 카페·게시판으로 순차 발행됩니다(계정 간 {accountDelay}분 텀{useTethering ? ", 테더링 IP 회전" : ""}).</p>
                 </div>
               )}

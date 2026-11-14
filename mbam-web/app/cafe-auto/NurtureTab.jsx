@@ -204,7 +204,7 @@ export default function NurtureTab({ s }) {
                       {acc.naver_id}
                     </label>
                   ))}
-                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>'아이디 육성' 탭(또는 설정 &gt; 계정관리)에서 아이디를 먼저 등록해주세요.</span>}
+                  {accounts.length === 0 && <span style={{ color: "#94a3b8" }}>오른쪽 '네이버 아이디 풀 관리'(또는 계정관리 메뉴)에서 아이디를 먼저 등록해주세요.</span>}
                 </div>
               </div>
 
@@ -352,7 +352,7 @@ export default function NurtureTab({ s }) {
 
               {/* 육성 예약 등록 (폼) */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
-                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>4. 일일 자동 방문(육성) 예약 등록</h2>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>5. 일일 자동 방문(육성) 예약 등록</h2>
                 <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
                   <select value={newSchAccId} onChange={e => {
                     setNewSchAccId(e.target.value); setNewSchCafeId("");
@@ -401,11 +401,13 @@ export default function NurtureTab({ s }) {
                   <button onClick={fetchAccounts} style={{ padding: "0.4rem 0.8rem", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>📥 계정관리에서 불러오기</button>
                 </div>
                 <p style={{ margin: "0 0 0.8rem", fontSize: "0.82rem", color: "#64748b" }}>여기 목록은 <b>계정관리(전체 계정)</b>와 동일합니다. 여기서 추가/삭제하면 계정관리에도 반영됩니다.</p>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
-                  <input type="text" placeholder="네이버 아이디" value={newAccId} onChange={e => setNewAccId(e.target.value)} style={{ padding: "0.5rem" }} />
-                  <input type="password" placeholder="비밀번호" value={newAccPw} onChange={e => setNewAccPw(e.target.value)} style={{ padding: "0.5rem" }} />
-                  <button onClick={handleAddAccount} style={{ padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none" }}>추가</button>
+                {/* 우측 칸이 좁아도 '추가' 버튼이 잘리지 않게: 입력칸은 줄어들고, 모자라면 줄바꿈 */}
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                  <input type="text" placeholder="네이버 아이디" value={newAccId} onChange={e => setNewAccId(e.target.value)} style={{ padding: "0.5rem", flex: "1 1 120px", minWidth: 0 }} />
+                  <input type="password" placeholder="비밀번호" value={newAccPw} onChange={e => setNewAccPw(e.target.value)} style={{ padding: "0.5rem", flex: "1 1 120px", minWidth: 0 }} />
+                  <button onClick={handleAddAccount} style={{ padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none", flexShrink: 0, whiteSpace: "nowrap" }}>추가</button>
                 </div>
+                <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
@@ -436,20 +438,21 @@ export default function NurtureTab({ s }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
 
               {/* 2. Cafe Mapping */}
               <div style={{ background: "white", padding: "1.5rem", border: "1px solid #cbd5e1" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "1rem" }}>아이디별 가입 카페 매핑</h2>
-                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
-                  <select value={newCafeAccId} onChange={e => setNewCafeAccId(e.target.value)} style={{ padding: "0.5rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+                  <select value={newCafeAccId} onChange={e => setNewCafeAccId(e.target.value)} style={{ padding: "0.5rem", maxWidth: "100%" }}>
                     <option value="">계정 선택</option>
                     {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.naver_id}</option>)}
                   </select>
-                  <input type="text" placeholder="카페 주소 URL" value={newCafeUrl} onChange={e => setNewCafeUrl(e.target.value)} style={{ padding: "0.5rem", flex: 1 }} />
-                  <button onClick={handleAddCafe} style={{ padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none" }}>등록</button>
+                  <input type="text" placeholder="카페 주소 URL" value={newCafeUrl} onChange={e => setNewCafeUrl(e.target.value)} style={{ padding: "0.5rem", flex: "1 1 160px", minWidth: 0 }} />
+                  <button onClick={handleAddCafe} style={{ padding: "0.5rem 1rem", background: "#2563eb", color: "white", border: "none", flexShrink: 0, whiteSpace: "nowrap" }}>등록</button>
                 </div>
-                <ul style={{ paddingLeft: "1.5rem", margin: 0, fontSize: "0.9rem" }}>
+                <ul style={{ paddingLeft: "1.5rem", margin: 0, fontSize: "0.9rem", overflowWrap: "anywhere" }}>
                   {accounts.map(acc => (
                     acc.cafes && acc.cafes.map(cafe => (
                       <li key={cafe.id} style={{ marginBottom: "0.3rem" }}>
@@ -468,31 +471,36 @@ export default function NurtureTab({ s }) {
                     아직 예약이 없습니다. 좌측 '일일 자동 방문(육성) 예약 등록'에서 추가하세요.
                   </div>
                 )}
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                {/* 우측 칸이 좁아 열이 세로로 길게 늘어나고 상태/관리 열이 밀려나지 않도록:
+                    표에 최소 폭을 주고 가로 스크롤, 긴 주소는 한 줄 말줄임(마우스를 올리면 전체 주소) */}
+                <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", minWidth: "640px", borderCollapse: "collapse", fontSize: "0.88rem" }}>
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "2px solid #cbd5e1" }}>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>실행 시간</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>대상 계정</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>대상 카페</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>작업 내용</th>
-                      <th style={{ padding: "0.5rem", textAlign: "left" }}>상태</th>
-                      <th style={{ padding: "0.5rem", textAlign: "center" }}>관리</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", whiteSpace: "nowrap" }}>실행 시간</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", whiteSpace: "nowrap" }}>대상 계정</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", whiteSpace: "nowrap" }}>대상 카페</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", whiteSpace: "nowrap" }}>작업 내용</th>
+                      <th style={{ padding: "0.5rem", textAlign: "left", whiteSpace: "nowrap" }}>상태</th>
+                      <th style={{ padding: "0.5rem", textAlign: "center", whiteSpace: "nowrap" }}>관리</th>
                     </tr>
                   </thead>
                   <tbody>
                     {schedules.map(sch => (
                       <tr key={sch.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: "0.5rem", fontWeight: "bold" }}>매일 {sch.schedule_time}</td>
-                        <td style={{ padding: "0.5rem" }}>{sch.naver_id}</td>
-                        <td style={{ padding: "0.5rem" }}>{sch.cafe_url}{sch.board_name ? ` (${sch.board_name})` : ""}</td>
-                        <td style={{ padding: "0.5rem", fontSize: "0.85rem", color: "#475569" }}>
+                        <td style={{ padding: "0.5rem", fontWeight: "bold", whiteSpace: "nowrap" }}>매일 {sch.schedule_time}</td>
+                        <td style={{ padding: "0.5rem", whiteSpace: "nowrap" }}>{sch.naver_id}</td>
+                        <td title={`${sch.cafe_url || ""}${sch.board_name ? ` (${sch.board_name})` : ""}`} style={{ padding: "0.5rem", maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {(sch.cafe_url || "").replace(/^https?:\/\/(m\.)?cafe\.naver\.com\//, "")}{sch.board_name ? ` (${sch.board_name})` : ""}
+                        </td>
+                        <td style={{ padding: "0.5rem", fontSize: "0.85rem", color: "#475569", minWidth: "180px" }}>
                           {sch.target_post_url
-                            ? <span>🎯 게시글 부스트 (방문 {sch.post_count_per_day}회/{sch.visit_interval_min ?? 30}분 간격{sch.do_view ? ", 조회수" : ""}{sch.do_like ? ", ❤️좋아요" : ""})<br/><span style={{ color: "#2563eb", fontSize: "0.78rem", wordBreak: "break-all" }}>{sch.target_post_url}</span></span>
+                            ? <span>🎯 게시글 부스트 (방문 {sch.post_count_per_day}회/{sch.visit_interval_min ?? 30}분 간격{sch.do_view ? ", 조회수" : ""}{sch.do_like ? ", ❤️좋아요" : ""})<br/><span title={sch.target_post_url} style={{ display: "block", maxWidth: "220px", color: "#2563eb", fontSize: "0.78rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sch.target_post_url}</span></span>
                             : (sch.content_category
                                 ? `${sch.content_category}${sch.content_item_title ? ` - ${sch.content_item_title}` : ''} (${sch.post_count_per_day}회)`
                                 : `🚶 일반 육성 (카페 방문 ${sch.post_count_per_day}회/${sch.visit_interval_min ?? 30}분 간격)`)}
                         </td>
-                        <td style={{ padding: "0.5rem" }}>
+                        <td style={{ padding: "0.5rem", whiteSpace: "nowrap" }}>
                           <span style={{ background: sch.is_active ? "#dcfce7" : "#f1f5f9", color: sch.is_active ? "#166534" : "#64748b", padding: "0.2rem 0.5rem", borderRadius: "4px" }}>
                             {sch.is_active ? "활성화" : "정지"}
                           </span>
@@ -504,6 +512,7 @@ export default function NurtureTab({ s }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
             </div>
