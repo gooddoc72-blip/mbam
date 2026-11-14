@@ -131,6 +131,21 @@ def main():
         "파일 전송에 실패했습니다.", "인터넷 연결을 확인하고 다시 시도하세요.")
     print(f"  {len(files)}개 파일 전송 완료")
 
+    # ── 2-1) 관리자 토큰 파일(.env) — 서버에만 둔다 ──
+    # docker-compose.yml 은 .env 를 읽는다. 없으면 서버에서 임의 값을 만들어 저장(권한 600).
+    # 값은 이 창에 출력하지 않는다 — 확인은 안내된 명령으로 서버에서 직접.
+    out = run(["ssh", *SSH_OPTS, "-i", str(KEY), SERVER,
+               f"cd {REMOTE} && if [ -f .env ] && grep -q '^ADMIN_TOKEN=' .env; then echo ENV_OK; else "
+               f"umask 077 && printf 'ADMIN_TOKEN=%s\nAUTH_SECRET=%s\n' "
+               f"\"$(openssl rand -hex 32)\" \"$(openssl rand -hex 32)\" > .env && echo ENV_CREATED; fi"],
+              "관리자 토큰 파일 준비에 실패했습니다.")
+    if "ENV_CREATED" in out:
+        print("  새 관리자 토큰을 만들었습니다 (서버 auth_server/.env).")
+        print("  확인 명령: ssh -i my-key.pem " + SERVER + " \"cat ~/auth_server/.env\"")
+        print("  → ADMIN_TOKEN 값을 Railway 환경변수 LICENSE_ADMIN_TOKEN 과 승인도구에 넣으세요.")
+    else:
+        print("  기존 관리자 토큰 유지")
+
     # ── 3) 재시작 ──
     step(3, 4, "서버 프로그램 재시작 중... 1~2분 걸립니다. 기다려 주세요.")
     run(["ssh", *SSH_OPTS, "-i", str(KEY), SERVER,

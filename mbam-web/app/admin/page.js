@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Users, Search, Settings, Key, AlertCircle, Save } from "lucide-react";
 import { PcApprovalPanel, UserDevicesModal } from "./PcApproval";
+import LicenseAdmin from "./LicenseAdmin";
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -261,6 +262,7 @@ export default function AdminDashboard() {
       </div>
 
       <PcApprovalPanel onChanged={() => fetchUsersAndPlans()} />
+      <LicenseAdmin />
       {devicesUser && (
         <UserDevicesModal user={devicesUser} onClose={() => setDevicesUser(null)} onChanged={() => fetchUsersAndPlans()} />
       )}

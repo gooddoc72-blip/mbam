@@ -6,7 +6,42 @@ from datetime import datetime
 # 서버 주소 및 관리자 토큰 (서버 설정과 일치해야 함)
 # 도메인으로 부른다 — 서버 IP가 바뀌어도 DNS만 고치면 되고, 관리자 토큰이 평문으로 나가지 않는다
 SERVER_URL = "https://license.blocklab.co.kr"
-ADMIN_TOKEN = "change-this-admin-token"
+# 관리자 토큰은 프로그램에 넣지 않는다(exe 가 유출되면 토큰도 유출됨).
+# 우선순위: 환경변수 MBAM_ADMIN_TOKEN → %APPDATA%/MBAM/admin_token.txt → 처음 실행 시 입력받아 저장.
+import os as _os
+_TOKEN_FILE = _os.path.join(_os.environ.get("APPDATA") or _os.path.expanduser("~"), "MBAM", "admin_token.txt")
+
+
+def _load_admin_token() -> str:
+    t = (_os.environ.get("MBAM_ADMIN_TOKEN") or "").strip()
+    if t:
+        return t
+    try:
+        with open(_TOKEN_FILE, "r", encoding="utf-8") as f:
+            t = f.read().strip()
+        if t:
+            return t
+    except OSError:
+        pass
+    from tkinter import simpledialog
+    _r = tk.Tk(); _r.withdraw()
+    t = (simpledialog.askstring(
+        "관리자 토큰", "라이선스 서버 관리자 토큰을 입력하세요.\n(서버 auth_server/.env 의 ADMIN_TOKEN 값 · 이 PC 에만 저장됩니다)",
+        show="*", parent=_r) or "").strip()
+    _r.destroy()
+    if t:
+        try:
+            _os.makedirs(_os.path.dirname(_TOKEN_FILE), exist_ok=True)
+            with open(_TOKEN_FILE, "w", encoding="utf-8") as f:
+                f.write(t)
+        except OSError:
+            pass
+    return t
+
+
+ADMIN_TOKEN = _load_admin_token()
+if not ADMIN_TOKEN:
+    raise SystemExit("관리자 토큰이 없어 종료합니다.")
 
 def fetch_devices():
     try:
@@ -43,7 +78,8 @@ def change_status(hwid, new_status, product="", days=None):
 PRODUCT_NAMES = {
     "": "크롤러",
     "cafe": "카페 마케팅",
-    "blog": "블로그 마케팅",
+    "blog": "블로그 마케팅 기본",
+    "blog_pro": "블로그 마케팅 프로",
     "mbam": "마케팅 연구소",
 }
 

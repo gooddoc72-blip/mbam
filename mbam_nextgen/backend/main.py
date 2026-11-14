@@ -302,6 +302,9 @@ if _enabled("shopping"):
     app.include_router(shopping_router.router, dependencies=[Depends(get_current_user)])
 if _enabled("admin"):
     app.include_router(admin_router.router)
+    # 설치형 라이선스 서버 관리 중계(관리자 전용) — 토큰은 서버 환경변수에만
+    from mbam_nextgen.backend.routers import license_admin_router
+    app.include_router(license_admin_router.router)
 if _enabled("billing"):
     # 웹 회원 정기결제 — 설치형(카페·블로그 전용판)은 기기 승인 기간으로 관리하므로 마운트 안 함
     from mbam_nextgen.backend.routers import billing_router

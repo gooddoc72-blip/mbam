@@ -4,9 +4,11 @@ services:
     container_name: mbam_license_server
     ports:
       - "8005:8005"
+    # 관리자 토큰·서명키는 서버에만 있는 auth_server/.env 에서 읽는다(저장소·배포 파일에 넣지 않음).
+    # 배포 스크립트가 서버에 .env 가 없으면 임의 값으로 만들어 준다.
+    env_file:
+      - .env
     environment:
-      # 반드시 본인만 아는 값으로 바꾸세요. 코드 발급/관리에 쓰입니다.
-      - ADMIN_TOKEN=change-this-admin-token
       - PORT=8005
     volumes:
       - ./license.db:/app/license.db

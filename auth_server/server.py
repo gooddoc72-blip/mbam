@@ -32,7 +32,14 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session
 DATABASE_URL = os.environ.get("LICENSE_DB_URL", "sqlite:///./license.db")
 
 # 관리자 토큰: 환경변수로 주거나, 없으면 1회 생성해 콘솔에 출력 (재시작 시 유지하려면 .env 권장)
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
+# 예시값·짧은 값은 공개된 것과 같으므로 절대 쓰지 않는다(소스에 적혀 있던 값 → 누구나 관리자 권한).
+_WEAK_TOKENS = {"change-this-admin-token", "change-me", "admin", "changeme", ""}
+ADMIN_TOKEN = (os.environ.get("ADMIN_TOKEN") or "").strip()
+if ADMIN_TOKEN in _WEAK_TOKENS or len(ADMIN_TOKEN) < 24:
+    if ADMIN_TOKEN:
+        print("[MBAM 라이선스 서버] ⚠ ADMIN_TOKEN 이 예시값이거나 너무 짧아 사용하지 않습니다. "
+              "서버의 auth_server/.env 에 24자 이상 임의 값을 넣으세요.")
+    ADMIN_TOKEN = ""
 if not ADMIN_TOKEN:
     ADMIN_TOKEN = secrets.token_urlsafe(24)
     print("=" * 60)

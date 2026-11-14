@@ -4,3 +4,4 @@ __pycache__/
 .cache/
 README_DEPLOY.md
 test_*.db
+.env
