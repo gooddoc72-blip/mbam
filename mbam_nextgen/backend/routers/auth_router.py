@@ -330,6 +330,12 @@ async def social_login(provider: str, request: Request):
     # CSRF 방어용 1회성 state (고정 문자열 대신 랜덤 생성 후 쿠키에 저장 → 콜백에서 대조)
     state = _secrets.token_urlsafe(16)
 
+    # 키가 비어 있으면 구글/카카오의 영문 오류 화면(Missing required parameter: client_id)이 뜬다.
+    # 우리 로그인 화면으로 돌려보내 무엇이 빠졌는지 보이게 한다.
+    _cid_env = {"kakao": "KAKAO_CLIENT_ID", "naver": "NAVER_CLIENT_ID", "google": "GOOGLE_CLIENT_ID"}.get(provider)
+    if _cid_env and not os.environ.get(_cid_env, "").strip():
+        return RedirectResponse(f"{FRONTEND_URL}/login?error={provider}_not_configured")
+
     if provider == "kakao":
         client_id = os.environ.get("KAKAO_CLIENT_ID", "")
         redirect_uri = f"{BASE_URL}/api/auth/callback/kakao"
@@ -431,7 +437,7 @@ async def social_callback(provider: str, request: Request, code: str, state: str
         elif provider == "google":
             client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
             client_secret = get_decrypted_env("GOOGLE_CLIENT_SECRET")
-            redirect_uri = f"{BASE_URL}/api/auth/social/callback/google"
+            redirect_uri = f"{BASE_URL}/api/auth/callback/google"   # ⚠ 시작(social_login)과 글자까지 같아야 한다 — 다르면 구글이 redirect_uri_mismatch 로 토큰을 거부
             token_resp = await client.post("https://oauth2.googleapis.com/token", data={
                 "grant_type": "authorization_code",
                 "client_id": client_id,

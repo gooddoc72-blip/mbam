@@ -18,6 +18,24 @@ function LoginContent() {
     if (token) {
       localStorage.setItem("mbam_token", token);
       router.push(HOME_PATH);
+      return;
+    }
+    // 소셜 로그인 실패로 돌아온 경우(?error=...) — 예전에는 아무 표시 없이 로그인 화면만 다시 떠서 원인을 알 수 없었다
+    const err = searchParams.get("error");
+    if (err) {
+      const NAMES = { google: "구글", kakao: "카카오", naver: "네이버" };
+      const [prov, ...rest] = err.split("_");
+      const kind = rest.join("_");
+      const who = NAMES[prov] || "소셜";
+      const MSG = {
+        not_configured: `${who} 로그인이 아직 준비되지 않았습니다. 이메일로 로그인하거나 다른 방법을 이용해 주세요.`,
+        token_failed: `${who} 인증 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.`,
+        user_failed: `${who} 계정 정보를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.`,
+        json_failed: `${who} 응답을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.`,
+      };
+      setError(err === "invalid_state"
+        ? "로그인 시간이 지났거나 다른 창에서 시작된 요청입니다. 다시 시도해 주세요."
+        : MSG[kind] || "소셜 로그인에 실패했습니다. 다시 시도해 주세요.");
     }
   }, [searchParams, router]);
 
