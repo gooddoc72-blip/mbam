@@ -60,14 +60,10 @@ if ($SkipRuntime) {
   if (-not (Test-Path $Runtime)) {
     throw "-SkipRuntime 은 이전 빌드의 runtime\ 이 있어야 합니다. 처음 한 번은 스위치 없이 실행하세요."
   }
-  Write-Host "== 증분 빌드: runtime·node_modules 재사용 ==" -ForegroundColor Cyan
-  Get-ChildItem $Payload -Force | Where-Object { $_.Name -notin @("runtime", "mbam-web") } |
+  Write-Host "== 증분 빌드: runtime 재사용 ==" -ForegroundColor Cyan
+  # mbam-web 은 독립 실행형(standalone) 산출물로 매번 새로 채운다(약 1,500개·20MB 라 재사용할 이유가 없다)
+  Get-ChildItem $Payload -Force | Where-Object { $_.Name -ne "runtime" } |
     Remove-Item -Recurse -Force
-  $webKeep = Join-Path $Payload "mbam-web"
-  if (Test-Path $webKeep) {
-    Get-ChildItem $webKeep -Force | Where-Object { $_.Name -ne "node_modules" } |
-      Remove-Item -Recurse -Force
-  }
 } else {
   if (Test-Path $Payload) { Remove-Item $Payload -Recurse -Force }
 }
@@ -183,19 +179,29 @@ foreach ($f in @("agent.py","agent_startup.vbs","agent_config.example.json",
 # 사본을 떠서 거기서 블로그와 무관한 page 폴더를 지우고 빌드한다.
 Write-Host "[2/7] 프론트 스테이징(블로그 화면만 남기기)..." -ForegroundColor Yellow
 $webSrc = Join-Path $Src "mbam-web"
-if (Test-Path $WebStage) { Remove-Item $WebStage -Recurse -Force }
+$stageNm = Join-Path $WebStage "node_modules"
+# 예전 빌드가 남긴 node_modules '정션'은 반드시 rmdir 로 연결만 끊는다.
+# (그대로 두고 아래 robocopy /MIR 를 돌리면 원본 mbam-web\node_modules 에 직접 쓰고 지운다)
+if ((Test-Path $stageNm) -and ((Get-Item $stageNm -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+  cmd /c rmdir "$stageNm" | Out-Null
+}
+# node_modules 는 남겨 두고(다음 빌드에서 /MIR 로 바뀐 것만 갱신) 나머지만 새로 뜬다.
+if (Test-Path $WebStage) {
+  Get-ChildItem $WebStage -Force | Where-Object { $_.Name -ne "node_modules" } | Remove-Item -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $WebStage | Out-Null
 & robocopy $webSrc $WebStage /E /NFL /NDL /NJH /NJS /NP /XD ".next" "node_modules" ".claude" | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "프론트 스테이징 복사 실패(code $LASTEXITCODE)" }
 
-# node_modules 는 용량이 커서 복사 대신 디렉터리 정션(junction)으로 연결 — 관리자 권한 불필요.
-# ⚠ 원본과 node_modules 를 공유하므로, 빌드 중에는 mbam-web 개발 서버(npm run dev)나
-#   다른 next 빌드를 돌리지 말 것. 캐시가 겹쳐 빌드가 실패한다.
+# node_modules 는 정션이 아니라 '실제 사본'이어야 한다.
+# 독립 실행형(standalone) 빌드는 파일의 실제 경로로 추적하므로, 정션이면 산출물이
+# 저장소 경로 구조째(standalone\installer\.cache\...\server.js + standalone\mbam-web\node_modules)
+# 로 나와 server.js 가 next 를 찾지 못한다. 처음 한 번만 1~2분 걸리고 이후엔 바뀐 것만 복사한다.
 if (-not (Test-Path (Join-Path $webSrc "node_modules"))) {
   Push-Location $webSrc; npm ci; Pop-Location
 }
-cmd /c mklink /J "$(Join-Path $WebStage 'node_modules')" "$(Join-Path $webSrc 'node_modules')" | Out-Null
-if (-not (Test-Path (Join-Path $WebStage "node_modules"))) { throw "node_modules 정션 생성 실패" }
+& robocopy (Join-Path $webSrc "node_modules") $stageNm /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "node_modules 복사 실패(code $LASTEXITCODE)" }
 
 # 블로그판에서 뺄 화면들 — 사이드바에도 없고 백엔드 라우터도 마운트되지 않는다.
 #
@@ -222,6 +228,8 @@ Write-Host "[3/7] 프론트엔드(Next.js) 블로그 빌드..." -ForegroundColor
 $env:NEXT_PUBLIC_PRODUCT = "blog"
 $env:NEXT_PUBLIC_BLOG_TIER = $Tier   # basic | pro — 메뉴·탭·제품명이 여기서 갈린다
 $env:BACKEND_URL = "http://127.0.0.1:$BackendPort"
+# 독립 실행형 — next.config.mjs 가 이 값을 보고 output:'standalone' 을 켠다.
+$env:NEXT_OUTPUT_STANDALONE = "1"
 # 이전 산출물을 지우고 빌드 → 성공 여부를 BUILD_ID 존재로 판정한다.
 # ($LASTEXITCODE 는 이 스크립트의 출력을 파일로 리다이렉트하면 npm 의 경고(stderr)를
 #  실패로 잡아 거짓 실패를 낸다. 산출물 확인이 확실하다.)
@@ -233,26 +241,31 @@ if (-not (Test-Path (Join-Path $stageNext "BUILD_ID"))) {
     throw "프론트 빌드 실패 — .next\BUILD_ID 가 생성되지 않았습니다. 위 npm 로그를 확인하세요."
 }
 
-# 빌드 산출물 + 런타임 의존성 복사 (node_modules 는 정션이 아닌 실제 사본이어야 함)
+# 독립 실행형 산출물 조립 → payload\mbam-web
+#   .next\standalone\  = server.js + 실행에 필요한 node_modules(추려진 것) + .next(서버 번들)
+#   여기에 .next\static(브라우저용 JS/CSS)과 public 을 직접 넣어야 server.js 가 서빙한다.
+# 결과 구조(설치 폴더\mbam-web):
+#   server.js, package.json, node_modules\(약 1,500개), .next\(BUILD_ID·server·static), public\
+# ⚠ .next 위치는 예전과 같아야 한다 — 업데이트(licensing\updater.py)가 mbam-web\.next 를
+#   통째로 교체하므로, 1.0.3 이하(next start) 설치본도 같은 .next 로 뜬다.
+$saDir = Join-Path $stageNext "standalone"
+if (-not (Test-Path (Join-Path $saDir "server.js"))) {
+  throw "독립 실행형 산출물이 없습니다 → $saDir\server.js`n  next.config.mjs 의 NEXT_OUTPUT_STANDALONE 처리와 npm 로그를 확인하세요."
+}
 $webDst = Join-Path $Payload "mbam-web"
 New-Item -ItemType Directory -Force -Path $webDst | Out-Null
-foreach ($item in @(".next","public","package.json","package-lock.json")) {
-  $p = Join-Path $WebStage $item
-  if (Test-Path $p) {
-    if ((Get-Item $p).PSIsContainer) { & robocopy $p (Join-Path $webDst $item) /E /NFL /NDL /NJH /NJS /NP | Out-Null }
-    else { Copy-Item $p $webDst }
-  }
+& robocopy $saDir $webDst /E /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "standalone 복사 실패(code $LASTEXITCODE)" }
+& robocopy (Join-Path $stageNext "static") (Join-Path $webDst ".next\static") /E /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw ".next\static 복사 실패(code $LASTEXITCODE)" }
+$pub = Join-Path $WebStage "public"
+if (Test-Path $pub) { & robocopy $pub (Join-Path $webDst "public") /E /NFL /NDL /NJH /NJS /NP | Out-Null }
+# 경로 구조째 나왔다면(정션 등으로 추적 루트가 어긋남) server.js 가 next 를 못 찾는다 — 여기서 잡는다.
+if (-not (Test-Path (Join-Path $webDst "node_modules\next\package.json"))) {
+  throw "standalone 산출물에 node_modules\next 가 없습니다. 추적 루트가 어긋났습니다(정션 여부 확인)."
 }
-# node_modules 는 원본에서 직접 복사(스테이징의 정션을 따라가면 안 되므로 원본 경로 사용)
-$nmDst = Join-Path $webDst "node_modules"
-if ($SkipRuntime -and (Test-Path $nmDst)) {
-  Write-Host "  (재사용) mbam-web\node_modules — 약 370MB 복사 생략"
-} else {
-  & robocopy (Join-Path $webSrc "node_modules") $nmDst /E /NFL /NDL /NJH /NJS /NP | Out-Null
-}
-foreach ($cfg in (Get-ChildItem $WebStage -Filter "next.config.*" -ErrorAction SilentlyContinue)) {
-  Copy-Item $cfg.FullName $webDst
-}
+$webFiles = (Get-ChildItem $webDst -Recurse -File -Force).Count
+Write-Host "  mbam-web 파일 수: $webFiles (예전 통째 동봉 약 19,000)" -ForegroundColor DarkGray
 
 # ── 4~5. 동봉 런타임 (Python + Chromium + Node) ─────────────
 # 전체 빌드 시간의 대부분이 여기다 — pip 로 1.2GB 설치 + Chromium 675MB + Node 78MB.
@@ -270,31 +283,22 @@ Get-File $pyUrl $pyArchive
 $pyTmp = Join-Path $Cache "py_extract_blog"
 if (Test-Path $pyTmp) { Remove-Item $pyTmp -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $pyTmp | Out-Null
-tar -xzf $pyArchive -C $pyTmp
+# Windows 내장 tar(bsdtar)를 직접 지정 — Git Bash 에서 실행하면 PATH 의 GNU tar 가 잡혀
+# 'F:' 를 원격 호스트로 해석해 'Cannot connect to F: resolve failed' 로 실패한다.
+& (Join-Path $env:SystemRoot "System32\tar.exe") -xzf $pyArchive -C $pyTmp
 Move-Item (Join-Path $pyTmp "python") (Join-Path $Runtime "python")
 $PyExe = Join-Path $Runtime "python\python.exe"
 
 Write-Host "  파이썬 패키지 설치..."
 & $PyExe -m pip install --upgrade pip
 
-# requirements.txt 는 개발 PC(Python 3.14)에서 뽑은 freeze 목록이라, 동봉 Python($PythonVersion)
-# 에 설치할 수 없는 항목이 섞여 있다. 대표적으로 audioop-lts 는 3.13+ 전용이라
-# 3.12 에서는 resolver 가 통째로 실패하고 '아무 패키지도 설치되지 않는다'.
-# (3.12 에는 audioop 이 표준 라이브러리로 들어 있어서 애초에 필요 없다)
-# 또 이 파일은 UTF-16 로 저장돼 있어 .NET 이 BOM 을 보고 읽게 한다.
-Write-Host "  requirements 필터링(동봉 Python 과 호환되지 않는 항목 제거)..."
-$reqSrc = Join-Path $Src "requirements.txt"
-$skipPkgs = @("audioop-lts")     # 3.13+ 전용
-$reqLines = [System.IO.File]::ReadAllLines($reqSrc)   # BOM 자동 감지(UTF-16 대응)
-$reqKept = $reqLines | Where-Object {
-    $name = ($_ -split '[=<>!~\[; ]')[0].Trim().ToLower()
-    -not ($skipPkgs -contains $name)
-}
-$reqFiltered = Join-Path $Cache "requirements_blog_payload.txt"
-Set-Content -Path $reqFiltered -Value $reqKept -Encoding utf8
-Write-Host "    $($reqLines.Count) 줄 → $($reqKept.Count) 줄"
-
-& $PyExe -m pip install -r $reqFiltered
+# 저장소 루트 requirements.txt(개발 PC 의 pip freeze, 180여 개)가 아니라
+# installer\requirements_local.txt(고객용 코드가 실제로 import 하는 것만, 버전 고정)를 쓴다.
+# freeze 를 그대로 넣던 1.0.3 까지는 gradio·streamlit·pandas·pyarrow 등 안 쓰는 패키지가
+# 파일 2만 3천 개·675MB 를 차지해 고객 PC 설치가 오래 걸렸다.
+# 빠진 패키지는 맨 끝 check_imports.py 가 잡아 빌드를 중단한다.
+$reqLocal = Join-Path $Here "requirements_local.txt"
+& $PyExe -m pip install --no-warn-script-location -r $reqLocal
 # requirements.txt(freeze)에 빠져 있지만 실제로 쓰이는 패키지들.
 # pyperclip: 네이버 로그인 시 아이디/비번을 클립보드로 붙여넣는 데 쓴다.
 #   빠지면 기기 인증 창이 뜨자마자 닫혀 로그인을 못 한다.
@@ -311,7 +315,7 @@ Write-Host "  설치 검증(핵심 패키지 import)..."
 #   - playwright 만 import 하면 greenlet 이 로드되지 않아, msvcp140.dll 누락으로
 #     고객 PC 에서 백엔드가 아예 안 뜨는 결함이 이 검증을 그대로 통과했다.
 #     실제 백엔드가 타는 경로(playwright.async_api)까지 import 해야 잡힌다.
-$probe = "import fastapi,uvicorn,sqlalchemy,pydantic,dotenv,bs4,aiohttp,apscheduler,requests,PIL,tkinter,jwt,cryptography,pyperclip;import playwright.async_api,greenlet,numpy,pandas;print('PKG_OK')"
+$probe = "import fastapi,uvicorn,sqlalchemy,pydantic,dotenv,bs4,aiohttp,apscheduler,requests,PIL,tkinter,jwt,cryptography,pyperclip;import playwright.async_api,greenlet,numpy,multipart,docx,kiwipiepy;print('PKG_OK')"
 $probeOut = & $PyExe -c $probe 2>&1
 if ($probeOut -notmatch "PKG_OK") {
     throw "동봉 Python 패키지 설치가 불완전합니다. pip 로그를 확인하세요.`n$probeOut"
@@ -349,11 +353,18 @@ Repair-BundledNativeRuntime $PyDir
 Copy-NativeFixPayload $PyDir $Payload      # 예전 설치본을 업데이트로 고치기 위한 복구용 사본
 # 보정 결과를 실제 import 로 확인한다. 이게 통과해야 고객 PC 에서 백엔드가 뜬다.
 # (DLL 이 있어도 버전이 낮으면 '프로시저 진입점을 찾을 수 없습니다' 로 여기서 걸린다)
-$nativeOut = & $PyExe -c "import playwright.async_api,greenlet,numpy,pandas;print('NATIVE_OK')" 2>&1
+$nativeOut = & $PyExe -c "import playwright.async_api,greenlet,numpy,lxml.etree;print('NATIVE_OK')" 2>&1
 if ($nativeOut -notmatch "NATIVE_OK") {
     throw "네이티브 확장모듈 로드 실패 — 이대로 배포하면 고객 PC 에서 백엔드가 뜨지 않습니다.`n$nativeOut"
 }
 Write-Host "  네이티브 확장모듈 정상" -ForegroundColor Green
+
+# 고객용 코드가 import 하는 패키지가 동봉 Python 에 전부 있는지(코드는 실행하지 않고 이름만 확인)
+$impOut = & $PyExe -I (Join-Path $Here "check_imports.py") $Payload 2>&1
+if ($impOut -notmatch "IMPORTS_OK") {
+    throw "동봉 Python 에 빠진 패키지가 있습니다 — 이대로 배포하면 고객 PC 에서 해당 기능이 죽습니다.`n$impOut"
+}
+Write-Host "  고객용 코드 import 점검 정상" -ForegroundColor Green
 
 # ── 6. 라이선스 서버 설정 ──────────────────────────────────
 Write-Host "[6/7] license_config.json 작성..." -ForegroundColor Yellow
@@ -374,7 +385,7 @@ if (Test-Path (Join-Path $Here "blog.ico")) { Copy-Item (Join-Path $Here "blog.i
 elseif (Test-Path (Join-Path $Here "mbam.ico")) { Copy-Item (Join-Path $Here "mbam.ico") (Join-Path $Payload "blog.ico") }
 
 # ── 7. 마무리 ──────────────────────────────────────────────
-Remove-Item (Join-Path $WebStage "node_modules") -Force -Recurse -ErrorAction SilentlyContinue  # 정션 해제
+# (스테이징의 node_modules 는 실제 사본이라 남겨 둔다 — 다음 빌드에서 바뀐 것만 복사)
 Write-Host "[7/7] 완료. payload_blog 준비됨." -ForegroundColor Green
 Write-Host ""
 Write-Host "다음 명령으로 설치파일을 컴파일하세요:" -ForegroundColor Cyan

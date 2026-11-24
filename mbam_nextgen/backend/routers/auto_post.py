@@ -222,7 +222,11 @@ class AutoPostRequest(BaseModel):
     include_source_link: Optional[bool] = False  # 본문 끝에 [링크] 출처 자동 추가 (기본 OFF)
     
     # Proxy / Tethering
+    # ip_mode: 발행 화면에서 고른 IP 방식 — "none" | "proxy" | "tethering". 비우면 [프록시/IP] 화면 설정을 따른다.
+    #   프록시와 테더링은 둘 중 하나만 쓴다(테더링 IP 위에 프록시를 덧씌우면 테더링이 의미 없음).
+    ip_mode: Optional[str] = None
     use_tethering: Optional[bool] = False
+    tethering_strict: Optional[bool] = True   # 테더링 IP 변경 실패 시 남은 계정 발행 중단
     proxy: Optional[str] = None            # 서버가 프록시 풀에서 자동 배정(요청 시 비움) — URL 문자열
 
 # In-memory status store for monitoring (prototype level)
@@ -380,6 +384,7 @@ async def run_automation_task(task_id: str, req: AutoPostRequest, user_id: str =
                     generate_ai_images=ai_images,
                     ai_supplement_count=req.ai_supplement_count,
                     use_tethering=req.use_tethering,
+                    tethering_strict=(req.tethering_strict is not False),
                     insert_map=req.insert_map,
                     map_query=req.map_query,
                     image_link=req.image_link,
@@ -524,19 +529,37 @@ async def trigger_auto_post(req: AutoPostRequest,
 
     # 프록시 자동 배정 — IP 방식=proxy 이면 풀에서 정책(하이브리드: 발행=계정별 고정)에 맞게 배정.
     # 여기(인증+DB)서 URL 문자열로 해소해 req/payload 에 심으면 로컬·클라우드(에이전트) 모두 동일 적용.
+    # IP 방식 결정 — 요청의 ip_mode(발행 화면 선택) > [프록시/IP] 화면 설정.
+    #   proxy     : 계정마다 프록시 배정, 테더링 끔
+    #   tethering : 계정마다 폰 IP 교체, 프록시 배정 안 함
+    #   none      : 둘 다 안 함
+    # (ip_mode 를 안 보내는 예전 화면은 설정값을 따르되, 화면의 테더링 체크도 그대로 존중한다)
     try:
         from mbam_nextgen.services import proxy_pool
         _uid = current_user.get("sub")
         _tk = "cafe" if req.target_type == "cafe" else "blog"
-        if req.accounts:
-            for _acc in req.accounts:
-                _pc = proxy_pool.resolve_proxy(db, _uid, account_id=(_acc.get("id") or ""), task_kind=_tk)
+        _s = proxy_pool.get_ip_settings(db, _uid) if _uid else {}
+        _mode = (req.ip_mode or _s.get("ip_mode") or "none").strip().lower()
+        if _mode == "tethering":
+            req.use_tethering = True
+        elif req.ip_mode:              # 화면에서 명시적으로 proxy/none 을 고른 경우만 끈다
+            req.use_tethering = False
+        if _mode == "proxy" and not req.use_tethering:
+            if req.ip_mode == "proxy" and not proxy_pool.list_active(db, _uid):
+                # 발행 화면에서 '프록시'를 골랐는데 쓸 프록시가 없으면 내 IP 로 몰래 나가지 않게 막는다
+                raise HTTPException(status_code=400, detail="사용 중인 프록시가 없습니다. [프록시/IP] 화면에서 프록시를 등록하거나 IP 방식을 바꿔 주세요.")
+            _rot = _s.get("proxy_rotation", "hybrid")
+            if req.accounts:
+                for _acc in req.accounts:
+                    _pc = proxy_pool.pick(db, _uid, mode=_rot, account_id=(_acc.get("id") or ""), task_kind=_tk)
+                    if _pc:
+                        _acc["proxy"] = proxy_pool.to_url(_pc)
+            else:
+                _pc = proxy_pool.pick(db, _uid, mode=_rot, account_id=(req.naver_id or ""), task_kind=_tk)
                 if _pc:
-                    _acc["proxy"] = proxy_pool.to_url(_pc)
-        else:
-            _pc = proxy_pool.resolve_proxy(db, _uid, account_id=(req.naver_id or ""), task_kind=_tk)
-            if _pc:
-                req.proxy = proxy_pool.to_url(_pc)
+                    req.proxy = proxy_pool.to_url(_pc)
+    except HTTPException:
+        raise
     except Exception as _e:
         print(f"[auto_post] 프록시 배정 건너뜀: {_e}")
 

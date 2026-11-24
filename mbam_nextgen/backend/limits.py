@@ -95,10 +95,20 @@ def get_daily_count(db: Session, user_id: str, action_type: str,
     return int(q.scalar() or 0)
 
 
+def _is_local_install(user: Advertiser) -> bool:
+    """설치형(블로그·카페 전용판)의 'PC 사용자'인가.
+
+    설치형은 기기 승인으로 관리하는 제품이라 웹용 요금제 한도를 적용하지 않는다.
+    1.0.3 까지는 이 사용자의 plan_type('paid')이 plans.json 에 없어 전역 기본값
+    (네이버 계정 5개 · 아이디당 블로그 발행 하루 1건)이 그대로 걸렸다.
+    """
+    return getattr(user, "social_provider", None) == "local-install"
+
+
 def check_daily_limit(db: Session, user: Advertiser, action_type: str,
                       naver_account_id: str = None):
     """한도 초과면 403. (소비는 하지 않음 — 실행 직전 검사용)"""
-    if getattr(user, "plan_type", None) == "admin":
+    if getattr(user, "plan_type", None) == "admin" or _is_local_install(user):
         return
     limits = get_user_limits(user)
     cap = limits["daily_limits"].get(action_type)
@@ -144,7 +154,7 @@ def enforce_and_consume(db: Session, user: Advertiser, action_type: str,
 
 def check_account_limit(db: Session, user: Advertiser, current_count: int):
     """네이버 계정 추가 직전 검사. 한도 도달이면 403."""
-    if getattr(user, "plan_type", None) == "admin":
+    if getattr(user, "plan_type", None) == "admin" or _is_local_install(user):
         return
     limits = get_user_limits(user)
     cap = limits["max_naver_accounts"]

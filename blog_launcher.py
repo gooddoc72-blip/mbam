@@ -223,7 +223,16 @@ def start_frontend():
     log = open(LOG_DIR / "frontend.log", "a", encoding="utf-8")
     built = (WEB_DIR / ".next" / "BUILD_ID").exists()
     next_bin = WEB_DIR / "node_modules" / "next" / "dist" / "bin" / "next"
-    if built and next_bin.exists():
+    standalone = WEB_DIR / "server.js"
+    if built and standalone.exists():
+        # 1.0.4+ 설치본: Next 독립 실행형(output: standalone). node_modules 를 실행에
+        # 필요한 것만 담아 설치 파일 수가 크게 줄었다. 포트·주소는 환경변수로 받는다.
+        # HOSTNAME '::' = next start 와 같은 듀얼스택(localhost 가 ::1 로 풀려도 열림)
+        env["PORT"] = str(FRONTEND_PORT)
+        env["HOSTNAME"] = "::"
+        cmd = [_node_exe(), str(standalone)]
+    elif built and next_bin.exists():
+        # 1.0.3 이하 설치본(node_modules 통째로 동봉) — 업데이트로 .next 만 바뀌어도 이 경로로 뜬다
         cmd = [_node_exe(), str(next_bin), "start", "-p", str(FRONTEND_PORT)]
     else:
         # 빌드본이 없으면 개발 서버로 폴백
@@ -281,7 +290,8 @@ def preflight() -> list:
     if not (WEB_DIR / ".next" / "BUILD_ID").exists():
         problems.append(f"화면 빌드가 없습니다 → {WEB_DIR / '.next'}\n"
                         f"   설치가 덜 됐습니다. 다시 설치해 주세요.")
-    elif not (WEB_DIR / "node_modules" / "next" / "dist" / "bin" / "next").exists():
+    elif not ((WEB_DIR / "server.js").exists()
+              or (WEB_DIR / "node_modules" / "next" / "dist" / "bin" / "next").exists()):
         problems.append(f"화면 실행 파일이 없습니다 → {WEB_DIR / 'node_modules' / 'next'}\n"
                         f"   설치가 덜 됐습니다. 다시 설치해 주세요.")
 
@@ -324,6 +334,7 @@ def save_report(problems=None) -> Path:
     for label, path in (("python.exe", APP_DIR / "runtime" / "python" / "python.exe"),
                         ("node.exe", APP_DIR / "runtime" / "node" / "node.exe"),
                         (".next/BUILD_ID", WEB_DIR / ".next" / "BUILD_ID"),
+                        ("server.js", WEB_DIR / "server.js"),
                         ("node_modules/next", WEB_DIR / "node_modules" / "next")):
         lines.append(f"  {label:18} {'있음' if path.exists() else '없음 ← 문제'}")
     try:

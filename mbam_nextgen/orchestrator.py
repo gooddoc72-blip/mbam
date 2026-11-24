@@ -925,14 +925,30 @@ class WorkflowOrchestrator:
             account_id = acc.get("id")
             account_pw = acc.get("pw")
             
-            # USB 테더링 IP 변경 처리
+            # USB 테더링 IP 변경 처리 — 실제로 바뀌었는지 확인한다.
+            # tethering_strict(기본 켬): 못 바꾸면 남은 계정 발행을 멈춘다.
+            # 같은 IP 로 여러 계정이 연달아 발행되면 테더링을 켠 의미가 없어지기 때문.
             use_tethering = kwargs.get("use_tethering", False)
             if use_tethering:
                 if log_callback:
-                    log_callback("📱 [Orchestrator] USB 테더링 IP 전환 중...")
-                new_ip = await self.proxy_manager.rotate_tethering_ip()
-                if log_callback:
-                    log_callback(f"✨ [Orchestrator] 할당된 IP: {new_ip}")
+                    log_callback("📱 USB 테더링 IP 변경 중... (최대 1분)")
+                tr = await self.proxy_manager.rotate_tethering_ip_checked()
+                if tr["ok"]:
+                    if log_callback:
+                        log_callback(f"✨ {tr['message']}")
+                elif kwargs.get("tethering_strict", True):
+                    left = len(accounts) - idx
+                    msg = (f"⛔ IP 변경 실패로 발행을 멈춥니다 — {tr['message']} "
+                           f"(남은 계정 {left}개는 발행하지 않았습니다. 같은 IP 로 여러 계정이 발행되는 것을 막기 위해서입니다. "
+                           f"계속 발행하려면 'IP 변경 실패 시 중단'을 끄세요)")
+                    if log_callback:
+                        log_callback(msg)
+                    for rest in accounts[idx:]:
+                        results.append({"success": False, "account_id": rest.get("id"), "skipped": True,
+                                        "error": f"테더링 IP 변경 실패: {tr['message']}"})
+                    break
+                elif log_callback:
+                    log_callback(f"⚠️ IP 변경 실패(같은 IP 로 계속 진행): {tr['message']}")
             
             if log_callback:
                 log_callback(f"🚀 [{idx+1}/{len(accounts)}] 계정 {account_id} 작업 시작...")

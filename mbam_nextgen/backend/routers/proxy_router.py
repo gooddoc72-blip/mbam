@@ -118,8 +118,8 @@ async def tethering_status():
         connected, devices = res if isinstance(res, tuple) else (bool(res), [])
     except FileNotFoundError:
         return {"connected": False, "adb": False,
-                "message": "adb 를 찾을 수 없습니다. 안드로이드 플랫폼 도구(adb)를 설치하고 "
-                           "PATH 에 등록해야 USB 테더링을 쓸 수 있습니다."}
+                "message": "adb 가 없습니다. 아래 [adb 내려받기]를 누르면 구글 공식 배포본을 "
+                           "이 PC 에 자동으로 받습니다(약 10MB)."}
     except Exception as e:
         return {"connected": False, "adb": True, "message": f"확인 중 오류: {e}"}
     return {
@@ -133,24 +133,31 @@ async def tethering_status():
 
 @router.post("/tethering/rotate", summary="테더링 IP 교체 시험 — 실제로 바뀌는지 확인")
 async def tethering_rotate():
-    from mbam_nextgen.infrastructure.tethering import TetheringManager
+    # 발행 때와 같은 경로(rotate_tethering_ip_checked)로 시험해야 '시험은 됐는데 발행 땐 실패'가 없다
     from mbam_nextgen.infrastructure.proxy import ProxyManager
-    tm = TetheringManager()
-    res = tm.check_device()
-    connected = res[0] if isinstance(res, tuple) else bool(res)   # (여부, 목록) 튜플이다
-    if not connected:
-        raise HTTPException(status_code=400, detail="연결된 폰이 없습니다. USB 연결과 [USB 디버깅]을 확인하세요.")
-    before = await ProxyManager.verify_ip()
+    r = await ProxyManager().rotate_tethering_ip_checked()
+    return {"success": r["ok"], "changed": r["ok"], "before": r["before"], "after": r["after"],
+            "message": r["message"]}
+
+
+@router.post("/tethering/install-adb", summary="adb(구글 공식 platform-tools) 내려받기 — 설치형 전용")
+async def tethering_install_adb(current_user: dict = Depends(get_current_user)):
+    """테더링에 필요한 adb 를 이 PC 의 사용자 폴더(%LOCALAPPDATA%/MBAM/platform-tools)에 받는다.
+    설치 파일에 넣지 않는 이유: 안드로이드 SDK 약관상 재배포 제한 — 사용자가 구글에서 직접 받게 한다.
+    클라우드(웹용 서버)에서는 의미가 없으므로 막는다(테더링은 에이전트가 도는 고객 PC 의 일)."""
+    from mbam_nextgen.backend import jobs as jobsvc
+    if jobsvc.is_cloud_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+    import asyncio
+    from mbam_nextgen.infrastructure.tethering import download_adb, find_adb
+    existing = find_adb()
+    if existing:
+        return {"success": True, "path": existing, "message": "adb 가 이미 있습니다."}
     try:
-        await tm.rotate_ip()
+        path = await asyncio.to_thread(download_adb)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"IP 교체 실패: {e}")
-    after = await ProxyManager.verify_ip()
-    return {"success": True, "before": before, "after": after,
-            "changed": bool(before and after and before != after and after != "확인 불가"),
-            "message": (f"IP 가 {before} → {after} 로 바뀌었습니다."
-                        if before != after else
-                        f"IP 가 바뀌지 않았습니다({after}). 폰이 데이터(LTE/5G)로 연결돼 있는지 확인하세요.")}
+        raise HTTPException(status_code=502, detail=f"adb 내려받기 실패: {e} — 인터넷 연결을 확인해 주세요.")
+    return {"success": True, "path": path, "message": "adb 를 내려받았습니다. 이제 폰을 연결해 [연결 확인]을 눌러 주세요."}
 
 
 @router.delete("/{proxy_id}", summary="프록시 삭제")

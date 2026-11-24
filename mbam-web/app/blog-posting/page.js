@@ -69,7 +69,47 @@ function BlogPostingContent() {
   const [accounts, setAccounts] = useState([{ id: "", pw: "", blogAddr: "", checked: true }]);
   const accountsHydrated = useRef(false);  // 최초 마운트(로드 전)의 빈 기본행이 저장을 덮어쓰지 않도록
   const [intervalMins, setIntervalMins] = useState(5);
-  const [useTethering, setUseTethering] = useState(false);
+  // IP 방식 — [프록시/IP] 화면과 같은 설정(ip_settings)을 읽고 쓴다. 프록시·테더링 중 하나만.
+  const [ipMode, setIpMode] = useState("none");            // none | proxy | tethering
+  const [proxyCount, setProxyCount] = useState(0);         // 사용 중인 프록시 수
+  const [tetherStrict, setTetherStrict] = useState(true);  // 테더링 IP 변경 실패 시 발행 중단
+  const [tetherInfo, setTetherInfo] = useState(null);      // 폰 연결 확인 결과
+  const useTethering = ipMode === "tethering";
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetchWithAuth("/api/proxy");
+        if (!res.ok) return;
+        const d = await res.json();
+        const mode = d?.settings?.ip_mode;
+        if (["none", "proxy", "tethering"].includes(mode)) setIpMode(mode);
+        setProxyCount((d?.items || d?.proxies || []).filter(p => p.is_active !== false && p.active !== false).length);
+      } catch (e) {}
+    })();
+  }, []);
+  const chooseIpMode = async (mode) => {
+    setIpMode(mode);
+    setTetherInfo(null);
+    try {
+      await fetchWithAuth("/api/proxy/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip_mode: mode }) });
+    } catch (e) {}
+  };
+  const checkTether = async () => {
+    setTetherInfo({ loading: true });
+    try {
+      const res = await fetchWithAuth("/api/proxy/tethering/status");
+      setTetherInfo(await res.json());
+    } catch (e) { setTetherInfo({ connected: false, message: "확인 실패: " + e.message }); }
+  };
+  const installAdb = async () => {
+    setTetherInfo({ loading: true, message: "adb 내려받는 중... (약 10MB)" });
+    try {
+      const res = await fetchWithAuth("/api/proxy/tethering/install-adb", { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) { setTetherInfo({ connected: false, adb: false, message: d.detail || "내려받기 실패" }); return; }
+      await checkTether();
+    } catch (e) { setTetherInfo({ connected: false, adb: false, message: "내려받기 실패: " + e.message }); }
+  };
   const [registeredIds, setRegisteredIds] = useState([]);
 
   // 계정관리(중앙 저장소)에서 선택 불러오기
@@ -847,7 +887,9 @@ function BlogPostingContent() {
         publish_mode: publishMode,
         schedule_date: scheduleDate,
         schedule_time: scheduleTime,
+        ip_mode: ipMode,
         use_tethering: useTethering,
+        tethering_strict: tetherStrict,
         generate_card_news: generateCardNews,
         ai_supplement_count: Number(aiSupplementCount) || 0,
         include_source_link: includeSourceLink
@@ -1076,12 +1118,49 @@ function BlogPostingContent() {
               <input type="number" value={intervalMins} onChange={e => setIntervalMins(e.target.value)} style={{ width: "60px", padding: "0.4rem", border: "1px solid #cbd5e1", textAlign: "center" }} />
               <span style={{ color: "#64748b" }}>분 대기 후 다음 계정 발행</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: "bold", color: useTethering ? "#3b82f6" : "#64748b", whiteSpace: "nowrap" }}>
-                <input type="checkbox" checked={useTethering} onChange={e => setUseTethering(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-                📱 안드로이드 USB 테더링 (비행기 모드 자동 토글) 사용
-              </label>
-              <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>* PC와 폰이 USB로 연결되어 있고, USB 테더링이 켜져 있어야 합니다.</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                <span style={{ fontWeight: "bold", color: "#475569", whiteSpace: "nowrap" }}>계정별 IP 방식:</span>
+                {[
+                  ["none", "사용 안 함", "내 인터넷 그대로"],
+                  ["proxy", "프록시", `계정마다 고정 IP (사용 중 ${proxyCount}개)`],
+                  ["tethering", "USB 테더링", "계정마다 폰 IP 교체"],
+                ].map(([k, label, sub]) => (
+                  <button key={k} type="button" onClick={() => chooseIpMode(k)} title={sub}
+                    style={{ padding: "0.45rem 0.9rem", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "0.88rem",
+                      border: ipMode === k ? "2px solid #3b82f6" : "1px solid #cbd5e1",
+                      background: ipMode === k ? "#eff6ff" : "white", color: ipMode === k ? "#1d4ed8" : "#475569" }}>
+                    {label} <span style={{ fontWeight: "normal", fontSize: "0.78rem", color: "#64748b" }}>· {sub}</span>
+                  </button>
+                ))}
+              </div>
+              {ipMode === "proxy" && (
+                <span style={{ fontSize: "0.82rem", color: proxyCount ? "#64748b" : "#dc2626" }}>
+                  {proxyCount
+                    ? "* 계정마다 같은 프록시가 고정 배정됩니다. 프록시 등록·시험은 [프록시/IP] 화면에서 합니다."
+                    : "⚠ 사용 중인 프록시가 없습니다 — [프록시/IP] 화면에서 먼저 등록하세요(없으면 발행이 시작되지 않습니다)."}
+                </span>
+              )}
+              {ipMode === "tethering" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", fontSize: "0.85rem", color: "#475569" }}>
+                  <span style={{ color: "#94a3b8" }}>* 안드로이드 폰을 USB 로 연결하고 [USB 테더링]과 [개발자 옵션 › USB 디버깅]을 켜 주세요. 계정을 바꿀 때마다 비행기 모드를 껐다 켜서 IP 를 바꾸고, 실제로 바뀌었는지 확인합니다.</span>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                    <button type="button" onClick={checkTether} style={{ padding: "0.35rem 0.8rem", border: "1px solid #cbd5e1", background: "white", cursor: "pointer", borderRadius: "6px" }}>폰 연결 확인</button>
+                    {tetherInfo && tetherInfo.adb === false && (
+                      <button type="button" onClick={installAdb} style={{ padding: "0.35rem 0.8rem", border: "1px solid #3b82f6", background: "#eff6ff", color: "#1d4ed8", cursor: "pointer", borderRadius: "6px", fontWeight: "bold" }}>adb 내려받기 (구글 공식)</button>
+                    )}
+                    {tetherInfo && (
+                      <span style={{ color: tetherInfo.loading ? "#64748b" : tetherInfo.connected ? "#16a34a" : "#dc2626" }}>
+                        {tetherInfo.loading ? (tetherInfo.message || "확인 중...") : (tetherInfo.connected ? "✅ " : "⚠ ") + (tetherInfo.message || "")}
+                      </span>
+                    )}
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer" }}>
+                    <input type="checkbox" checked={tetherStrict} onChange={e => setTetherStrict(e.target.checked)} />
+                    IP 변경 실패 시 남은 계정 발행 중단 <span style={{ color: "#94a3b8" }}>(끄면 같은 IP 로 계속 발행)</span>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         </div>

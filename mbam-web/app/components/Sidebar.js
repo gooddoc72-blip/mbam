@@ -138,6 +138,8 @@ const MENU_ITEMS_BLOG = [
             { name: "블로그 진단", path: "/blog-check", icon: ShieldCheck },
             { name: "형태소 분석", path: "/blog-analysis", icon: Search },
             { name: "블로그 발행", path: "/blog-posting", icon: PenTool },
+            // 계정·날짜·키워드를 건마다 따로 정하는 예약 발행 (1.0.3 까지는 '티스토리' 메뉴 안에 숨어 있었다)
+            { name: "예약 포스팅", path: "/blog-schedule?platform=naver&tab=reservation", icon: CalendarClock },
             { name: "플레이스 블로그", path: "/place-blog", icon: MapPin },
             // 병원 블로그 — 블로그 프로판에만 (기본판 빌드에는 페이지 자체가 없다)
             ...(IS_BLOG_PRO ? [{ name: "병원 블로그", path: "/hospital-blog", icon: Hospital }] : []),

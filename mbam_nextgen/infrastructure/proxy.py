@@ -45,14 +45,47 @@ class ProxyManager:
         except:
             return "확인 불가"
     
+    async def rotate_tethering_ip_checked(self, attempts: int = 2) -> dict:
+        """테더링 IP 를 바꾸고 '실제로 바뀌었는지'까지 확인한다.
+
+        반환: {"ok": bool, "before": str, "after": str, "message": str}
+        1.0.3 까지는 명령만 보내고 성공으로 쳐서, 폰이 없거나 명령이 막혀도
+        같은 IP 로 다음 계정을 발행했다. 이제는 바뀐 IP 를 눈으로 확인한 경우만 ok.
+        """
+        from .tethering import find_adb
+        if not find_adb():
+            return {"ok": False, "before": "", "after": "",
+                    "message": "adb 가 없습니다 — [프록시/IP] 화면에서 'adb 내려받기'를 눌러 주세요."}
+        try:
+            connected, _ = self.tethering.check_device()
+        except Exception as e:
+            connected = False
+        if not connected:
+            return {"ok": False, "before": "", "after": "",
+                    "message": "연결된 폰이 없습니다 — USB 연결·[USB 디버깅]·'이 컴퓨터 허용'을 확인해 주세요."}
+        before = await self.verify_ip()
+        after = before
+        for n in range(1, attempts + 1):
+            if not await self.tethering.rotate_ip():
+                return {"ok": False, "before": before, "after": before,
+                        "message": "폰이 비행기 모드/데이터 전환 명령을 받지 않았습니다(기종 제한일 수 있음)."}
+            # 통신사가 새 IP 를 붙여 주고 테더링이 다시 잡힐 때까지 최대 약 30초 기다린다
+            for _ in range(10):
+                after = await self.verify_ip()
+                if after and after != "확인 불가" and after != before:
+                    print(f"[ProxyManager] ✅ IP 변경 완료: {before} → {after}")
+                    return {"ok": True, "before": before, "after": after,
+                            "message": f"IP 변경: {before} → {after}"}
+                await asyncio.sleep(3)
+            print(f"[ProxyManager] IP 가 그대로입니다({after}) — 재시도 {n}/{attempts}")
+        return {"ok": False, "before": before, "after": after,
+                "message": f"IP 가 바뀌지 않았습니다({before} → {after}). 통신사가 같은 IP 를 다시 줬거나 "
+                           "테더링이 끊겼을 수 있습니다."}
+
     async def rotate_tethering_ip(self) -> str:
-        """USB 테더링 IP 변경을 실행하고 변경된 IP 반환"""
-        success = await self.tethering.rotate_ip()
-        if success:
-            new_ip = await self.verify_ip()
-            print(f"[ProxyManager] ✅ IP 변경 완료: {new_ip}")
-            return new_ip
-        return "변경 실패"
+        """USB 테더링 IP 변경을 실행하고 변경된 IP 반환 (실패 시 '변경 실패')"""
+        r = await self.rotate_tethering_ip_checked()
+        return r["after"] if r["ok"] else "변경 실패"
 
     @staticmethod
     def get_random_delay(min_sec: int = 180, max_sec: int = 600) -> int:

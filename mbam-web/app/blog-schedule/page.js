@@ -1,13 +1,25 @@
 "use client";
 import { HAS_HOSPITAL_BLOG, HAS_SHOPPING_BLOG } from "../utils/product";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { fetchWithAuth } from "../utils/api";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import LibraryPickerModal from "../components/LibraryPickerModal";
 
+// 사이드바의 '예약 포스팅'(?platform=naver&tab=reservation)과 '티스토리'(?platform=tistory)가
+// 같은 화면을 쓴다. 화면이 떠 있는 채로 메뉴를 바꾸면 페이지가 다시 마운트되지 않으므로,
+// 주소의 쿼리가 바뀔 때마다 플랫폼·탭을 다시 맞춘다(useSearchParams 는 Suspense 경계가 필요).
 export default function BlogSchedulePage() {
+  return (
+    <Suspense fallback={null}>
+      <BlogScheduleInner />
+    </Suspense>
+  );
+}
+
+function BlogScheduleInner() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -126,13 +138,17 @@ export default function BlogSchedulePage() {
 
   useEffect(() => {
     loadAll();
-    // 사이드바에서 ?platform=tistory 등으로 들어오면 해당 플랫폼을 자동 선택
-    try {
-      const p = new URLSearchParams(window.location.search).get("platform");
-      if (["naver", "blogspot", "tistory"].includes(p)) { setSubTab("daily"); setPlatform(p); }
-    } catch (e) {}
     /* eslint-disable-next-line */
   }, []);
+
+  // 사이드바에서 ?platform=tistory / ?platform=naver&tab=reservation 등으로 들어오면 그 화면을 연다
+  useEffect(() => {
+    const p = searchParams?.get("platform");
+    const t = searchParams?.get("tab");
+    if (["naver", "blogspot", "tistory"].includes(p)) setPlatform(p);
+    if (t === "reservation" || t === "daily") setSubTab(t);
+    else if (p) setSubTab("daily");
+  }, [searchParams]);
 
   const toggleAcc = (id) => setSelectedAccIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -286,7 +302,7 @@ export default function BlogSchedulePage() {
           )}
           {isNaver && (
             <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", padding: "0.9rem 1.1rem", fontSize: "0.85rem", color: "#92400e" }}>
-              ⚠️ 예약 시각에 발행되려면 <b>백엔드 서버(8000)가 켜져 있어야</b> 합니다. PC를 껐다 켜면 시작하기.bat으로 서버를 다시 띄워주세요.
+              ⚠️ 예약 시각에 발행되려면 <b>그 시각에 이 프로그램이 켜져 있어야</b> 합니다. PC 가 꺼져 있었다면 켜고 프로그램을 실행하면 지난 예약부터 이어서 발행합니다.
               또한 해당 계정은 <b>계정관리에서 기기 인증(1회 수동 로그인)</b>이 되어 있어야 자동 로그인됩니다.
             </div>
           )}

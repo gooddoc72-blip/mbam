@@ -74,6 +74,17 @@ export default function ProxyPage() {
     } catch (e) { alert("오류: " + e.message); }
     setTetherBusy("");
   };
+  // adb 가 없으면 구글 공식 platform-tools 에서 adb 만 받아 이 PC 의 사용자 폴더에 둔다(설치형 전용)
+  const installAdb = async () => {
+    setTetherBusy("adb");
+    try {
+      const res = await fetchWithAuth("/api/proxy/tethering/install-adb", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setTether({ connected: false, adb: false, message: d.detail || "내려받기 실패" }); setTetherBusy(""); return; }
+    } catch (e) { setTether({ connected: false, adb: false, message: "내려받기 실패: " + e.message }); setTetherBusy(""); return; }
+    setTetherBusy("");
+    await checkTethering();
+  };
 
   const toggle = async (id) => { try { await fetchWithAuth(`/api/proxy/${id}/toggle`, { method: "POST" }); load(); } catch (e) {} };
   const remove = async (id) => { if (!confirm("이 프록시를 삭제할까요?")) return; try { await fetchWithAuth(`/api/proxy/${id}`, { method: "DELETE" }); load(); } catch (e) {} };
@@ -167,11 +178,20 @@ export default function ProxyPage() {
             border: `1px solid ${tether.connected ? "#bbf7d0" : "#fecaca"}`,
           }}>
             {tether.connected ? "✅ " : "⚠️ "}{tether.message}
+            {tether.adb === false && (
+              <div style={{ marginTop: "0.5rem" }}>
+                <button onClick={installAdb} disabled={!!tetherBusy}
+                  style={{ padding: "0.4rem 0.9rem", background: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: tetherBusy ? "wait" : "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>
+                  {tetherBusy === "adb" ? "내려받는 중..." : "adb 내려받기 (구글 공식, 약 10MB)"}
+                </button>
+              </div>
+            )}
           </div>
         )}
         <div style={{ marginTop: "0.6rem", fontSize: "0.8rem", color: "#94a3b8", lineHeight: 1.7 }}>
-          준비물 — ① 안드로이드 폰 ② USB 케이블 ③ 폰의 [개발자 옵션 &gt; USB 디버깅] 켜기 ④ PC 에 adb 설치<br />
-          사용하려면 위 <b>IP 우회 방식</b>에서 [USB 테더링]을 고르거나, 카페 작업 화면의 테더링 항목을 켜세요.
+          준비물 — ① 안드로이드 폰 ② USB 케이블 ③ 폰의 [USB 테더링] 켜기 ④ [개발자 옵션 &gt; USB 디버깅] 켜기 ⑤ adb (없으면 [폰 연결 확인] 후 나오는 버튼으로 자동 설치)<br />
+          사용하려면 위 <b>IP 우회 방식</b>에서 [USB 테더링]을 고르거나, 발행 화면의 <b>계정별 IP 방식</b>에서 고르세요(같은 설정입니다).<br />
+          발행 중에는 계정마다 IP 가 <b>실제로 바뀌었는지 확인</b>하고, 바뀌지 않으면 남은 계정 발행을 멈춥니다(발행 화면에서 끌 수 있음).
         </div>
       </div>
 

@@ -24,7 +24,7 @@
 ; ⚠ build_blog_payload.ps1 의 -Version 과 반드시 같아야 한다.
 ;   이 값이 version.json 으로 설치본에 들어가고, 런처가 서버의 최신 버전과 비교한다.
 ;   어긋나면 방금 설치한 고객에게도 업데이트 안내가 뜬다.
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "마케팅연구소"
 ; 런처는 동봉된 pythonw.exe 로 blog_launcher.py 를 실행 (별도 exe 빌드 불필요)
 #define LauncherExe "runtime\python\pythonw.exe"
@@ -48,7 +48,9 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output\블로그 마케팅 (설치형)
 OutputBaseFilename={#OutName}{#MyAppVersion}
-Compression=lzma2/max
+; 최고(max) 대비 크기는 약 4% 커지지만 푸는 속도가 빠르다(1.0.4 실측: 273MB 표본 7.2초 → 4.0초).
+; 설치 시간은 압축보다 '파일 개수'의 영향이 훨씬 크다 — requirements_local.txt·standalone 참고.
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
